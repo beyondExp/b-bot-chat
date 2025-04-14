@@ -14,6 +14,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Only render Auth0Provider on the client side
   useEffect(() => {
     setIsClient(true)
+
+    // Log auth state from localStorage for debugging
+    const localAuth = localStorage.getItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated")
+    console.log("Local storage auth state:", localAuth)
   }, [])
 
   // Handle Auth0 initialization errors

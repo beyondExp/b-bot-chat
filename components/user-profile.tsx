@@ -1,21 +1,58 @@
 "use client"
 
 import { useAuth0 } from "@auth0/auth0-react"
-import { LogOut, Settings } from "lucide-react"
+import { LogOut, Settings, User, LogIn } from "lucide-react"
 import Image from "next/image"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 
 export function UserProfile() {
-  const { user, logout, isAuthenticated } = useAuth0()
+  const { user, logout, isAuthenticated, loginWithRedirect, isLoading } = useAuth0()
   const [showDropdown, setShowDropdown] = useState(false)
+  const [localAuthState, setLocalAuthState] = useState(false)
   const router = useRouter()
 
-  if (!isAuthenticated || !user) {
-    return null
+  // Check for local storage auth state on mount
+  useEffect(() => {
+    const localAuth = localStorage.getItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated") === "true"
+    setLocalAuthState(localAuth)
+
+    // Log auth state for debugging
+    console.log("Auth state:", {
+      isAuthenticated,
+      isLoading,
+      localAuth,
+      hasUser: !!user,
+    })
+  }, [isAuthenticated, isLoading, user])
+
+  // If still loading, show loading state
+  if (isLoading) {
+    return (
+      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  // If not authenticated (and not in a loading state), show login button
+  if (!isAuthenticated && !localAuthState) {
+    return (
+      <button
+        onClick={() => loginWithRedirect()}
+        className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+      >
+        <LogIn size={16} />
+        <span>Sign In</span>
+      </button>
+    )
   }
 
   const handleLogout = () => {
+    // Clear local storage auth state
+    localStorage.removeItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated")
+
+    // Call Auth0 logout
     logout({
       logoutParams: {
         returnTo: `${window.location.origin}/api/auth/logout`,
@@ -31,7 +68,7 @@ export function UserProfile() {
         aria-label="User profile"
       >
         <div className="w-8 h-8 rounded-full overflow-hidden border border-border">
-          {user.picture ? (
+          {user?.picture ? (
             <Image
               src={user.picture || "/placeholder.svg"}
               alt={user.name || "User"}
@@ -41,7 +78,7 @@ export function UserProfile() {
             />
           ) : (
             <div className="w-full h-full bg-muted flex items-center justify-center">
-              <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={16} height={16} className="dark:invert" />
+              <User size={16} className="text-muted-foreground" />
             </div>
           )}
         </div>
@@ -52,7 +89,7 @@ export function UserProfile() {
           <div className="p-4 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full overflow-hidden border border-border">
-                {user.picture ? (
+                {user?.picture ? (
                   <Image
                     src={user.picture || "/placeholder.svg"}
                     alt={user.name || "User"}
@@ -62,13 +99,13 @@ export function UserProfile() {
                   />
                 ) : (
                   <div className="w-full h-full bg-muted flex items-center justify-center">
-                    <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={20} height={20} className="dark:invert" />
+                    <User size={20} className="text-muted-foreground" />
                   </div>
                 )}
               </div>
               <div className="overflow-hidden">
-                <p className="font-medium truncate">{user.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                <p className="font-medium truncate">{user?.name || "User"}</p>
+                <p className="text-xs text-muted-foreground truncate">{user?.email || "user@example.com"}</p>
               </div>
             </div>
           </div>

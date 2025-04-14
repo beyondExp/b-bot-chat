@@ -1,106 +1,79 @@
 "use client"
 
-import { MoonIcon, SunIcon, MenuIcon, CompassIcon, ExternalLink, RefreshCwIcon } from "lucide-react"
-import { useTheme } from "next-themes"
+import { useState } from "react"
+import { Menu, X, Sparkles } from "lucide-react"
+import { UserProfile } from "@/components/user-profile"
+import { useAuth0 } from "@auth0/auth0-react"
 import Image from "next/image"
-import { UserProfile } from "./user-profile"
-import { useState, useEffect } from "react"
-import { refreshCache } from "@/lib/refresh-cache"
 
 interface ChatHeaderProps {
-  selectedAgent: string | null
-  toggleSidebar: () => void
-  onOpenDiscover: () => void
+  onToggleSidebar: () => void
+  isSidebarOpen: boolean
+  onToggleDiscover: () => void
 }
 
-export function ChatHeader({ selectedAgent, toggleSidebar, onOpenDiscover }: ChatHeaderProps) {
-  const { theme, setTheme } = useTheme()
-  const [showPWAGuide, setShowPWAGuide] = useState(false)
-  const [isInstalled, setIsInstalled] = useState(false)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-
-  // Check if app is installed
-  useEffect(() => {
-    if (typeof window === "undefined") return
-
-    // Check if in standalone mode (already installed)
-    if (
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (window.navigator as any).standalone === true ||
-      localStorage.getItem("pwa-installed") === "true"
-    ) {
-      setIsInstalled(true)
-    }
-  }, [])
-
-  const handleRefreshCache = async () => {
-    setIsRefreshing(true)
-    await refreshCache()
-    // The page will reload, but just in case it doesn't:
-    setTimeout(() => {
-      setIsRefreshing(false)
-      window.location.reload()
-    }, 2000)
-  }
+export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover }: ChatHeaderProps) {
+  const { isAuthenticated, isLoading } = useAuth0()
+  const [showDebugInfo, setShowDebugInfo] = useState(false)
 
   return (
-    <header className="header">
-      <div className="flex items-center gap-3">
-        <button onClick={toggleSidebar} className="icon-button" aria-label="Toggle sidebar">
-          <MenuIcon size={20} />
+    <header className="flex items-center justify-between p-3 border-b border-border bg-card">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onToggleSidebar}
+          className="p-2 rounded-md hover:bg-muted transition-colors"
+          aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+        >
+          {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 relative flex items-center justify-center">
-            <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={32} height={32} className="dark:invert" />
+          <div className="w-6 h-6 relative flex items-center justify-center">
+            <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={24} height={24} className="dark:invert" />
           </div>
-          <div>
-            <h1 className="font-medium text-sm">{selectedAgent ? getAgentName(selectedAgent) : "Beyond Assistant"}</h1>
-            <p className="text-xs text-muted-foreground">beyond-bot.ai</p>
-          </div>
+          <span className="font-semibold">Beyond-Bot.ai</span>
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <button onClick={handleRefreshCache} className="icon-button" aria-label="Refresh Cache" disabled={isRefreshing}>
-          <RefreshCwIcon size={18} className={isRefreshing ? "animate-spin" : ""} />
-        </button>
 
-        <button onClick={onOpenDiscover} className="discover-header-button" aria-label="Discover AI Agents">
-          <CompassIcon size={18} />
-          <span className="discover-button-text">Discover</span>
-        </button>
-
-        <a
-          href="https://hub.b-bot.space"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hub-header-button"
-          aria-label="Go to Creator Hub"
-        >
-          <ExternalLink size={18} />
-          <span className="hub-button-text">Creator Hub</span>
-        </a>
+      <div className="flex items-center gap-3">
         <button
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          className="icon-button"
-          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          onClick={onToggleDiscover}
+          className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
         >
-          {theme === "dark" ? <SunIcon size={20} /> : <MoonIcon size={20} />}
+          <Sparkles size={16} />
+          <span>Discover Agents</span>
         </button>
+
+        {/* Debug button - only in development */}
+        {process.env.NODE_ENV === "development" && (
+          <button
+            onClick={() => setShowDebugInfo(!showDebugInfo)}
+            className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+          >
+            Debug
+          </button>
+        )}
+
+        {/* Debug info panel */}
+        {showDebugInfo && (
+          <div className="fixed top-14 right-4 z-50 bg-white border border-gray-300 rounded-md shadow-lg p-4 text-xs max-w-xs">
+            <h4 className="font-bold mb-2">Auth Debug Info:</h4>
+            <p>isAuthenticated: {isAuthenticated ? "true" : "false"}</p>
+            <p>isLoading: {isLoading ? "true" : "false"}</p>
+            <button
+              onClick={() => {
+                // Force auth state refresh
+                localStorage.removeItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated")
+                window.location.reload()
+              }}
+              className="mt-2 px-2 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200"
+            >
+              Reset Auth State
+            </button>
+          </div>
+        )}
+
         <UserProfile />
       </div>
     </header>
   )
-}
-
-function getAgentName(agentId: string): string {
-  const agents: Record<string, string> = {
-    "b-bot": "B-Bot",
-    default: "Beyond Assistant",
-    professor: "Professor Einstein",
-    chef: "Chef Gordon",
-    therapist: "Dr. Thompson",
-    coder: "Dev Patel",
-  }
-
-  return agents[agentId] || "Beyond Assistant"
 }
