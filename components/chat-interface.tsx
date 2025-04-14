@@ -212,14 +212,12 @@ export function ChatInterface() {
           newOptions.headers = {
             ...options.headers,
             Authorization: `Bearer ${token}`,
-            "bbot-api-key": "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid",
           }
           console.log("Making fetch request with Authorization header:", `Bearer ${token.substring(0, 15)}...`)
         } else {
           console.log("Making fetch request without Authorization header (using token in body)")
           newOptions.headers = {
             ...options.headers,
-            "bbot-api-key": "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid",
           }
         }
 

@@ -138,7 +138,7 @@ async function handleThreadBasedChat(req: NextRequest) {
       const latestMessage = messages[messages.length - 1]
 
       // Add the message to the thread
-      const messageUrl = `https://api-staging.b-bot.space/api/v2/threads/${threadId}/messages`
+      const messageUrl = `${process.env.AUTH0_AUDIENCE}/api/v2/threads/${threadId}/messages`
       console.log(`Adding message to thread ${threadId}`)
 
       const messageResponse = await fetch(messageUrl, {
@@ -159,7 +159,7 @@ async function handleThreadBasedChat(req: NextRequest) {
       }
 
       // Run the thread with the selected assistant
-      const runUrl = `https://api-staging.b-bot.space/api/v2/threads/${threadId}/runs`
+      const runUrl = `${process.env.AUTH0_AUDIENCE}/api/v2/threads/${threadId}/runs`
       console.log(`Running thread ${threadId} with assistant ${agent || "default"}`)
 
       const runResponse = await fetch(runUrl, {
@@ -203,7 +203,7 @@ async function handleThreadBasedChat(req: NextRequest) {
     }
 
     // If no threadId, fall back to the direct chat endpoint
-    const apiUrl = `https://api-staging.b-bot.space/api/v2/assistants/${agent || "default"}/chat`
+    const apiUrl = `${process.env.AUTH0_AUDIENCE}/api/v2/assistants/${agent || "default"}/chat`
     console.log(`Making direct chat request to ${apiUrl}`)
 
     const response = await fetch(apiUrl, {

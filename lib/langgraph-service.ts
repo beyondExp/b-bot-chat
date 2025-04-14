@@ -17,13 +17,12 @@ export function useLangGraphService() {
       if (!authToken) {
         throw new Error("No authentication token available")
       }
-
-      const response = await fetch("https://api-staging.b-bot.space/api/v2/threads", {
+      console.log("NEW THREAD 1")
+      const response = await fetch(process.env.AUTH0_AUDIENCE + "http://localhost:5000/api/v2/threads", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
-          "bbot-api-key": "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid",
         },
         body: JSON.stringify(data),
       })
@@ -44,9 +43,10 @@ export function useLangGraphService() {
       if (!authToken) {
         throw new Error("No authentication token available")
       }
+        console.log("NEW THREAD 2")
 
       const response = await fetch(
-        `https://api-staging.b-bot.space/api/v2/threads/${threadId}/graph?assistant_id=${assistantId}`,
+        `${process.env.AUTH0_AUDIENCE}/api/v2/threads/${threadId}/graph?assistant_id=${assistantId}`,
         {
           method: "POST",
           headers: {
@@ -75,7 +75,7 @@ export function useLangGraphService() {
         throw new Error("No authentication token available")
       }
 
-      const response = await fetch(`https://api-staging.b-bot.space/api/v2/threads/${threadId}/messages`, {
+      const response = await fetch(`${process.env.AUTH0_AUDIENCE}/api/v2/threads/${threadId}/messages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
