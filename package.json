@@ -62,7 +62,8 @@
     "@auth0/auth0-react": "latest",
     "stripe": "latest",
     "@stripe/react-stripe-js": "latest",
-    "ai": "latest"
+    "ai": "latest",
+    "@ai-sdk/react": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",
