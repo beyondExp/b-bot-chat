@@ -117,6 +117,13 @@ export function LandingPage() {
                 </>
               )}
             </button>
+            <a
+              href="/?agent=b-bot"
+              className="px-6 py-3 bg-muted text-foreground rounded-lg font-medium hover:bg-muted/70 transition-colors flex items-center justify-center gap-2"
+            >
+              <span>Chat with B-Bot</span>
+              <Bot size={16} />
+            </a>
             <button
               onClick={() => setShowPWAGuide(true)}
               className="px-6 py-3 bg-muted text-foreground rounded-lg font-medium hover:bg-muted/70 transition-colors flex items-center justify-center gap-2"
@@ -777,11 +784,18 @@ export function LandingPage() {
               </>
             ) : (
               <>
-                <span>Chat with AI Agents</span>
+                <span>Sign In & Chat</span>
                 <ArrowRight size={20} />
               </>
             )}
           </button>
+          <a
+            href="/?agent=b-bot"
+            className="px-8 py-4 bg-muted text-foreground rounded-lg font-medium hover:bg-muted/70 transition-colors inline-flex items-center gap-2 text-lg"
+          >
+            <span>Try B-Bot Now</span>
+            <Bot size={20} />
+          </a>
           <a
             href="https://hub.b-bot.space"
             target="_blank"

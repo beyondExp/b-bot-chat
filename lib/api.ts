@@ -3,9 +3,9 @@
 import { useAuth0 } from "@auth0/auth0-react"
 import { useCallback } from "react"
 
-const API_BASE_URL = process.env.AUTH0_AUDIENCE + "/api/v2"
-const API_V3_BASE_URL = process.env.AUTH0_AUDIENCE + "/api/v3"
-export const LANGGRAPH_AUDIENCE = process.env.SYNAPSE_URL
+const API_BASE_URL = "https://api-staging.b-bot.space/api/v2"
+const API_V3_BASE_URL = "https://api-staging.b-bot.space/api/v3"
+export const LANGGRAPH_AUDIENCE = "https://api.b-bot.space"
 
 // Token cache (client-side only)
 let cachedToken: string | null = null
@@ -222,6 +222,7 @@ export function getAuthToken(): string | null {
 export function storeSynapseToken(token: string): void {
   if (typeof window === "undefined") return
   localStorage.setItem("synapseToken", token)
+  localStorage.setItem("auth_token", token) // Store in auth_token as well for consistency
 }
 
 /**

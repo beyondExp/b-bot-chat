@@ -59,10 +59,12 @@
     "vaul": "^0.9.6",
     "zod": "^3.24.1",
     "@stripe/stripe-js": "latest",
+    "@langchain/core": "latest",
     "@auth0/auth0-react": "latest",
     "stripe": "latest",
     "@stripe/react-stripe-js": "latest",
     "ai": "latest",
+    "@langchain/langgraph-sdk": "latest",
     "@ai-sdk/react": "latest"
   },
   "devDependencies": {

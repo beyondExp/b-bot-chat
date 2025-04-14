@@ -21,6 +21,8 @@ import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 
 // Add these imports at the top of the file
 import { useLangGraphService } from "@/lib/langgraph-service"
+// Add this import at the top of the file
+import { LangGraphService } from "@/lib/langgraph-service-sdk"
 
 export function ChatInterface() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
@@ -38,7 +40,7 @@ export function ChatInterface() {
   const [rechargeAmount, setRechargeAmount] = useState(2000) // $20.00
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
 
-  const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
+  const { isAuthenticated, getAccessTokenSilently, user, loginWithRedirect } = useAuth0()
   const { getAgent } = useAgents()
   const authenticatedFetch = useAuthenticatedFetch()
 
@@ -46,14 +48,21 @@ export function ChatInterface() {
   const [threadId, setThreadId] = useState<string | null>(null)
   const { createThread, runThread, addThreadMessage } = useLangGraphService()
 
+  // Replace the existing useLangGraphService hook with this:
+  // Create a new instance of LangGraphService
+  const langGraphService = new LangGraphService()
+
   // Add this effect to create a thread when the component mounts
   useEffect(() => {
-    if ((isAuthenticated || isLocallyAuthenticated()) && !threadId) {
+    // Allow B-Bot without authentication, but require auth for other agents
+    const shouldCreateThread = (isAuthenticated || isLocallyAuthenticated() || selectedAgent === "b-bot") && !threadId
+
+    if (shouldCreateThread) {
       const initializeThread = async () => {
         try {
           // Default to b-bot if no agent is selected
-          const thread = await createThread({
-            user_id: user?.sub || "local-user",
+          const thread = await langGraphService.createThread({
+            user_id: user?.sub || "anonymous-user",
             agent_id: selectedAgent || "b-bot",
           })
           setThreadId(thread.thread_id)
@@ -65,7 +74,7 @@ export function ChatInterface() {
 
       initializeThread()
     }
-  }, [isAuthenticated, threadId, user?.sub, createThread, selectedAgent])
+  }, [isAuthenticated, threadId, user?.sub, selectedAgent])
 
   // Load recent agents from localStorage
   useEffect(() => {
@@ -167,22 +176,51 @@ export function ChatInterface() {
 
   // Update the handleSelectAgent function to create a new thread when switching agents
   const handleSelectAgent = (agentId: string | null) => {
+    // Only allow selecting non-B-Bot agents if authenticated
+    if (agentId !== "b-bot" && !(isAuthenticated || isLocallyAuthenticated())) {
+      // Show login prompt
+      if (
+        typeof window !== "undefined" &&
+        window.confirm("You need to sign in to chat with this agent. Would you like to sign in now?")
+      ) {
+        loginWithRedirect()
+      }
+      return
+    }
+
     // Only update if the agent is actually changing
     if (agentId !== selectedAgent) {
       setSelectedAgent(agentId)
 
       // Create a new thread for the new agent
-      if ((isAuthenticated || isLocallyAuthenticated()) && agentId) {
+      if ((isAuthenticated || isLocallyAuthenticated() || agentId === "b-bot") && agentId) {
         const initializeNewThread = async () => {
           try {
-            const thread = await createThread({
-              user_id: user?.sub || "local-user",
+            console.log(`Initializing new thread for agent: ${agentId}`)
+            const thread = await langGraphService.createThread({
+              user_id: user?.sub || "anonymous-user",
               agent_id: agentId,
             })
             setThreadId(thread.thread_id)
             console.log("New thread initialized for agent:", agentId, "Thread ID:", thread.thread_id)
+
+            // Clear messages when switching agents
+            setMessages([])
           } catch (error) {
             console.error("Failed to initialize thread for new agent:", error)
+
+            // If this is B-Bot, create a fallback thread
+            if (agentId === "b-bot") {
+              console.log("Creating fallback thread for B-Bot")
+              const fallbackThreadId = `bbot-anonymous-${Date.now()}`
+              setThreadId(fallbackThreadId)
+
+              // Clear messages when switching agents
+              setMessages([])
+            } else {
+              // For other agents, show an error message
+              alert("Failed to initialize chat with this agent. Please try again later.")
+            }
           }
         }
 
@@ -199,60 +237,111 @@ export function ChatInterface() {
     setShowDiscover(false)
   }
 
-  // Create a custom fetch function for the chat API that includes the auth headers
+  // Update the customFetch function to use our new service for sending messages
   const customFetch = useCallback(
     async (url: string, options: RequestInit) => {
       try {
-        const token = await getAuthTokenForRequest()
-
-        // Create a new options object with the Authorization header if we have a token
-        const newOptions: RequestInit = { ...options }
-
-        if (token) {
-          newOptions.headers = {
-            ...options.headers,
-            Authorization: `Bearer ${token}`,
-          }
-          console.log("Making fetch request with Authorization header:", `Bearer ${token.substring(0, 15)}...`)
-        } else {
-          console.log("Making fetch request without Authorization header (using token in body)")
-          newOptions.headers = {
-            ...options.headers,
-          }
-        }
-
-        // Add token to body as well (as fallback)
+        // Parse the request body to get the messages
+        let bodyObj: any = {}
         if (options.body && typeof options.body === "string") {
           try {
-            const bodyObj = JSON.parse(options.body)
-            if (token) {
-              bodyObj.token = token
-              bodyObj.synapseToken = token // Add synapseToken to match Vue implementation
-            }
-            newOptions.body = JSON.stringify(bodyObj)
+            bodyObj = JSON.parse(options.body)
           } catch (e) {
             console.error("Error parsing request body:", e)
+            bodyObj = { messages: [] }
           }
         }
 
-        console.log("Request URL:", url)
-        console.log("Request method:", newOptions.method)
-
-        // Make the fetch request with the new options
-        const response = await fetch(url, newOptions)
-
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => "Failed to get error text")
-          console.error(`Fetch error (${response.status}): ${errorText}`)
+        // Ensure we have a valid messages array
+        if (!bodyObj.messages) {
+          bodyObj.messages = []
+        } else if (!Array.isArray(bodyObj.messages)) {
+          bodyObj.messages = []
         }
 
-        return response
+        // Get the latest user message
+        const latestMessage = bodyObj.messages.length > 0 ? bodyObj.messages[bodyObj.messages.length - 1] : null
+
+        if (!latestMessage) {
+          throw new Error("No message to send")
+        }
+
+        // If we have a threadId, add the message and run the thread
+        if (threadId) {
+          console.log(`Adding message to thread ${threadId}`)
+
+          // Add the message to the thread
+          await langGraphService.addThreadMessage(threadId, {
+            role: "user",
+            content: latestMessage.content || "",
+            isBBotThread: selectedAgent === "b-bot",
+          })
+
+          // Run the thread with the selected agent
+          const response = await langGraphService.runThread(threadId, selectedAgent || "b-bot", {
+            messages: [latestMessage.content || ""],
+          })
+
+          // Create a Response object to return
+          const responseData = response.response || {
+            role: "assistant",
+            content: "I'm sorry, I couldn't process your request.",
+            id: `msg-${Date.now()}`,
+            created_at: new Date().toISOString(),
+          }
+
+          // Create a stream from the response
+          const stream = new ReadableStream({
+            start(controller) {
+              // Add the response to the stream
+              controller.enqueue(JSON.stringify(responseData))
+              controller.close()
+            },
+          })
+
+          // Return the stream as a Response
+          return new Response(stream, {
+            headers: {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive",
+            },
+          })
+        }
+
+        // If no threadId, fall back to the original fetch
+        console.log("No threadId, falling back to original fetch")
+        return fetch(url, options)
       } catch (error) {
         console.error("Error in customFetch:", error)
-        throw error
+
+        // Create a fallback response
+        const fallbackResponse = {
+          role: "assistant",
+          content: "I'm sorry, I encountered an error processing your request. Please try again.",
+          id: `msg-${Date.now()}`,
+          created_at: new Date().toISOString(),
+        }
+
+        // Create a stream from the fallback response
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(JSON.stringify(fallbackResponse))
+            controller.close()
+          },
+        })
+
+        // Return the stream as a Response
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+          },
+        })
       }
     },
-    [getAuthTokenForRequest],
+    [threadId, selectedAgent],
   )
 
   // Update the useChat hook to use our custom fetch function
@@ -263,6 +352,8 @@ export function ChatInterface() {
       threadId: threadId,
       token: cachedAuthToken, // Include the token in the request body
       synapseToken: cachedAuthToken, // Include as synapseToken to match Vue implementation
+      isAnonymous: !isAuthenticated && selectedAgent === "b-bot", // Flag for anonymous B-Bot usage
+      messages: [], // Ensure messages array exists initially
     },
     id: selectedAgent || "b-bot", // Default to b-bot
     onFinish: (message) => {

@@ -5,7 +5,7 @@ export const auth0Config: Auth0ProviderOptions = {
   clientId: "RShGzaeQqPJwM850f6MwzyODEDD4wMwK",
   authorizationParams: {
     redirect_uri: typeof window !== "undefined" ? window.location.origin : "",
-    audience: process.env.AUTH0_AUDIENCE,
+    audience: "https://api.b-bot.space",
     scope: "openid profile email",
   },
 }

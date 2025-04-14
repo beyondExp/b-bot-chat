@@ -1,7 +1,17 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { ChevronLeftIcon, Sparkles, BookOpen, ChefHat, Heart, Code, CompassIcon, ExternalLink } from "lucide-react"
+import { useState, useEffect, useRef, useMemo } from "react"
+import {
+  ChevronLeftIcon,
+  Sparkles,
+  BookOpen,
+  ChefHat,
+  Heart,
+  Code,
+  CompassIcon,
+  ExternalLink,
+  LogIn,
+} from "lucide-react"
 import { useAgents } from "@/lib/agent-service"
 import { useAuth0 } from "@auth0/auth0-react"
 import type { Agent } from "@/types/agent"
@@ -26,33 +36,39 @@ export function AgentSelector({
   const [error, setError] = useState<string | null>(null)
   const isMounted = useRef(true)
 
-  const { isAuthenticated } = useAuth0()
+  // Get authentication status from Auth0
+  const { isAuthenticated, loginWithRedirect } = useAuth0()
   const { getAgents } = useAgents()
 
-  // Fetch agents
+  // Fetch agents only if authenticated
   useEffect(() => {
-    if (!isAuthenticated) return
-
-    const fetchAgents = async () => {
-      setIsLoading(true)
-      try {
-        const agentsData = await getAgents()
-        if (isMounted.current) {
-          setAgents(agentsData)
-        }
-      } catch (err) {
-        console.error("Error fetching agents:", err)
-        if (isMounted.current) {
-          setError("Failed to load agents. Please try again later.")
-        }
-      } finally {
-        if (isMounted.current) {
-          setIsLoading(false)
+    // Always fetch agents if authenticated
+    if (isAuthenticated) {
+      const fetchAgents = async () => {
+        setIsLoading(true)
+        try {
+          const agentsData = await getAgents()
+          if (isMounted.current) {
+            setAgents(agentsData)
+          }
+        } catch (err) {
+          console.error("Error fetching agents:", err)
+          if (isMounted.current) {
+            setError("Failed to load agents. Please try again later.")
+          }
+        } finally {
+          if (isMounted.current) {
+            setIsLoading(false)
+          }
         }
       }
-    }
 
-    fetchAgents()
+      fetchAgents()
+    } else {
+      // If not authenticated, set agents to empty array (we'll handle B-Bot separately)
+      setAgents([])
+      setIsLoading(false)
+    }
 
     // Cleanup function to prevent state updates after unmount
     return () => {
@@ -111,13 +127,33 @@ export function AgentSelector({
   }
 
   // Update the displayedAgents calculation to always include B-Bot at the top
-  // Replace the existing displayedAgents calculation with this:
+  // and filter other agents based on authentication status
+  const displayedAgents = useMemo(() => {
+    // Create default B-Bot agent
+    const defaultBBot: Agent = {
+      id: "b-bot",
+      name: "B-Bot",
+      shortDescription: "Your personal AI assistant",
+      description: "B-Bot is your personal AI assistant that can help with a wide range of tasks.",
+      profileImage: "/helpful-robot.png",
+      category: "General",
+      publisherId: "beyond-official",
+      abilities: [],
+      apps: [],
+    }
 
-  // Always ensure B-Bot is included, regardless of recent agents
-  const displayedAgents =
-    recentAgents.length > 0
-      ? ensureBBotIncluded(agents.filter((agent) => recentAgents.includes(agent.id)))
-      : ensureBBotIncluded(agents.slice(0, 5)) // Show only first 5 if no recent agents
+    // If not authenticated, only show B-Bot
+    if (!isAuthenticated) {
+      return [defaultBBot]
+    }
+
+    // If authenticated, ensure B-Bot is included with other agents
+    const agentsWithBBot = ensureBBotIncluded(
+      recentAgents.length > 0 ? agents.filter((agent) => recentAgents.includes(agent.id)) : agents.slice(0, 5),
+    )
+
+    return agentsWithBBot
+  }, [isAuthenticated, agents, recentAgents])
 
   return (
     <>
@@ -129,17 +165,28 @@ export function AgentSelector({
       </div>
 
       <div className="sidebar-content">
-        {/* Discover button */}
-        <button className="discover-button" onClick={onOpenDiscover} aria-label="Discover AI Agents">
-          <CompassIcon size={18} />
-          <span>Discover AI Agents</span>
-        </button>
+        {/* Discover button - only show if authenticated */}
+        {isAuthenticated ? (
+          <button className="discover-button" onClick={onOpenDiscover} aria-label="Discover AI Agents">
+            <CompassIcon size={18} />
+            <span>Discover AI Agents</span>
+          </button>
+        ) : (
+          <button
+            className="discover-button"
+            onClick={() => loginWithRedirect()}
+            aria-label="Sign in to discover more agents"
+          >
+            <LogIn size={18} />
+            <span>Sign in for more agents</span>
+          </button>
+        )}
 
         {isLoading ? (
           <div className="p-4 text-center">
             <div className="animate-pulse">Loading agents...</div>
           </div>
-        ) : error ? (
+        ) : error && isAuthenticated ? (
           <div className="p-4 text-center">
             <div className="text-red-500 mb-2">{error}</div>
             <button
@@ -174,39 +221,41 @@ export function AgentSelector({
               </button>
             )}
 
-            {recentAgents.length > 0 && (
+            {/* Only show Recent section if authenticated and there are recent agents */}
+            {isAuthenticated && recentAgents.length > 0 && (
               <div className="sidebar-section">
                 <h3 className="sidebar-section-title">Recent</h3>
               </div>
             )}
 
-            {/* Show other agents (excluding B-Bot which is already shown) */}
-            {displayedAgents
-              .filter((agent) => agent.id !== "b-bot")
-              .map((agent) => (
-                <button
-                  key={agent.id}
-                  className={`sidebar-agent ${selectedAgent === agent.id ? "active" : ""}`}
-                  onClick={() => {
-                    onSelectAgent(agent.id)
-                    // Close sidebar on mobile after selection
-                    if (window.innerWidth <= 768) {
-                      onClose()
-                    }
-                  }}
-                >
-                  <div className={`agent-icon ${selectedAgent === agent.id ? "bg-primary text-white" : "bg-muted"}`}>
-                    {getAgentIcon(agent)}
-                  </div>
-                  <div className="agent-info">
-                    <div className="agent-name">{agent.name}</div>
-                    <div className="agent-description">{agent.shortDescription}</div>
-                  </div>
-                </button>
-              ))}
+            {/* Show other agents only if authenticated */}
+            {isAuthenticated &&
+              displayedAgents
+                .filter((agent) => agent.id !== "b-bot")
+                .map((agent) => (
+                  <button
+                    key={agent.id}
+                    className={`sidebar-agent ${selectedAgent === agent.id ? "active" : ""}`}
+                    onClick={() => {
+                      onSelectAgent(agent.id)
+                      // Close sidebar on mobile after selection
+                      if (window.innerWidth <= 768) {
+                        onClose()
+                      }
+                    }}
+                  >
+                    <div className={`agent-icon ${selectedAgent === agent.id ? "bg-primary text-white" : "bg-muted"}`}>
+                      {getAgentIcon(agent)}
+                    </div>
+                    <div className="agent-info">
+                      <div className="agent-name">{agent.name}</div>
+                      <div className="agent-description">{agent.shortDescription}</div>
+                    </div>
+                  </button>
+                ))}
 
-            {/* Show "View All" button if there are more than 5 agents */}
-            {agents.length > 5 && recentAgents.length === 0 && (
+            {/* Show "View All" button if authenticated and there are more than 5 agents */}
+            {isAuthenticated && agents.length > 5 && recentAgents.length === 0 && (
               <button className="view-all-button" onClick={onOpenDiscover}>
                 View All Agents
               </button>
@@ -214,6 +263,7 @@ export function AgentSelector({
           </>
         )}
 
+        {/* Show promo container for both authenticated and unauthenticated users */}
         <div className="promo-container">
           <a href="https://hub.b-bot.space" target="_blank" rel="noopener noreferrer" className="hub-promo-card">
             <div className="hub-promo-icon">

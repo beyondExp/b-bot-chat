@@ -1,58 +1,42 @@
 import type { NextRequest } from "next/server"
 
-// Helper function to extract token from various sources
-// Make this function async since it uses await
-async function extractToken(req: NextRequest): Promise<string | null> {
+// Allow streaming responses up to 30 seconds
+export const maxDuration = 30
+
+// Helper function to safely read the request body
+async function safelyReadBody(req: NextRequest): Promise<any> {
   try {
-    // Try to get token from request body first (like in Vue implementation)
-    const body = req.json ? await req.json() : null
-
-    // Check for synapseToken in body (matching Vue implementation)
-    if (body?.synapseToken) {
-      console.log("Using synapseToken from request body")
-      return body.synapseToken
+    // Check if the request has a body
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      console.log("Request doesn't have JSON content type:", contentType)
+      return null
     }
 
-    // Check for Authorization header
-    const authHeader = req.headers.get("Authorization")
-    if (authHeader) {
-      console.log("Using Authorization header")
-      return authHeader.replace("Bearer ", "")
+    // Try to read the body as text first
+    const bodyText = await req.text()
+    console.log("Request body text length:", bodyText.length)
+
+    if (!bodyText || bodyText.trim() === "") {
+      console.log("Request body is empty")
+      return null
     }
 
-    // Check for token in body as fallback
-    if (body?.token) {
-      console.log("Using token from request body")
-      return body.token
+    // Then parse the text as JSON
+    try {
+      return JSON.parse(bodyText)
+    } catch (parseError) {
+      console.error("Error parsing JSON from body text:", parseError)
+      return null
     }
-
-    // Try to get token from Vercel's special header
-    const vercelHeaders = req.headers.get("x-vercel-sc-headers")
-    if (vercelHeaders) {
-      try {
-        const parsedHeaders = JSON.parse(vercelHeaders)
-        if (parsedHeaders.Authorization) {
-          console.log("Using token from x-vercel-sc-headers")
-          return parsedHeaders.Authorization.replace("Bearer ", "")
-        }
-      } catch (e) {
-        console.error("Error parsing x-vercel-sc-headers:", e)
-      }
-    }
-
-    console.log("No token found in request")
-    return null
   } catch (error) {
-    console.error("Error extracting token:", error)
+    console.error("Error reading request body:", error)
     return null
   }
 }
 
-// Allow streaming responses up to 30 seconds
-export const maxDuration = 30
-
-// Update this function to handle thread-based communication with more resilient auth handling
-async function handleThreadBasedChat(req: NextRequest) {
+// Update the handleThreadBasedChat function to better handle thread-based chat
+async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
   try {
     // Get the authorization header from the incoming request
     const authHeader = req.headers.get("Authorization")
@@ -61,18 +45,54 @@ async function handleThreadBasedChat(req: NextRequest) {
     // Log all incoming headers for debugging
     console.log("Incoming request headers:", Object.fromEntries([...req.headers.entries()]))
 
-    // Parse request body - clone the request to avoid consuming the body
-    const requestClone = req.clone()
-    const requestData = await requestClone.json()
-    const { messages, agent, threadId, token, synapseToken } = requestData
+    // Use the parsed body if provided, otherwise try to parse it again
+    let requestData = parsedBody
+    if (!requestData) {
+      console.log("No parsed body provided to handler, attempting to read body")
+      requestData = await safelyReadBody(req.clone())
+    }
+
+    // If we still don't have request data, use default values
+    if (!requestData) {
+      console.log("Unable to parse request body, using default values")
+      requestData = {
+        messages: [],
+        agent: "b-bot",
+        threadId: null,
+      }
+    }
+
+    // Extract data from the request
+    const { messages = [], agent = "b-bot", threadId = null, token, synapseToken } = requestData
+
+    // Validate messages
+    if (!Array.isArray(messages)) {
+      console.error("Messages is not an array:", messages)
+      return new Response(
+        JSON.stringify({
+          error: "Invalid request",
+          details: "The 'messages' field must be an array",
+          message: "I'm sorry, there was an error processing your request. Please try again.",
+        }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      )
+    }
 
     console.log("Request data received:", {
       agent,
       threadId,
-      messageCount: messages?.length || 0,
+      messageCount: messages.length,
       hasToken: !!token,
       hasSynapseToken: !!synapseToken,
     })
+
+    // Check if this is a B-Bot request
+    const isBBotRequest = agent === "b-bot"
 
     // Try to get auth token from various sources
     let authToken = null
@@ -91,26 +111,6 @@ async function handleThreadBasedChat(req: NextRequest) {
     else if (token) {
       authToken = token
       console.log("Using token from request body")
-    }
-    // 4. Try from Vercel's special header
-    else {
-      try {
-        const vercelScHeaders = req.headers.get("x-vercel-sc-headers")
-        if (vercelScHeaders) {
-          const parsedHeaders = JSON.parse(vercelScHeaders)
-          if (parsedHeaders.Authorization) {
-            authToken = parsedHeaders.Authorization.replace("Bearer ", "")
-            console.log("Using token from x-vercel-sc-headers")
-          }
-        }
-      } catch (e) {
-        console.error("Error parsing x-vercel-sc-headers:", e)
-      }
-    }
-
-    // If we still don't have a token, try to proceed without it
-    if (!authToken) {
-      console.warn("No authorization token found, proceeding with default headers")
     }
 
     // Set up headers with the auth token if available
@@ -135,10 +135,61 @@ async function handleThreadBasedChat(req: NextRequest) {
     // If we have a threadId, use it to add a message and run the thread
     if (threadId) {
       // Get the latest user message
-      const latestMessage = messages[messages.length - 1]
+      const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null
+
+      if (!latestMessage) {
+        return new Response(
+          JSON.stringify({
+            error: "No message provided",
+            message: "I'm sorry, I didn't receive any message to respond to.",
+          }),
+          {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        )
+      }
+
+      // Check if this is an anonymous B-Bot thread
+      if (threadId.startsWith("bbot-anonymous-")) {
+        console.log("Handling anonymous B-Bot thread")
+
+        // Create a simple response for anonymous B-Bot threads
+        const responseData = {
+          id: `msg-${Date.now()}`,
+          role: "assistant",
+          content: `I'm B-Bot, your AI assistant. I'm currently in anonymous mode with limited capabilities. ${
+            latestMessage.content?.toLowerCase().includes("hello") ||
+            latestMessage.content?.toLowerCase().includes("hi")
+              ? "Hello! How can I help you today?"
+              : "How can I assist you further?"
+          }`,
+          createdAt: new Date().toISOString(),
+        }
+
+        // Create a stream from the response
+        const stream = new ReadableStream({
+          start(controller) {
+            // Add the response to the stream
+            controller.enqueue(JSON.stringify(responseData))
+            controller.close()
+          },
+        })
+
+        // Return the stream
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+          },
+        })
+      }
 
       // Add the message to the thread
-      const messageUrl = `${process.env.AUTH0_AUDIENCE}/api/v2/threads/${threadId}/messages`
+      const messageUrl = `https://api-staging.b-bot.space/api/v2/threads/${threadId}/messages`
       console.log(`Adding message to thread ${threadId}`)
 
       const messageResponse = await fetch(messageUrl, {
@@ -146,7 +197,7 @@ async function handleThreadBasedChat(req: NextRequest) {
         headers,
         body: JSON.stringify({
           role: "user",
-          content: latestMessage.content,
+          content: latestMessage.content || "",
         }),
       })
 
@@ -159,16 +210,14 @@ async function handleThreadBasedChat(req: NextRequest) {
       }
 
       // Run the thread with the selected assistant
-      const runUrl = `${process.env.AUTH0_AUDIENCE}/api/v2/threads/${threadId}/runs`
+      const runUrl = `https://api-staging.b-bot.space/api/v2/threads/${threadId}/graph`
       console.log(`Running thread ${threadId} with assistant ${agent || "default"}`)
 
-      const runResponse = await fetch(runUrl, {
+      const runResponse = await fetch(`${runUrl}?assistant_id=${agent || "default"}`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          assistant_id: agent || "default",
-          stream_mode: ["messages"],
-          metadata: { conversation_id: threadId },
+          messages: [latestMessage.content || ""],
         }),
       })
 
@@ -187,7 +236,16 @@ async function handleThreadBasedChat(req: NextRequest) {
       const stream = new ReadableStream({
         start(controller) {
           // Add the response to the stream
-          controller.enqueue(JSON.stringify(responseData))
+          controller.enqueue(
+            JSON.stringify(
+              responseData.response || {
+                role: "assistant",
+                content: "I'm sorry, I couldn't process your request.",
+                id: `msg-${Date.now()}`,
+                created_at: new Date().toISOString(),
+              },
+            ),
+          )
           controller.close()
         },
       })
@@ -203,7 +261,7 @@ async function handleThreadBasedChat(req: NextRequest) {
     }
 
     // If no threadId, fall back to the direct chat endpoint
-    const apiUrl = `${process.env.AUTH0_AUDIENCE}/api/v2/assistants/${agent || "default"}/chat`
+    const apiUrl = `https://api-staging.b-bot.space/api/v2/assistants/${agent || "default"}/chat`
     console.log(`Making direct chat request to ${apiUrl}`)
 
     const response = await fetch(apiUrl, {
@@ -251,6 +309,7 @@ async function handleThreadBasedChat(req: NextRequest) {
       JSON.stringify({
         error: "Error in thread-based chat",
         details: error instanceof Error ? error.message : String(error),
+        message: "I'm sorry, something went wrong. Please try again later.",
       }),
       {
         status: 500,
@@ -267,14 +326,37 @@ export async function POST(req: NextRequest) {
   try {
     console.log("Chat API request received")
 
-    // Simply pass the request to the handler
-    return await handleThreadBasedChat(req)
+    // Try to safely read the request body
+    const parsedBody = await safelyReadBody(req.clone())
+
+    if (!parsedBody) {
+      console.log("Failed to parse request body, providing fallback response")
+
+      // Return a simple response for empty or invalid requests
+      return new Response(
+        JSON.stringify({
+          id: `msg-${Date.now()}`,
+          role: "assistant",
+          content: "I'm sorry, I couldn't process your request. Please try again with a valid message.",
+          createdAt: new Date().toISOString(),
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      )
+    }
+
+    // Pass the parsed body to the handler
+    return await handleThreadBasedChat(req, parsedBody)
   } catch (error) {
     console.error("Chat API error:", error)
     return new Response(
       JSON.stringify({
         error: "Internal Server Error",
         details: error instanceof Error ? error.message : String(error),
+        message: "I'm sorry, something went wrong. Please try again later.",
       }),
       {
         status: 500,
