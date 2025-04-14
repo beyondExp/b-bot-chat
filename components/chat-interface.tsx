@@ -24,8 +24,17 @@ import { useLangGraphService } from "@/lib/langgraph-service"
 // Add this import at the top of the file
 import { LangGraphService } from "@/lib/langgraph-service-sdk"
 
+// At the top of the file, add this import:
+import { useSearchParams } from "next/navigation"
+
 export function ChatInterface() {
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
+  // Inside the ChatInterface component, add this near the top:
+  // Get agent from URL query parameters
+  const searchParams = useSearchParams()
+  const agentFromUrl = searchParams.get("agent")
+
+  // Then modify the useState for selectedAgent to use the URL parameter if available:
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(agentFromUrl || null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showDiscover, setShowDiscover] = useState(false)
   const [recentAgents, setRecentAgents] = useState<string[]>([])
