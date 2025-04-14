@@ -18,9 +18,6 @@ import { useAuthenticatedFetch, getAuthToken, isLocallyAuthenticated } from "@/l
 
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
-
-// Add these imports at the top of the file
-import { useLangGraphService } from "@/lib/langgraph-service"
 // Add this import at the top of the file
 import { LangGraphService } from "@/lib/langgraph-service-sdk"
 
@@ -51,9 +48,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Add this to the ChatInterface component, after the existing state declarations
   const [threadId, setThreadId] = useState<string | null>(null)
-  const { createThread, runThread, addThreadMessage } = useLangGraphService()
 
-  // Replace the existing useLangGraphService hook with this:
   // Create a new instance of LangGraphService
   const langGraphService = new LangGraphService()
 
@@ -242,7 +237,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     setShowDiscover(false)
   }
 
-  // Update the customFetch function to use our new service for sending messages
+  // Update the customFetch function to use our LangGraphService for sending messages
   const customFetch = useCallback(
     async (url: string, options: RequestInit) => {
       try {
@@ -271,9 +266,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           throw new Error("No message to send")
         }
 
-        // If we have a threadId, add the message and run the thread
+        // If we have a threadId, use the LangGraphService to handle the chat
         if (threadId) {
-          console.log(`Adding message to thread ${threadId}`)
+          console.log(`Using LangGraphService to handle chat for thread ${threadId}`)
 
           // Add the message to the thread
           await langGraphService.addThreadMessage(threadId, {
@@ -314,9 +309,64 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           })
         }
 
-        // If no threadId, fall back to the original fetch
-        console.log("No threadId, falling back to original fetch")
-        return fetch(url, options)
+        // If no threadId, use the LangGraphService to create a thread and handle the chat
+        console.log("No threadId, creating a new thread and handling chat")
+
+        try {
+          // Create a new thread
+          const thread = await langGraphService.createThread({
+            user_id: user?.sub || "anonymous-user",
+            agent_id: selectedAgent || "b-bot",
+          })
+
+          // Set the threadId for future use
+          setThreadId(thread.thread_id)
+          console.log("Created new thread with ID:", thread.thread_id)
+
+          // Add the message to the thread
+          await langGraphService.addThreadMessage(thread.thread_id, {
+            role: "user",
+            content: latestMessage.content || "",
+            isBBotThread: selectedAgent === "b-bot",
+          })
+
+          // Run the thread with the selected agent
+          const response = await langGraphService.runThread(thread.thread_id, selectedAgent || "b-bot", {
+            messages: [latestMessage.content || ""],
+          })
+
+          // Create a Response object to return
+          const responseData = response.response || {
+            role: "assistant",
+            content: "I'm sorry, I couldn't process your request.",
+            id: `msg-${Date.now()}`,
+            created_at: new Date().toISOString(),
+          }
+
+          // Create a stream from the response
+          const stream = new ReadableStream({
+            start(controller) {
+              // Add the response to the stream
+              controller.enqueue(JSON.stringify(responseData))
+              controller.close()
+            },
+          })
+
+          // Return the stream as a Response
+          return new Response(stream, {
+            headers: {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive",
+            },
+          })
+        } catch (error) {
+          console.error("Error creating thread and handling chat:", error)
+
+          // Fall back to the original fetch if we can't create a thread
+          console.log("Falling back to original fetch")
+          return fetch(url, options)
+        }
       } catch (error) {
         console.error("Error in customFetch:", error)
 
@@ -346,7 +396,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         })
       }
     },
-    [threadId, selectedAgent],
+    [threadId, selectedAgent, user?.sub],
   )
 
   // Update the useChat hook to use our custom fetch function
