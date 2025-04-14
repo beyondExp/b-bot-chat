@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server"
 
 // Helper function to extract token from various sources
-function extractToken(req: NextRequest): string | null {
+// Make this function async since it uses await
+async function extractToken(req: NextRequest): Promise<string | null> {
   try {
     // Try to get token from request body first (like in Vue implementation)
     const body = req.json ? await req.json() : null
@@ -60,8 +61,9 @@ async function handleThreadBasedChat(req: NextRequest) {
     // Log all incoming headers for debugging
     console.log("Incoming request headers:", Object.fromEntries([...req.headers.entries()]))
 
-    // Parse request body
-    const requestData = await req.json()
+    // Parse request body - clone the request to avoid consuming the body
+    const requestClone = req.clone()
+    const requestData = await requestClone.json()
     const { messages, agent, threadId, token, synapseToken } = requestData
 
     console.log("Request data received:", {
