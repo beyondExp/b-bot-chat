@@ -24,17 +24,13 @@ import { useLangGraphService } from "@/lib/langgraph-service"
 // Add this import at the top of the file
 import { LangGraphService } from "@/lib/langgraph-service-sdk"
 
-// At the top of the file, add this import:
-import { useSearchParams } from "next/navigation"
+interface ChatInterfaceProps {
+  initialAgent?: string | null
+}
 
-export function ChatInterface() {
-  // Inside the ChatInterface component, add this near the top:
-  // Get agent from URL query parameters
-  const searchParams = useSearchParams()
-  const agentFromUrl = searchParams.get("agent")
-
-  // Then modify the useState for selectedAgent to use the URL parameter if available:
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(agentFromUrl || null)
+export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
+  // Initialize selectedAgent with the initialAgent prop
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(initialAgent || null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showDiscover, setShowDiscover] = useState(false)
   const [recentAgents, setRecentAgents] = useState<string[]>([])
@@ -478,9 +474,9 @@ export function ChatInterface() {
       {/* Main content */}
       <div className="main-content">
         <ChatHeader
-          selectedAgent={selectedAgent}
-          toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          onOpenDiscover={() => setShowDiscover(true)}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          isSidebarOpen={sidebarOpen}
+          onToggleDiscover={() => setShowDiscover(true)}
         />
 
         {showDiscover ? (

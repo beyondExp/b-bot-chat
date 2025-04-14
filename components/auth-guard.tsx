@@ -5,22 +5,21 @@ import { useAuth0 } from "@auth0/auth0-react"
 import { LandingPage } from "./landing-page"
 import { useEffect, useState } from "react"
 import { PostLoginPWAPrompt } from "./post-login-pwa-prompt"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 
 interface AuthGuardProps {
   children: React.ReactNode
+  initialAgent?: string | null
 }
 
-export function AuthGuard({ children }: AuthGuardProps) {
+export function AuthGuard({ children, initialAgent }: AuthGuardProps) {
   const { isAuthenticated, isLoading, error, loginWithRedirect } = useAuth0()
   const [loadingTimeout, setLoadingTimeout] = useState(false)
   const [showPWAPrompt, setShowPWAPrompt] = useState(false)
-  const searchParams = useSearchParams()
   const router = useRouter()
 
   // Check if user is trying to access B-Bot specifically
-  const agent = searchParams.get("agent")
-  const isBBotAccess = agent === "b-bot"
+  const isBBotAccess = initialAgent === "b-bot"
 
   // Add a timeout to prevent getting stuck in loading state
   useEffect(() => {
