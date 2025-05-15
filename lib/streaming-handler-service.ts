@@ -3,6 +3,13 @@ export class StreamingHandlerService {
    * Process a streaming response from the backend.
    * @param {Response} response - The fetch response object (with .body as ReadableStream)
    * @param {Object} callbacks - Callback functions for UI updates
+   * @param {Function} callbacks.onMessage - Called with new assistant message
+   * @param {Function} callbacks.onToolEvent - Called with new tool event
+   * @param {Function} callbacks.onUpdate - Called with updated messages array
+   * @param {Function} callbacks.onError - Called with error message
+   * @param {Function} callbacks.onScrollDown - Called to scroll UI down
+   * @param {Function} callbacks.onSetLoading - Called with loading state (true/false)
+   * @param {Function} callbacks.onInterrupt - Called with interrupt message
    */
   async processStream(
     response: Response,
@@ -10,7 +17,7 @@ export class StreamingHandlerService {
       onMessage = (msg: string) => {},
       onToolEvent = (event: any) => {},
       onUpdate = (messages: any[]) => {},
-      onError = (error: string) => {},
+      onError = (err: string) => {},
       onScrollDown = () => {},
       onSetLoading = (loading: boolean) => {},
       onInterrupt = (interruptMessage: any) => {},
@@ -27,13 +34,12 @@ export class StreamingHandlerService {
       const decoder = new TextDecoder()
       const reader = response.body.getReader()
 
-      // Dynamically import eventsource-parser
+      // Dynamically import the eventsource-parser
       const { createParser } = await import("eventsource-parser")
 
       const parser = createParser({
         onEvent: (event) => {
           try {
-            // Handle interrupt events
             if (event.data && typeof event.data === "string" && event.data.includes("__interrupt__")) {
               let interruptData
               try {
@@ -74,12 +80,11 @@ export class StreamingHandlerService {
               }
             }
 
-            // Handle different event types
             switch (event.event) {
-              case "messages/metadata":
+              case "messages/metadata": {
                 // Optionally handle metadata
                 break
-
+              }
               case "messages/partial": {
                 let partialData
                 try {
@@ -106,7 +111,6 @@ export class StreamingHandlerService {
                 }
                 break
               }
-
               case "updates": {
                 let updatesData
                 try {
@@ -122,7 +126,6 @@ export class StreamingHandlerService {
                 }
                 break
               }
-
               case "values": {
                 let valuesData
                 try {
@@ -142,7 +145,6 @@ export class StreamingHandlerService {
                 }
                 break
               }
-
               case "error": {
                 let errorData
                 try {
@@ -155,7 +157,6 @@ export class StreamingHandlerService {
                 onSetLoading(false)
                 break
               }
-
               default:
                 // Optionally handle other event types
                 break
@@ -167,11 +168,14 @@ export class StreamingHandlerService {
         },
       })
 
-      // Process the stream
-      const done = false
+      let done = false
       while (!done) {
         const { value, done: streamDone } = await reader.read()
-        if (streamDone) break
+        if (streamDone) {
+          done = true
+          break
+        }
+
         const decoded = decoder.decode(value)
         parser.feed(decoded)
       }

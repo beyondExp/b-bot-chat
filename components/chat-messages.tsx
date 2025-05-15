@@ -7,7 +7,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useAgents } from "@/lib/agent-service"
-import { Markdown } from "react-markdown/lib/react-markdown"
 
 interface ChatMessagesProps {
   messages: any[]
@@ -102,7 +101,7 @@ export function ChatMessages({
                   </Avatar>
                 )}
                 <Card className={`p-3 ${message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                  <Markdown>{message.content}</Markdown>
+                  <div className="prose prose-sm dark:prose-invert">{message.content}</div>
                 </Card>
               </div>
             </div>
@@ -117,7 +116,7 @@ export function ChatMessages({
                   <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
                 </Avatar>
                 <Card className="p-3 bg-muted">
-                  <Markdown>{incomingMessage}</Markdown>
+                  <div className="prose prose-sm dark:prose-invert">{incomingMessage}</div>
                 </Card>
               </div>
             </div>
