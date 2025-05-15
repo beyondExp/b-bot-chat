@@ -51,6 +51,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [incomingMessage, setIncomingMessage] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [chatMessages, setChatMessages] = useState<any[]>([])
+  const [conversationHistory, setConversationHistory] = useState<any[]>([])
 
   // Create a new instance of LangGraphService
   const langGraphService = new LangGraphService()
@@ -170,6 +171,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
             // Clear messages when switching agents
             setChatMessages([])
+            setConversationHistory([])
           } catch (error) {
             console.error("Failed to initialize thread for new agent:", error)
 
@@ -181,6 +183,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
               // Clear messages when switching agents
               setChatMessages([])
+              setConversationHistory([])
             } else {
               // For other agents, show an error message
               alert("Failed to initialize chat with this agent. Please try again later.")
@@ -217,6 +220,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     // Add the user message to the chat
     setChatMessages((prev) => [...prev, tempUserMessage])
 
+    // Update conversation history
+    const updatedHistory = [
+      ...conversationHistory,
+      {
+        role: "user",
+        content: messageContent,
+      },
+    ]
+    setConversationHistory(updatedHistory)
+
     try {
       // Get the current thread ID or create a new one
       let currentThreadId = threadId
@@ -230,22 +243,27 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         setThreadId(currentThreadId)
       }
 
-      // Prepare the configuration for the stream
+      // Add the message to the thread
+      if (currentThreadId) {
+        await langGraphService.addThreadMessage(currentThreadId, {
+          role: "user",
+          content: messageContent,
+        })
+      }
+
+      // Prepare the configuration for the stream - matching the example payload structure
       const streamConfig = {
-        messages: [messageContent],
-        input: {
-          messages: [messageContent],
-          entity_id: user?.sub
-            ? `${user.sub.replace(/[|-]/g, "")}_${selectedAgent || "b-bot"}`
-            : `anonymous_${selectedAgent || "b-bot"}`,
-        },
+        input: messageContent,
         config: {
-          configurable: {
-            thread_id: currentThreadId,
-          },
-          entity_id: user?.sub
-            ? `${user.sub.replace(/[|-]/g, "")}_${selectedAgent || "b-bot"}`
-            : `anonymous_${selectedAgent || "b-bot"}`,
+          thread_id: currentThreadId,
+          agent_id: selectedAgent || "b-bot",
+          user_id: user?.sub || "anonymous-user",
+          conversation_history: updatedHistory,
+          // Add any other configuration options as needed
+          temperature: 0.7,
+          max_tokens: 1024,
+          top_p: 1.0,
+          instructions: "Be helpful and concise.",
         },
       }
 
@@ -277,6 +295,15 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               const filtered = prev.filter((msg) => !msg.id.includes("temp"))
               return [...filtered, assistantMessage]
             })
+
+            // Update conversation history
+            setConversationHistory((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: messages[messages.length - 1].content || "",
+              },
+            ])
           }
 
           setIsLoading(false)

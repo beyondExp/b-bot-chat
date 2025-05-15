@@ -14,7 +14,6 @@ export class LangGraphService {
       "Content-Type": "application/json",
     }
 
-    // We don't need to set the API key here - the server will handle it
     // Just set the Authorization header if we have a token
     if (isLocallyAuthenticated()) {
       const token = getAuthToken()
@@ -33,6 +32,8 @@ export class LangGraphService {
         method: "POST",
         headers: this.getHeaders(),
         body: JSON.stringify({
+          assistant_id: config.agent_id || "b-bot",
+          user_id: config.user_id,
           metadata: config,
         }),
       })
@@ -97,16 +98,84 @@ export class LangGraphService {
     }
   }
 
-  // Invoke a graph with streaming
-  async invokeGraphStream(graphName: string, threadId: string, inputs: any = {}) {
+  // Add a message to a thread
+  async addThreadMessage(threadId: string, message: { role: string; content: string }) {
+    try {
+      const response = await fetch(`${this.baseURL}/threads/${threadId}/messages`, {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify({
+          role: message.role,
+          content: message.content,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`Failed to add message to thread: ${response.status} - ${errorText}`)
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error(`Failed to add message to thread ${threadId}:`, error)
+      throw error
+    }
+  }
+
+  // Invoke a graph with streaming - updated to match the example payload structure
+  async invokeGraphStream(agentId: string, threadId: string, options: any = {}) {
     try {
       // Use the proxy endpoint for streaming
       const url = `${this.baseURL}/threads/${threadId}/runs/stream`
 
+      // Extract the user message from options
+      let userMessage = ""
+      if (options.messages && Array.isArray(options.messages) && options.messages.length > 0) {
+        userMessage = options.messages[0]
+      } else if (
+        options.input &&
+        options.input.messages &&
+        Array.isArray(options.input.messages) &&
+        options.input.messages.length > 0
+      ) {
+        userMessage = options.input.messages[0]
+      }
+
+      // Format the request body according to the example payload structure
+      const requestBody = {
+        input: userMessage,
+        config: {
+          thread_id: threadId,
+          agent_id: agentId,
+          user_id: options.config?.entity_id || options.input?.entity_id || "anonymous-user",
+          ability_id: options.config?.ability_id,
+          model_id: options.config?.query_model || options.config?.response_model,
+          apps: options.config?.apps || options.input?.apps || {},
+          tool_activation: options.config?.tool_activation || {},
+          document_urls: options.config?.document_urls || [],
+          conversation_history: options.config?.conversation_history || [],
+          temperature: options.config?.temperature,
+          max_tokens: options.config?.max_tokens,
+          top_p: options.config?.top_p,
+          instructions: options.config?.instructions || options.config?.system_message,
+          // Include any other fields from the config
+          ...options.config,
+        },
+        stream_mode: ["values", "messages", "updates"],
+        stream_subgraphs: true,
+        subgraphs: true,
+      }
+
+      console.log("Sending request with payload:", {
+        input: userMessage.substring(0, 50) + (userMessage.length > 50 ? "..." : ""),
+        threadId,
+        agentId,
+      })
+
       const response = await fetch(url, {
         method: "POST",
         headers: this.getHeaders(),
-        body: JSON.stringify(inputs),
+        body: JSON.stringify(requestBody),
       })
 
       if (!response.ok) {
@@ -116,7 +185,7 @@ export class LangGraphService {
 
       return response
     } catch (error) {
-      console.error(`Failed to invoke streaming graph ${graphName}:`, error)
+      console.error(`Failed to invoke streaming graph ${agentId}:`, error)
       throw error
     }
   }

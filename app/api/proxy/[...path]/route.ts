@@ -1,32 +1,43 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// Define a constant for the B-Bot API key - use the non-public version
-const BBOT_API_KEY = process.env.ADMIN_API_KEY || ""
-
-// Define the LangGraph API URL
-const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || "https://api.langgraph.com"
+export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 
 export async function GET(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleRequest(request, params.path, "GET")
+  return handleProxyRequest(request, params.path, "GET")
 }
 
 export async function POST(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleRequest(request, params.path, "POST")
+  return handleProxyRequest(request, params.path, "POST")
 }
 
 export async function PUT(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleRequest(request, params.path, "PUT")
+  return handleProxyRequest(request, params.path, "PUT")
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleRequest(request, params.path, "DELETE")
+  return handleProxyRequest(request, params.path, "DELETE")
 }
 
-async function handleRequest(request: NextRequest, pathSegments: string[], method: string) {
+export async function PATCH(request: NextRequest, { params }: { params: { path: string[] } }) {
+  return handleProxyRequest(request, params.path, "PATCH")
+}
+
+async function handleProxyRequest(request: NextRequest, pathSegments: string[], method: string) {
   try {
+    // Get the LangGraph API URL from environment variables
+    const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://api-staging.b-bot.space/api/v2"
+
+    // Get the API key from environment variables (server-side only)
+    const apiKey = process.env.ADMIN_API_KEY
+
+    if (!apiKey) {
+      console.error("API key not found in environment variables")
+      return NextResponse.json({ error: "API key not configured" }, { status: 500 })
+    }
+
     // Construct the target URL
-    const path = pathSegments.join("/")
-    const url = new URL(`${LANGGRAPH_API_URL}/${path}`)
+    const targetPath = pathSegments.join("/")
+    const url = new URL(`${langGraphApiUrl}/${targetPath}`)
 
     // Copy query parameters
     const searchParams = new URLSearchParams(request.nextUrl.search)
@@ -35,29 +46,46 @@ async function handleRequest(request: NextRequest, pathSegments: string[], metho
     }
 
     // Prepare headers
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    }
+    const headers = new Headers()
+    headers.set("Content-Type", "application/json")
 
-    // Add the B-Bot API key from server-side environment variable
-    if (BBOT_API_KEY) {
-      headers["bbot-api-key"] = BBOT_API_KEY
-    }
+    // Add the API key header
+    headers.set("bbot-api-key", apiKey)
 
-    // Get the authorization header from the request
-    const authHeader = request.headers.get("authorization")
+    // Forward the Authorization header if present
+    const authHeader = request.headers.get("Authorization")
     if (authHeader) {
-      headers["Authorization"] = authHeader
+      headers.set("Authorization", authHeader)
     }
 
-    // Get request body if it exists
+    // Get the request body if it's not a GET request
     let body = null
     if (method !== "GET" && method !== "HEAD") {
-      const contentType = request.headers.get("content-type") || ""
-      if (contentType.includes("application/json")) {
+      try {
         body = await request.json()
-      } else {
-        body = await request.text()
+
+        // If this is a streaming request to /threads/{threadId}/runs/stream
+        // Format the payload according to the expected structure
+        if (targetPath.includes("/threads/") && targetPath.includes("/runs/stream")) {
+          console.log("Formatting streaming request payload")
+
+          // Extract the input and config from the request body
+          const { input, config } = body
+
+          // Create the properly formatted payload
+          const formattedBody = {
+            input,
+            config,
+            stream_mode: body.stream_mode || ["values", "messages", "updates"],
+            stream_subgraphs: body.stream_subgraphs !== false,
+            subgraphs: body.subgraphs !== false,
+            on_disconnect: body.on_disconnect || "cancel",
+          }
+
+          body = formattedBody
+        }
+      } catch (error) {
+        console.error("Error parsing request body:", error)
       }
     }
 
@@ -69,8 +97,17 @@ async function handleRequest(request: NextRequest, pathSegments: string[], metho
     })
 
     // Handle streaming responses
-    if (response.headers.get("content-type")?.includes("text/event-stream")) {
-      return new NextResponse(response.body, {
+    if (response.headers.get("Content-Type")?.includes("text/event-stream")) {
+      // Create a TransformStream to pass through the response
+      const { readable, writable } = new TransformStream()
+
+      // Pipe the response body to the transform stream
+      if (response.body) {
+        response.body.pipeTo(writable)
+      }
+
+      // Return a streaming response
+      return new NextResponse(readable, {
         headers: {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -79,11 +116,11 @@ async function handleRequest(request: NextRequest, pathSegments: string[], metho
       })
     }
 
-    // Handle regular JSON responses
-    const responseData = await response.json()
-    return NextResponse.json(responseData, { status: response.status })
+    // For non-streaming responses, return the JSON
+    const data = await response.json()
+    return NextResponse.json(data, { status: response.status })
   } catch (error) {
-    console.error("Error in proxy:", error)
-    return NextResponse.json({ error: "An error occurred while processing your request" }, { status: 500 })
+    console.error("Proxy error:", error)
+    return NextResponse.json({ error: "Proxy error", details: error.message }, { status: 500 })
   }
 }
