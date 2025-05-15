@@ -1,19 +1,13 @@
 "use client"
 
-import { ChatInterface } from "@/components/chat-interface"
-import { AuthGuard } from "@/components/auth-guard"
 import { useSearchParams } from "next/navigation"
+import { ChatInterface } from "./chat-interface"
 
 export function ClientPage() {
-  // Get the agent parameter from the URL
+  // Get agent from URL query parameters using useSearchParams
+  // This is now safely wrapped in a client component inside a Suspense boundary
   const searchParams = useSearchParams()
-  const agentParam = searchParams.get("agent")
+  const agentFromUrl = searchParams?.get("agent")
 
-  return (
-    <main className="flex min-h-screen flex-col">
-      <AuthGuard initialAgent={agentParam}>
-        <ChatInterface initialAgent={agentParam} />
-      </AuthGuard>
-    </main>
-  )
+  return <ChatInterface initialAgent={agentFromUrl} />
 }
