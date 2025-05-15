@@ -1,32 +1,16 @@
 "use client"
 
-import type React from "react"
-
 import { useState, useRef, useEffect } from "react"
-import {
-  SendIcon,
-  PaperclipIcon,
-  MicIcon,
-  ZapIcon,
-  AppWindowIcon as AppsIcon,
-  XIcon,
-  ImageIcon,
-  FileTextIcon,
-  CheckIcon,
-  PlusIcon,
-  MinusIcon,
-  MoreHorizontalIcon,
-  InfoIcon,
-  AudioWaveformIcon as Waveform,
-} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Send } from "lucide-react"
+import type React from "react"
 import type { FormEvent } from "react"
 
 interface ChatInputProps {
-  input: string
-  handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
-  handleSubmit: (e: FormEvent<HTMLFormElement>) => void
+  onSubmit: (e: React.FormEvent<HTMLFormElement>, input: string) => void
   isLoading: boolean
-  selectedAgent?: string | null
+  selectedAgent: string | null
 }
 
 interface Ability {
@@ -46,7 +30,8 @@ interface App {
   isConnected: boolean
 }
 
-export function ChatInput({ input, handleInputChange, handleSubmit, isLoading, selectedAgent }: ChatInputProps) {
+export function ChatInput({ onSubmit, isLoading, selectedAgent }: ChatInputProps) {
+  const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -107,12 +92,9 @@ export function ChatInput({ input, handleInputChange, handleSubmit, isLoading, s
 
   // Auto-resize textarea
   useEffect(() => {
-    const textarea = textareaRef.current
-    if (textarea) {
-      // Reset height to auto to get the correct scrollHeight
-      textarea.style.height = "auto"
-      // Set the height to scrollHeight with a min of 56px and max of 200px
-      textarea.style.height = input ? `${Math.min(textarea.scrollHeight, 200)}px` : "56px"
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto"
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
     }
   }, [input])
 
@@ -192,6 +174,19 @@ export function ChatInput({ input, handleInputChange, handleSubmit, isLoading, s
     setApps(apps.map((app) => (app.id === id ? { ...app, isConnected: true } : app)))
   }
 
+  // Handle form submission
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (input.trim() && !isLoading) {
+      onSubmit(e, input)
+      setInput("")
+      // Reset textarea height
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto"
+      }
+    }
+  }
+
   const handleFormSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
@@ -224,310 +219,32 @@ export function ChatInput({ input, handleInputChange, handleSubmit, isLoading, s
   // Check if any abilities or apps are active
   const hasActiveFeatures = abilities.some((a) => a.active) || apps.some((a) => a.active)
 
+  // Handle keyboard shortcuts
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      const form = e.currentTarget.form
+      if (form) form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }))
+    }
+  }
+
   return (
-    <div className="input-area">
-      {/* Attachments preview */}
-      {attachments.length > 0 && (
-        <div className="attachments-preview">
-          {attachments.map((file, index) => (
-            <div key={index} className="attachment-item">
-              <div className="attachment-icon">
-                {file.type.startsWith("image/") ? <ImageIcon size={16} /> : <FileTextIcon size={16} />}
-              </div>
-              <span className="attachment-name">{file.name}</span>
-              <button
-                type="button"
-                className="attachment-remove"
-                onClick={() => removeAttachment(index)}
-                aria-label="Remove attachment"
-              >
-                <XIcon size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <form onSubmit={handleFormSubmit}>
-        {/* Audio mode interface */}
-        {isAudioMode ? (
-          <div className="audio-mode-container">
-            <div className="audio-visualization">
-              <div className="audio-waveform">
-                <Waveform size={24} className="waveform-icon pulse" />
-              </div>
-              <div className="audio-timer">{formatDuration(audioDuration)}</div>
-            </div>
-            <button
-              type="button"
-              onClick={stopAudioRecording}
-              className="audio-stop-button"
-              aria-label="Stop recording"
-            >
-              <span>Stop recording</span>
-            </button>
-          </div>
-        ) : (
-          /* Regular input container with optimized buttons */
-          <div className="enhanced-input-container">
-            {/* Primary feature button - always visible */}
-            <div className="input-features">
-              {/* Upload button - always visible */}
-              <button
-                type="button"
-                className="feature-button tooltip-container"
-                onClick={() => fileInputRef.current?.click()}
-                aria-label="Attach files"
-              >
-                <PaperclipIcon size={18} />
-                <span className="tooltip">Attach files</span>
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                className="hidden"
-                multiple
-                accept="image/*,application/pdf,text/plain"
-              />
-
-              {/* More options button - reveals secondary features */}
-              <div className="relative">
-                <button
-                  type="button"
-                  className={`feature-button more-options-button tooltip-container ${showMoreOptions ? "active-feature" : ""}`}
-                  onClick={() => {
-                    setShowMoreOptions(!showMoreOptions)
-                    setShowAbilities(false)
-                    setShowApps(false)
-
-                    // Add a small delay to ensure the DOM is updated before checking position
-                    if (!showMoreOptions) {
-                      setTimeout(() => {
-                        // Check if we're on mobile and adjust dropdown position if needed
-                        const isMobile = window.innerWidth <= 640
-                        if (isMobile) {
-                          const dropdown = document.querySelector(".more-options-dropdown")
-                          if (dropdown) {
-                            const rect = dropdown.getBoundingClientRect()
-                            if (rect.right > window.innerWidth) {
-                              ;(dropdown as HTMLElement).style.left = "auto"
-                              ;(dropdown as HTMLElement).style.right = "0"
-                            }
-                          }
-                        }
-                      }, 10)
-                    }
-                  }}
-                  aria-label="More options"
-                  aria-expanded={showMoreOptions}
-                >
-                  <MoreHorizontalIcon size={18} />
-                  <span className="tooltip">More options</span>
-                </button>
-
-                {/* More options dropdown */}
-                {showMoreOptions && (
-                  <div className="feature-dropdown more-options-dropdown">
-                    <div className="more-options-grid">
-                      {/* Audio button */}
-                      <button
-                        type="button"
-                        className="option-button tooltip-container"
-                        onClick={startAudioRecording}
-                        aria-label="Start recording"
-                      >
-                        <MicIcon size={18} />
-                        <span className="option-label">Audio</span>
-                        <span className="tooltip">Record audio message</span>
-                      </button>
-
-                      {/* Abilities button */}
-                      <button
-                        type="button"
-                        className={`option-button tooltip-container ${abilities.some((a) => a.active) ? "active-option" : ""}`}
-                        onClick={() => {
-                          setShowAbilities(true)
-                          setShowApps(false)
-                          setShowMoreOptions(false)
-                        }}
-                        aria-label="Abilities"
-                      >
-                        <ZapIcon size={18} />
-                        <span className="option-label">Abilities</span>
-                        <span className="tooltip">Add special abilities</span>
-                      </button>
-
-                      {/* Apps button */}
-                      <button
-                        type="button"
-                        className={`option-button tooltip-container ${apps.some((a) => a.active) ? "active-option" : ""}`}
-                        onClick={() => {
-                          setShowApps(true)
-                          setShowAbilities(false)
-                          setShowMoreOptions(false)
-                        }}
-                        aria-label="Apps"
-                      >
-                        <AppsIcon size={18} />
-                        <span className="option-label">Apps</span>
-                        <span className="tooltip">Connect apps</span>
-                      </button>
-
-                      {/* Help button */}
-                      <button type="button" className="option-button tooltip-container" aria-label="Help">
-                        <InfoIcon size={18} />
-                        <span className="option-label">Help</span>
-                        <span className="tooltip">Get help</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Abilities dropdown */}
-            {showAbilities && (
-              <div className="feature-dropdown abilities-dropdown">
-                <div className="dropdown-header">
-                  <h3>Abilities</h3>
-                  <p>Enhance your assistant with additional capabilities</p>
-                </div>
-                <div className="dropdown-items">
-                  {abilities.map((ability) => (
-                    <div key={ability.id} className="dropdown-item">
-                      <div className="item-info">
-                        <div className="item-name">{ability.name}</div>
-                        <div className="item-description">{ability.description}</div>
-                      </div>
-                      <button
-                        type="button"
-                        className={`toggle-button ${ability.active ? "active" : ""}`}
-                        onClick={() => toggleAbility(ability.id)}
-                        aria-label={`${ability.active ? "Disable" : "Enable"} ${ability.name}`}
-                      >
-                        {ability.active ? <CheckIcon size={14} /> : <PlusIcon size={14} />}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Apps dropdown */}
-            {showApps && (
-              <div className="feature-dropdown apps-dropdown">
-                <div className="dropdown-header">
-                  <h3>Apps</h3>
-                  <p>Connect and use apps with your assistant</p>
-                </div>
-                <div className="dropdown-items">
-                  {apps.map((app) => (
-                    <div key={app.id} className="dropdown-item">
-                      <div className="app-icon">{app.icon}</div>
-                      <div className="item-info">
-                        <div className="item-name">{app.name}</div>
-                        <div className="item-description">{app.description}</div>
-                      </div>
-                      {app.needsConnection && !app.isConnected ? (
-                        <button
-                          type="button"
-                          className="connect-button"
-                          onClick={() => connectApp(app.id)}
-                          aria-label={`Connect ${app.name}`}
-                        >
-                          Connect
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className={`toggle-button ${app.active ? "active" : ""}`}
-                          onClick={() => toggleApp(app.id)}
-                          aria-label={`${app.active ? "Disable" : "Enable"} ${app.name}`}
-                        >
-                          {app.active ? <MinusIcon size={14} /> : <PlusIcon size={14} />}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Text input */}
-            <textarea
-              ref={textareaRef}
-              className="chat-input"
-              placeholder="Message Beyond-Bot.ai..."
-              value={input}
-              onChange={handleInputChange}
-              rows={1}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  if (input.trim() || attachments.length > 0) {
-                    handleFormSubmit(e as unknown as FormEvent<HTMLFormElement>)
-                  }
-                }
-              }}
-            />
-
-            {/* Send button */}
-            <button
-              type="submit"
-              className="send-button tooltip-container"
-              disabled={isLoading || (!input.trim() && attachments.length === 0)}
-              aria-label="Send message"
-            >
-              <SendIcon size={18} />
-              <span className="tooltip tooltip-left">Send message</span>
-            </button>
-          </div>
-        )}
-
-        {/* Active features indicator */}
-        {hasActiveFeatures && (
-          <div className="active-features">
-            {abilities
-              .filter((a) => a.active)
-              .map((ability) => (
-                <div key={ability.id} className="active-feature-tag">
-                  <ZapIcon size={12} />
-                  <span>{ability.name}</span>
-                  <button
-                    type="button"
-                    className="remove-feature"
-                    onClick={() => toggleAbility(ability.id)}
-                    aria-label={`Remove ${ability.name}`}
-                  >
-                    <XIcon size={10} />
-                  </button>
-                </div>
-              ))}
-
-            {apps
-              .filter((a) => a.active)
-              .map((app) => (
-                <div key={app.id} className="active-feature-tag">
-                  <span className="app-tag-icon">{app.icon}</span>
-                  <span>{app.name}</span>
-                  <button
-                    type="button"
-                    className="remove-feature"
-                    onClick={() => toggleApp(app.id)}
-                    aria-label={`Remove ${app.name}`}
-                  >
-                    <XIcon size={10} />
-                  </button>
-                </div>
-              ))}
-          </div>
-        )}
-
-        <div className="disclaimer">
-          Beyond-Bot.ai may produce inaccurate information about people, places, or facts.
-        </div>
+    <div className="chat-input-container p-4 border-t">
+      <form onSubmit={handleSubmit} className="flex items-end gap-2">
+        <Textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={`Message ${selectedAgent || "B-Bot"}...`}
+          className="min-h-[40px] max-h-[200px] resize-none"
+          disabled={isLoading}
+        />
+        <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
+          <Send className="h-4 w-4" />
+        </Button>
       </form>
+      {isLoading && <div className="text-sm text-gray-500 mt-2">Generating response...</div>}
     </div>
   )
 }

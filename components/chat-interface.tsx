@@ -2,13 +2,12 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect } from "react"
 import { ChatHeader } from "./chat-header"
 import { ChatInput } from "./chat-input"
 import { ChatMessages } from "./chat-messages"
 import { AgentSelector } from "./agent-selector"
 import { DiscoverPage } from "./discover-page"
-import { useChat } from "@ai-sdk/react"
 import { calculateTokenCost } from "@/lib/stripe"
 import { PaymentRequiredModal } from "./payment-required-modal"
 import { AutoRechargeNotification } from "./auto-recharge-notification"
@@ -18,8 +17,9 @@ import { useAuthenticatedFetch, getAuthToken, isLocallyAuthenticated } from "@/l
 
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
-// Add this import at the top of the file
+// Add these imports at the top of the file
 import { LangGraphService } from "@/lib/langgraph-service-sdk"
+import { StreamingHandlerService } from "@/lib/streaming-handler-service"
 
 interface ChatInterfaceProps {
   initialAgent?: string | null
@@ -48,9 +48,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Add this to the ChatInterface component, after the existing state declarations
   const [threadId, setThreadId] = useState<string | null>(null)
+  const [incomingMessage, setIncomingMessage] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [chatMessages, setChatMessages] = useState<any[]>([])
 
   // Create a new instance of LangGraphService
   const langGraphService = new LangGraphService()
+  const streamingHandler = new StreamingHandlerService()
 
   // Add this effect to create a thread when the component mounts
   useEffect(() => {
@@ -134,46 +138,6 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     fetchToken()
   }, [isAuthenticated, getAccessTokenSilently])
 
-  // Add this function to get the current authentication token
-  const getAuthTokenForRequest = useCallback(async () => {
-    try {
-      // If we have a cached token, use it
-      if (cachedAuthToken) {
-        console.log("Using cached auth token:", cachedAuthToken.substring(0, 15) + "...")
-        return cachedAuthToken
-      }
-
-      // Try to get token from localStorage
-      const storedToken = getAuthToken()
-      if (storedToken) {
-        console.log("Using token from localStorage:", storedToken.substring(0, 15) + "...")
-        setCachedAuthToken(storedToken)
-        return storedToken
-      }
-
-      // If not found in localStorage and authenticated, get it from Auth0
-      if (isAuthenticated) {
-        console.log("Getting fresh token with audience:", LANGGRAPH_AUDIENCE)
-        const token = await getAccessTokenSilently({
-          authorizationParams: {
-            audience: LANGGRAPH_AUDIENCE,
-          },
-        })
-
-        console.log("Got fresh token:", token.substring(0, 15) + "...")
-        setCachedAuthToken(token)
-        localStorage.setItem("auth_token", token)
-        return token
-      }
-
-      console.log("No authentication method available")
-      return null
-    } catch (error) {
-      console.error("Error getting auth token:", error)
-      return null
-    }
-  }, [getAccessTokenSilently, cachedAuthToken, isAuthenticated])
-
   // Update the handleSelectAgent function to create a new thread when switching agents
   const handleSelectAgent = (agentId: string | null) => {
     // Only allow selecting non-B-Bot agents if authenticated
@@ -205,7 +169,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             console.log("New thread initialized for agent:", agentId, "Thread ID:", thread.thread_id)
 
             // Clear messages when switching agents
-            setMessages([])
+            setChatMessages([])
           } catch (error) {
             console.error("Failed to initialize thread for new agent:", error)
 
@@ -216,7 +180,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               setThreadId(fallbackThreadId)
 
               // Clear messages when switching agents
-              setMessages([])
+              setChatMessages([])
             } else {
               // For other agents, show an error message
               alert("Failed to initialize chat with this agent. Please try again later.")
@@ -237,145 +201,117 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     setShowDiscover(false)
   }
 
-  // Update the customFetch function to use the new payload structure
-  const customFetch = useCallback(
-    async (url: string, options: RequestInit) => {
-      try {
-        // Parse the request body to get the messages
-        let bodyObj: any = {}
-        if (options.body && typeof options.body === "string") {
-          try {
-            bodyObj = JSON.parse(options.body)
-          } catch (e) {
-            console.error("Error parsing request body:", e)
-            bodyObj = { messages: [] }
-          }
-        }
+  // Function to handle sending a message with streaming
+  const handleSendMessage = async (messageContent: string) => {
+    if (!messageContent.trim()) return
+    setIsLoading(true)
 
-        // Get the latest user message from the messages array
-        let userInput = ""
-        if (bodyObj.messages && Array.isArray(bodyObj.messages) && bodyObj.messages.length > 0) {
-          const latestMessage = bodyObj.messages[bodyObj.messages.length - 1]
-          userInput = latestMessage.content || ""
-        }
+    // Create a temporary user message to show immediately
+    const tempUserMessage = {
+      id: `user-temp-${Date.now()}`,
+      role: "user",
+      content: messageContent,
+      timestamp: new Date().toISOString(),
+    }
 
-        // Create the new payload structure
-        const newPayload = {
-          input: userInput,
-          config: {
-            thread_id: threadId,
-            agent_id: selectedAgent || "b-bot",
-            user_id: user?.sub || "anonymous-user",
-            token: cachedAuthToken,
-            synapseToken: cachedAuthToken,
-            // Include conversation history
-            conversation_history: bodyObj.messages || [],
-          },
-        }
+    // Add the user message to the chat
+    setChatMessages((prev) => [...prev, tempUserMessage])
 
-        console.log("Sending request with new payload structure:", {
-          input: userInput.substring(0, 50) + (userInput.length > 50 ? "..." : ""),
-          threadId,
-          agent: selectedAgent || "b-bot",
+    try {
+      // Get the current thread ID or create a new one
+      let currentThreadId = threadId
+      if (!currentThreadId) {
+        console.log("No existing thread, creating a new one")
+        const thread = await langGraphService.createThread({
+          user_id: user?.sub || "anonymous-user",
+          agent_id: selectedAgent || "b-bot",
         })
-
-        // Make the request with the new payload
-        const response = await fetch(url, {
-          method: options.method,
-          headers: options.headers,
-          body: JSON.stringify(newPayload),
-        })
-
-        // Parse the response
-        const responseText = await response.text()
-        let responseData
-        try {
-          responseData = JSON.parse(responseText)
-        } catch (e) {
-          console.error("Error parsing response:", e, "Response text:", responseText)
-          throw new Error("Invalid response from server")
-        }
-
-        // Check if we got a thread_id in the response and update our state
-        if (responseData.thread_id && responseData.thread_id !== threadId) {
-          console.log("Updating thread ID from response:", responseData.thread_id)
-          setThreadId(responseData.thread_id)
-        }
-
-        // Create a stream from the response
-        const stream = new ReadableStream({
-          start(controller) {
-            // Add the response to the stream
-            controller.enqueue(JSON.stringify(responseData))
-            controller.close()
-          },
-        })
-
-        // Return the stream as a Response
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          },
-        })
-      } catch (error) {
-        console.error("Error in customFetch:", error)
-
-        // Create a fallback response
-        const fallbackResponse = {
-          role: "assistant",
-          content: "I'm sorry, I encountered an error processing your request. Please try again.",
-          id: `msg-${Date.now()}`,
-          created_at: new Date().toISOString(),
-        }
-
-        // Create a stream from the fallback response
-        const stream = new ReadableStream({
-          start(controller) {
-            controller.enqueue(JSON.stringify(fallbackResponse))
-            controller.close()
-          },
-        })
-
-        // Return the stream as a Response
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          },
-        })
+        currentThreadId = thread.thread_id
+        setThreadId(currentThreadId)
       }
-    },
-    [threadId, selectedAgent, user?.sub, cachedAuthToken],
-  )
 
-  // Update the useChat hook to use our custom fetch function
-  const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages } = useChat({
-    api: "/api/chat",
-    body: {
-      agent: selectedAgent || "b-bot",
-      threadId: threadId,
-      token: cachedAuthToken, // Include the token in the request body
-      synapseToken: cachedAuthToken, // Include as synapseToken to match Vue implementation
-      isAnonymous: !isAuthenticated && selectedAgent === "b-bot", // Flag for anonymous B-Bot usage
-      messages: [], // Ensure messages array exists initially
-    },
-    id: selectedAgent || "b-bot", // Default to b-bot
-    onFinish: (message) => {
-      scrollToBottom()
+      // Prepare the configuration for the stream
+      const streamConfig = {
+        messages: [messageContent],
+        input: {
+          messages: [messageContent],
+          entity_id: user?.sub
+            ? `${user.sub.replace(/[|-]/g, "")}_${selectedAgent || "b-bot"}`
+            : `anonymous_${selectedAgent || "b-bot"}`,
+        },
+        config: {
+          configurable: {
+            thread_id: currentThreadId,
+          },
+          entity_id: user?.sub
+            ? `${user.sub.replace(/[|-]/g, "")}_${selectedAgent || "b-bot"}`
+            : `anonymous_${selectedAgent || "b-bot"}`,
+        },
+      }
 
-      // Estimate token usage (in a real app, this would come from the API)
-      const newTokens = estimateTokenUsage(message.content)
-      setTokensUsed((prev) => prev + newTokens)
+      // Invoke the streaming graph
+      console.log("Invoking graph stream with thread ID:", currentThreadId)
+      const response = await langGraphService.invokeGraphStream(selectedAgent || "b-bot", currentThreadId, streamConfig)
 
-      // Deduct from balance
-      const cost = calculateTokenCost(newTokens)
-      setBalance((prev) => prev - cost)
-    },
-    fetcher: customFetch, // Use our custom fetch function
-  })
+      // Process the streaming response
+      await streamingHandler.processStream(response, {
+        onMessage: (msg) => {
+          setIncomingMessage(msg)
+          scrollToBottom()
+        },
+        onToolEvent: (event) => {
+          console.log("Tool event:", event)
+        },
+        onUpdate: (messages) => {
+          // Update the messages with the final response
+          if (messages && messages.length > 0) {
+            const assistantMessage = {
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              content: messages[messages.length - 1].content || "",
+              timestamp: new Date().toISOString(),
+            }
+
+            setChatMessages((prev) => {
+              // Filter out any temporary messages
+              const filtered = prev.filter((msg) => !msg.id.includes("temp"))
+              return [...filtered, assistantMessage]
+            })
+          }
+
+          setIsLoading(false)
+          setIncomingMessage("")
+          scrollToBottom()
+
+          // Estimate token usage
+          if (messages && messages.length > 0) {
+            const lastMessage = messages[messages.length - 1]
+            const newTokens = estimateTokenUsage(lastMessage.content || "")
+            setTokensUsed((prev) => prev + newTokens)
+
+            // Deduct from balance
+            const cost = calculateTokenCost(newTokens)
+            setBalance((prev) => prev - cost)
+          }
+        },
+        onError: (err) => {
+          console.error("Error in streaming:", err)
+          setIsLoading(false)
+          alert(`Error: ${err}`)
+        },
+        onScrollDown: scrollToBottom,
+        onSetLoading: setIsLoading,
+        onInterrupt: (interruptMessage) => {
+          console.log("Interrupt message:", interruptMessage)
+          // Handle interrupts if needed
+        },
+      })
+    } catch (error) {
+      console.error("Error sending message:", error)
+      setIsLoading(false)
+      alert(`Failed to send message: ${error}`)
+    }
+  }
 
   // Function to estimate token usage (simplified)
   const estimateTokenUsage = (text: string): number => {
@@ -389,7 +325,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [chatMessages, incomingMessage])
 
   // Check if auto recharge should be triggered
   const checkAutoRecharge = () => {
@@ -404,7 +340,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   }
 
   // Check if user has sufficient balance before sending message
-  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>, input: string) => {
+    e.preventDefault()
+
     // Estimate tokens for the input (simplified)
     const estimatedTokens = estimateTokenUsage(input)
     const estimatedCost = calculateTokenCost(estimatedTokens)
@@ -412,23 +350,21 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     if (balance < estimatedCost) {
       // Check if auto recharge can cover this
       if (autoRechargeEnabled && balance + rechargeAmount >= estimatedCost) {
-        e.preventDefault()
         // Trigger auto recharge
         setBalance((prev) => prev + rechargeAmount)
         setShowAutoRechargeNotification(true)
         // Submit after a short delay to allow state update
         setTimeout(() => {
-          handleSubmit(e)
+          handleSendMessage(input)
         }, 100)
         return
       }
 
-      e.preventDefault()
       setShowPaymentRequired(true)
       return
     }
 
-    handleSubmit(e)
+    handleSendMessage(input)
   }
 
   // Close sidebar on mobile when clicking outside
@@ -489,27 +425,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           <div className="flex-1 overflow-auto">
             <div className="chat-container">
               <ChatMessages
-                messages={messages}
+                messages={chatMessages}
                 messagesEndRef={messagesEndRef}
                 selectedAgent={selectedAgent}
+                incomingMessage={incomingMessage}
                 onSuggestionClick={(suggestion) => {
-                  const fakeEvent = {
-                    preventDefault: () => {},
-                  } as unknown as React.FormEvent<HTMLFormElement>
-
-                  handleInputChange({
-                    target: { value: suggestion },
-                  } as React.ChangeEvent<HTMLTextAreaElement>)
-
-                  setTimeout(() => {
-                    handleSubmit(fakeEvent)
-                  }, 100)
+                  handleSendMessage(suggestion)
                 }}
               />
               <ChatInput
-                input={input}
-                handleInputChange={handleInputChange}
-                handleSubmit={handleMessageSubmit}
+                onSubmit={(e, input) => handleMessageSubmit(e, input)}
                 isLoading={isLoading}
                 selectedAgent={selectedAgent}
               />
