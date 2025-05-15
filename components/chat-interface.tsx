@@ -237,7 +237,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     setShowDiscover(false)
   }
 
-  // Update the customFetch function to use our LangGraphService for sending messages
+  // Update the customFetch function to use the new payload structure
   const customFetch = useCallback(
     async (url: string, options: RequestInit) => {
       try {
@@ -252,121 +252,71 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           }
         }
 
-        // Ensure we have a valid messages array
-        if (!bodyObj.messages) {
-          bodyObj.messages = []
-        } else if (!Array.isArray(bodyObj.messages)) {
-          bodyObj.messages = []
+        // Get the latest user message from the messages array
+        let input = ""
+        if (bodyObj.messages && Array.isArray(bodyObj.messages) && bodyObj.messages.length > 0) {
+          const latestMessage = bodyObj.messages[bodyObj.messages.length - 1]
+          input = latestMessage.content || ""
         }
 
-        // Get the latest user message
-        const latestMessage = bodyObj.messages.length > 0 ? bodyObj.messages[bodyObj.messages.length - 1] : null
-
-        if (!latestMessage) {
-          throw new Error("No message to send")
-        }
-
-        // If we have a threadId, use the LangGraphService to handle the chat
-        if (threadId) {
-          console.log(`Using LangGraphService to handle chat for thread ${threadId}`)
-
-          // Add the message to the thread
-          await langGraphService.addThreadMessage(threadId, {
-            role: "user",
-            content: latestMessage.content || "",
-            isBBotThread: selectedAgent === "b-bot",
-          })
-
-          // Run the thread with the selected agent
-          const response = await langGraphService.runThread(threadId, selectedAgent || "b-bot", {
-            messages: [latestMessage.content || ""],
-          })
-
-          // Create a Response object to return
-          const responseData = response.response || {
-            role: "assistant",
-            content: "I'm sorry, I couldn't process your request.",
-            id: `msg-${Date.now()}`,
-            created_at: new Date().toISOString(),
-          }
-
-          // Create a stream from the response
-          const stream = new ReadableStream({
-            start(controller) {
-              // Add the response to the stream
-              controller.enqueue(JSON.stringify(responseData))
-              controller.close()
-            },
-          })
-
-          // Return the stream as a Response
-          return new Response(stream, {
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              Connection: "keep-alive",
-            },
-          })
-        }
-
-        // If no threadId, use the LangGraphService to create a thread and handle the chat
-        console.log("No threadId, creating a new thread and handling chat")
-
-        try {
-          // Create a new thread
-          const thread = await langGraphService.createThread({
-            user_id: user?.sub || "anonymous-user",
+        // Create the new payload structure
+        const newPayload = {
+          input,
+          config: {
+            thread_id: threadId,
             agent_id: selectedAgent || "b-bot",
-          })
-
-          // Set the threadId for future use
-          setThreadId(thread.thread_id)
-          console.log("Created new thread with ID:", thread.thread_id)
-
-          // Add the message to the thread
-          await langGraphService.addThreadMessage(thread.thread_id, {
-            role: "user",
-            content: latestMessage.content || "",
-            isBBotThread: selectedAgent === "b-bot",
-          })
-
-          // Run the thread with the selected agent
-          const response = await langGraphService.runThread(thread.thread_id, selectedAgent || "b-bot", {
-            messages: [latestMessage.content || ""],
-          })
-
-          // Create a Response object to return
-          const responseData = response.response || {
-            role: "assistant",
-            content: "I'm sorry, I couldn't process your request.",
-            id: `msg-${Date.now()}`,
-            created_at: new Date().toISOString(),
-          }
-
-          // Create a stream from the response
-          const stream = new ReadableStream({
-            start(controller) {
-              // Add the response to the stream
-              controller.enqueue(JSON.stringify(responseData))
-              controller.close()
-            },
-          })
-
-          // Return the stream as a Response
-          return new Response(stream, {
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              Connection: "keep-alive",
-            },
-          })
-        } catch (error) {
-          console.error("Error creating thread and handling chat:", error)
-
-          // Fall back to the original fetch if we can't create a thread
-          console.log("Falling back to original fetch")
-          return fetch(url, options)
+            user_id: user?.sub || null,
+            token: cachedAuthToken,
+            synapseToken: cachedAuthToken,
+            // Add any other config options here
+          },
         }
+
+        console.log("Sending request with new payload structure:", {
+          input: input.substring(0, 50) + (input.length > 50 ? "..." : ""),
+          threadId,
+          agent: selectedAgent || "b-bot",
+        })
+
+        // Make the request with the new payload
+        const response = await fetch(url, {
+          ...options,
+          body: JSON.stringify(newPayload),
+        })
+
+        // Parse the response
+        const responseText = await response.text()
+        let responseData
+        try {
+          responseData = JSON.parse(responseText)
+        } catch (e) {
+          console.error("Error parsing response:", e)
+          throw new Error("Invalid response from server")
+        }
+
+        // Check if we got a thread_id in the response and update our state
+        if (responseData.thread_id && responseData.thread_id !== threadId) {
+          console.log("Updating thread ID from response:", responseData.thread_id)
+          setThreadId(responseData.thread_id)
+        }
+
+        // Create a stream from the response
+        const stream = new ReadableStream({
+          start(controller) {
+            // Add the response to the stream
+            controller.enqueue(JSON.stringify(responseData))
+            controller.close()
+          },
+        })
+
+        // Return the stream as a Response
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+          },
+        })
       } catch (error) {
         console.error("Error in customFetch:", error)
 
@@ -396,7 +346,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         })
       }
     },
-    [threadId, selectedAgent, user?.sub],
+    [threadId, selectedAgent, user?.sub, cachedAuthToken],
   )
 
   // Update the useChat hook to use our custom fetch function

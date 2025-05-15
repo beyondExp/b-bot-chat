@@ -35,7 +35,7 @@ async function safelyReadBody(req: NextRequest): Promise<any> {
   }
 }
 
-// Update the handleThreadBasedChat function to better handle thread-based chat
+// Update the handleThreadBasedChat function to handle the new payload structure
 async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
   try {
     // Get the authorization header from the incoming request
@@ -56,37 +56,90 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
     if (!requestData) {
       console.log("Unable to parse request body, using default values")
       requestData = {
-        messages: [],
-        agent: "b-bot",
-        threadId: null,
+        input: "",
+        config: {
+          thread_id: null,
+          agent_id: "b-bot",
+        },
       }
     }
 
-    // Extract data from the request
-    const { messages = [], agent = "b-bot", threadId = null, token, synapseToken } = requestData
+    // Extract data from the request using the new structure
+    // Handle both the new structure and the old structure for backward compatibility
+    let input = ""
+    let threadId = null
+    let agent = "b-bot"
+    let userId = null
+    let abilityId = null
+    let modelId = null
+    let apps = {}
+    let toolActivation = {}
+    let documentUrls = []
+    let conversationHistory = []
+    let temperature = undefined
+    let maxTokens = undefined
+    let topP = undefined
+    let instructions = undefined
+    let token = null
+    let synapseToken = null
 
-    // Validate messages
-    if (!Array.isArray(messages)) {
-      console.error("Messages is not an array:", messages)
-      return new Response(
-        JSON.stringify({
-          error: "Invalid request",
-          details: "The 'messages' field must be an array",
-          message: "I'm sorry, there was an error processing your request. Please try again.",
-        }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        },
-      )
+    // Check if we have the new structure
+    if (requestData.input !== undefined && requestData.config !== undefined) {
+      console.log("Using new payload structure")
+      input = requestData.input || ""
+
+      // Extract config values
+      const config = requestData.config || {}
+      threadId = config.thread_id || null
+      agent = config.agent_id || "b-bot"
+      userId = config.user_id || null
+      abilityId = config.ability_id || null
+      modelId = config.model_id || null
+      apps = config.apps || {}
+      toolActivation = config.tool_activation || {}
+      documentUrls = config.document_urls || []
+      conversationHistory = config.conversation_history || []
+      temperature = config.temperature
+      maxTokens = config.max_tokens
+      topP = config.top_p
+      instructions = config.instructions
+      token = config.token || null
+      synapseToken = config.synapseToken || null
+    } else {
+      // Handle the old structure for backward compatibility
+      console.log("Using old payload structure")
+      const {
+        messages = [],
+        agent: oldAgent = "b-bot",
+        threadId: oldThreadId = null,
+        token: oldToken,
+        synapseToken: oldSynapseToken,
+      } = requestData
+
+      // Extract the latest message content as input
+      if (Array.isArray(messages) && messages.length > 0) {
+        const latestMessage = messages[messages.length - 1]
+        input = latestMessage.content || ""
+      }
+
+      threadId = oldThreadId
+      agent = oldAgent
+      token = oldToken
+      synapseToken = oldSynapseToken
+      conversationHistory = messages
     }
 
-    console.log("Request data received:", {
-      agent,
+    console.log("Request data processed:", {
+      input: input.substring(0, 50) + (input.length > 50 ? "..." : ""),
       threadId,
-      messageCount: messages.length,
+      agent,
+      userId: userId ? "present" : "missing",
+      abilityId: abilityId ? "present" : "missing",
+      modelId: modelId ? "present" : "missing",
+      hasApps: Object.keys(apps).length > 0,
+      hasToolActivation: Object.keys(toolActivation).length > 0,
+      documentUrlsCount: documentUrls.length,
+      conversationHistoryCount: conversationHistory.length,
       hasToken: !!token,
       hasSynapseToken: !!synapseToken,
     })
@@ -134,24 +187,6 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
 
     // If we have a threadId, use it to add a message and run the thread
     if (threadId) {
-      // Get the latest user message
-      const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null
-
-      if (!latestMessage) {
-        return new Response(
-          JSON.stringify({
-            error: "No message provided",
-            message: "I'm sorry, I didn't receive any message to respond to.",
-          }),
-          {
-            status: 400,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          },
-        )
-      }
-
       // Check if this is an anonymous B-Bot thread
       if (threadId.startsWith("bbot-anonymous-")) {
         console.log("Handling anonymous B-Bot thread")
@@ -161,8 +196,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
           id: `msg-${Date.now()}`,
           role: "assistant",
           content: `I'm B-Bot, your AI assistant. I'm currently in anonymous mode with limited capabilities. ${
-            latestMessage.content?.toLowerCase().includes("hello") ||
-            latestMessage.content?.toLowerCase().includes("hi")
+            input.toLowerCase().includes("hello") || input.toLowerCase().includes("hi")
               ? "Hello! How can I help you today?"
               : "How can I assist you further?"
           }`,
@@ -197,7 +231,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
         headers,
         body: JSON.stringify({
           role: "user",
-          content: latestMessage.content || "",
+          content: input || "",
         }),
       })
 
@@ -209,6 +243,22 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
         throw new Error(`Failed to add message to thread: ${messageResponse.status} - ${errorText}`)
       }
 
+      // Prepare the run request body with all the config options
+      const runRequestBody: any = {
+        messages: [input || ""],
+      }
+
+      // Add optional parameters if they exist
+      if (abilityId) runRequestBody.ability_id = abilityId
+      if (modelId) runRequestBody.model_id = modelId
+      if (Object.keys(apps).length > 0) runRequestBody.apps = apps
+      if (Object.keys(toolActivation).length > 0) runRequestBody.tool_activation = toolActivation
+      if (documentUrls.length > 0) runRequestBody.document_urls = documentUrls
+      if (temperature !== undefined) runRequestBody.temperature = temperature
+      if (maxTokens !== undefined) runRequestBody.max_tokens = maxTokens
+      if (topP !== undefined) runRequestBody.top_p = topP
+      if (instructions) runRequestBody.instructions = instructions
+
       // Run the thread with the selected assistant
       const runUrl = `https://api-staging.b-bot.space/api/v2/threads/${threadId}/graph`
       console.log(`Running thread ${threadId} with assistant ${agent || "default"}`)
@@ -216,9 +266,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       const runResponse = await fetch(`${runUrl}?assistant_id=${agent || "default"}`, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          messages: [latestMessage.content || ""],
-        }),
+        body: JSON.stringify(runRequestBody),
       })
 
       console.log(`Run response status: ${runResponse.status}`)
@@ -260,9 +308,165 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       })
     }
 
+    // If no threadId, create a new thread and then run it
+    console.log("No threadId provided, creating a new thread")
+
+    // Prepare the request body for creating a thread
+    const createThreadBody: any = {
+      assistant_id: agent || "default",
+    }
+
+    if (userId) createThreadBody.user_id = userId
+
+    // Create a new thread
+    const createThreadUrl = `https://api-staging.b-bot.space/api/v2/threads`
+    const createThreadResponse = await fetch(createThreadUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(createThreadBody),
+    })
+
+    console.log(`Create thread response status: ${createThreadResponse.status}`)
+
+    if (!createThreadResponse.ok) {
+      const errorText = await createThreadResponse.text()
+      console.error(`Error creating thread (${createThreadResponse.status}): ${errorText}`)
+
+      // If we can't create a thread, fall back to the direct chat endpoint
+      console.log("Falling back to direct chat endpoint")
+      return handleDirectChat(input, agent, conversationHistory, headers)
+    }
+
+    // Get the thread data
+    const threadData = await createThreadResponse.json()
+    const newThreadId = threadData.thread_id
+
+    console.log(`Created new thread with ID: ${newThreadId}`)
+
+    // Add the message to the new thread
+    const newMessageUrl = `https://api-staging.b-bot.space/api/v2/threads/${newThreadId}/messages`
+    console.log(`Adding message to new thread ${newThreadId}`)
+
+    const newMessageResponse = await fetch(newMessageUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        role: "user",
+        content: input || "",
+      }),
+    })
+
+    console.log(`New message response status: ${newMessageResponse.status}`)
+
+    if (!newMessageResponse.ok) {
+      const errorText = await newMessageResponse.text()
+      console.error(`Error adding message to new thread (${newMessageResponse.status}): ${errorText}`)
+      throw new Error(`Failed to add message to new thread: ${newMessageResponse.status} - ${errorText}`)
+    }
+
+    // Prepare the run request body with all the config options
+    const newRunRequestBody: any = {
+      messages: [input || ""],
+    }
+
+    // Add optional parameters if they exist
+    if (abilityId) newRunRequestBody.ability_id = abilityId
+    if (modelId) newRunRequestBody.model_id = modelId
+    if (Object.keys(apps).length > 0) newRunRequestBody.apps = apps
+    if (Object.keys(toolActivation).length > 0) newRunRequestBody.tool_activation = toolActivation
+    if (documentUrls.length > 0) newRunRequestBody.document_urls = documentUrls
+    if (temperature !== undefined) newRunRequestBody.temperature = temperature
+    if (maxTokens !== undefined) newRunRequestBody.max_tokens = maxTokens
+    if (topP !== undefined) newRunRequestBody.top_p = topP
+    if (instructions) newRunRequestBody.instructions = instructions
+
+    // Run the new thread with the selected assistant
+    const newRunUrl = `https://api-staging.b-bot.space/api/v2/threads/${newThreadId}/graph`
+    console.log(`Running new thread ${newThreadId} with assistant ${agent || "default"}`)
+
+    const newRunResponse = await fetch(`${newRunUrl}?assistant_id=${agent || "default"}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(newRunRequestBody),
+    })
+
+    console.log(`New run response status: ${newRunResponse.status}`)
+
+    if (!newRunResponse.ok) {
+      const errorText = await newRunResponse.text()
+      console.error(`Error running new thread (${newRunResponse.status}): ${errorText}`)
+      throw new Error(`Failed to run new thread: ${newRunResponse.status} - ${errorText}`)
+    }
+
+    // Get the response data
+    const newResponseData = await newRunResponse.json()
+
+    // Add the thread_id to the response
+    const responseWithThreadId = {
+      ...newResponseData.response,
+      thread_id: newThreadId,
+    }
+
+    // Create a stream from the response
+    const stream = new ReadableStream({
+      start(controller) {
+        // Add the response to the stream
+        controller.enqueue(
+          JSON.stringify(
+            responseWithThreadId || {
+              role: "assistant",
+              content: "I'm sorry, I couldn't process your request.",
+              id: `msg-${Date.now()}`,
+              created_at: new Date().toISOString(),
+              thread_id: newThreadId,
+            },
+          ),
+        )
+        controller.close()
+      },
+    })
+
+    // Return the stream
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    })
+  } catch (error) {
+    console.error("Error in thread-based chat:", error)
+    // Return a more detailed error response
+    return new Response(
+      JSON.stringify({
+        error: "Error in thread-based chat",
+        details: error instanceof Error ? error.message : String(error),
+        message: "I'm sorry, something went wrong. Please try again later.",
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )
+  }
+}
+
+// Helper function to handle direct chat when thread creation fails
+async function handleDirectChat(
+  input: string,
+  agent: string,
+  conversationHistory: any[],
+  headers: Record<string, string>,
+) {
+  try {
     // If no threadId, fall back to the direct chat endpoint
     const apiUrl = `https://api-staging.b-bot.space/api/v2/assistants/${agent || "default"}/chat`
     console.log(`Making direct chat request to ${apiUrl}`)
+
+    // Convert conversation history to the expected format if needed
+    const messages = conversationHistory.length > 0 ? conversationHistory : [{ role: "user", content: input }]
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -303,11 +507,10 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       },
     })
   } catch (error) {
-    console.error("Error in thread-based chat:", error)
-    // Return a more detailed error response
+    console.error("Error in direct chat:", error)
     return new Response(
       JSON.stringify({
-        error: "Error in thread-based chat",
+        error: "Error in direct chat",
         details: error instanceof Error ? error.message : String(error),
         message: "I'm sorry, something went wrong. Please try again later.",
       }),
