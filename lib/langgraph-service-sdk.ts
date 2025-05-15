@@ -39,13 +39,11 @@ export class LangGraphService {
       })
 
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to create thread: ${response.status} - ${errorText}`)
+        throw new Error(`Failed to create thread: ${response.status}`)
       }
 
       return await response.json()
     } catch (error) {
-      console.error("Error creating thread:", error)
       throw error
     }
   }
@@ -59,13 +57,11 @@ export class LangGraphService {
       })
 
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to get thread: ${response.status} - ${errorText}`)
+        throw new Error(`Failed to get thread: ${response.status}`)
       }
 
       return await response.json()
     } catch (error) {
-      console.error(`Error getting thread ${threadId}:`, error)
       throw error
     }
   }
@@ -87,13 +83,11 @@ export class LangGraphService {
       })
 
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to get thread history: ${response.status} - ${errorText}`)
+        throw new Error(`Failed to get thread history: ${response.status}`)
       }
 
       return await response.json()
     } catch (error) {
-      console.error(`Error getting history for thread ${threadId}:`, error)
       throw error
     }
   }
@@ -111,13 +105,11 @@ export class LangGraphService {
       })
 
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to add message to thread: ${response.status} - ${errorText}`)
+        throw new Error(`Failed to add message to thread: ${response.status}`)
       }
 
       return await response.json()
     } catch (error) {
-      console.error(`Failed to add message to thread ${threadId}:`, error)
       throw error
     }
   }
@@ -139,6 +131,8 @@ export class LangGraphService {
         options.input.messages.length > 0
       ) {
         userMessage = options.input.messages[0]
+      } else if (typeof options.input === "string") {
+        userMessage = options.input
       }
 
       // Format the request body according to the example payload structure
@@ -166,12 +160,6 @@ export class LangGraphService {
         subgraphs: true,
       }
 
-      console.log("Sending request with payload:", {
-        input: userMessage.substring(0, 50) + (userMessage.length > 50 ? "..." : ""),
-        threadId,
-        agentId,
-      })
-
       const response = await fetch(url, {
         method: "POST",
         headers: this.getHeaders(),
@@ -179,13 +167,11 @@ export class LangGraphService {
       })
 
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to invoke streaming graph: ${response.status} - ${errorText}`)
+        throw new Error(`Failed to invoke streaming graph: ${response.status}`)
       }
 
       return response
     } catch (error) {
-      console.error(`Failed to invoke streaming graph ${agentId}:`, error)
       throw error
     }
   }
@@ -233,8 +219,7 @@ export class LangGraphService {
 
       return messages
     } catch (error) {
-      console.error(`Failed to get messages for thread ${threadId}:`, error)
-      throw error
+      return []
     }
   }
 }

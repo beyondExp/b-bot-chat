@@ -71,9 +71,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             agent_id: selectedAgent || "b-bot",
           })
           setThreadId(thread.thread_id)
-          console.log("Thread initialized with ID:", thread.thread_id)
         } catch (error) {
-          console.error("Failed to initialize thread:", error)
+          // Silent error handling
         }
       }
 
@@ -89,7 +88,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         try {
           setRecentAgents(JSON.parse(savedRecentAgents))
         } catch (e) {
-          console.error("Error parsing recent agents from localStorage:", e)
+          // Silent error handling
         }
       }
     }
@@ -108,7 +107,6 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       try {
         // First check if we're authenticated through Auth0
         if (isAuthenticated) {
-          console.log("Fetching token with audience:", LANGGRAPH_AUDIENCE)
           const token = await getAccessTokenSilently({
             authorizationParams: {
               audience: LANGGRAPH_AUDIENCE,
@@ -116,7 +114,6 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           })
           setCachedAuthToken(token)
           localStorage.setItem("auth_token", token)
-          console.log("Cached auth token on mount:", token.substring(0, 15) + "...")
           return
         }
 
@@ -124,15 +121,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         if (isLocallyAuthenticated()) {
           const token = getAuthToken()
           if (token) {
-            console.log("Using locally stored token:", token.substring(0, 15) + "...")
             setCachedAuthToken(token)
             return
           }
         }
-
-        console.log("No authentication source available")
       } catch (error) {
-        console.error("Error fetching auth token on mount:", error)
+        // Silent error handling
       }
     }
 
@@ -161,23 +155,18 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       if ((isAuthenticated || isLocallyAuthenticated() || agentId === "b-bot") && agentId) {
         const initializeNewThread = async () => {
           try {
-            console.log(`Initializing new thread for agent: ${agentId}`)
             const thread = await langGraphService.createThread({
               user_id: user?.sub || "anonymous-user",
               agent_id: agentId,
             })
             setThreadId(thread.thread_id)
-            console.log("New thread initialized for agent:", agentId, "Thread ID:", thread.thread_id)
 
             // Clear messages when switching agents
             setChatMessages([])
             setConversationHistory([])
           } catch (error) {
-            console.error("Failed to initialize thread for new agent:", error)
-
             // If this is B-Bot, create a fallback thread
             if (agentId === "b-bot") {
-              console.log("Creating fallback thread for B-Bot")
               const fallbackThreadId = `bbot-anonymous-${Date.now()}`
               setThreadId(fallbackThreadId)
 
@@ -234,7 +223,6 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       // Get the current thread ID or create a new one
       let currentThreadId = threadId
       if (!currentThreadId) {
-        console.log("No existing thread, creating a new one")
         const thread = await langGraphService.createThread({
           user_id: user?.sub || "anonymous-user",
           agent_id: selectedAgent || "b-bot",
@@ -268,7 +256,6 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       }
 
       // Invoke the streaming graph
-      console.log("Invoking graph stream with thread ID:", currentThreadId)
       const response = await langGraphService.invokeGraphStream(selectedAgent || "b-bot", currentThreadId, streamConfig)
 
       // Process the streaming response
@@ -278,7 +265,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           scrollToBottom()
         },
         onToolEvent: (event) => {
-          console.log("Tool event:", event)
+          // Handle tool events if needed
         },
         onUpdate: (messages) => {
           // Update the messages with the final response
@@ -322,21 +309,18 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           }
         },
         onError: (err) => {
-          console.error("Error in streaming:", err)
           setIsLoading(false)
           alert(`Error: ${err}`)
         },
         onScrollDown: scrollToBottom,
         onSetLoading: setIsLoading,
         onInterrupt: (interruptMessage) => {
-          console.log("Interrupt message:", interruptMessage)
           // Handle interrupts if needed
         },
       })
     } catch (error) {
-      console.error("Error sending message:", error)
       setIsLoading(false)
-      alert(`Failed to send message: ${error}`)
+      alert(`Failed to send message. Please try again.`)
     }
   }
 

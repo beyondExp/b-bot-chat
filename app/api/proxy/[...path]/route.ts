@@ -31,7 +31,6 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     const apiKey = process.env.ADMIN_API_KEY
 
     if (!apiKey) {
-      console.error("API key not found in environment variables")
       return NextResponse.json({ error: "API key not configured" }, { status: 500 })
     }
 
@@ -67,8 +66,6 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
         // If this is a streaming request to /threads/{threadId}/runs/stream
         // Format the payload according to the expected structure
         if (targetPath.includes("/threads/") && targetPath.includes("/runs/stream")) {
-          console.log("Formatting streaming request payload")
-
           // Extract the input and config from the request body
           const { input, config } = body
 
@@ -85,7 +82,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
           body = formattedBody
         }
       } catch (error) {
-        console.error("Error parsing request body:", error)
+        // Silent error handling for body parsing
       }
     }
 
@@ -120,7 +117,6 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     const data = await response.json()
     return NextResponse.json(data, { status: response.status })
   } catch (error) {
-    console.error("Proxy error:", error)
-    return NextResponse.json({ error: "Proxy error", details: error.message }, { status: 500 })
+    return NextResponse.json({ error: "Proxy error" }, { status: 500 })
   }
 }
