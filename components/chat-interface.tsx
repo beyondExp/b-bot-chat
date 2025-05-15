@@ -253,34 +253,36 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         }
 
         // Get the latest user message from the messages array
-        let input = ""
+        let userInput = ""
         if (bodyObj.messages && Array.isArray(bodyObj.messages) && bodyObj.messages.length > 0) {
           const latestMessage = bodyObj.messages[bodyObj.messages.length - 1]
-          input = latestMessage.content || ""
+          userInput = latestMessage.content || ""
         }
 
         // Create the new payload structure
         const newPayload = {
-          input,
+          input: userInput,
           config: {
             thread_id: threadId,
             agent_id: selectedAgent || "b-bot",
-            user_id: user?.sub || null,
+            user_id: user?.sub || "anonymous-user",
             token: cachedAuthToken,
             synapseToken: cachedAuthToken,
-            // Add any other config options here
+            // Include conversation history
+            conversation_history: bodyObj.messages || [],
           },
         }
 
         console.log("Sending request with new payload structure:", {
-          input: input.substring(0, 50) + (input.length > 50 ? "..." : ""),
+          input: userInput.substring(0, 50) + (userInput.length > 50 ? "..." : ""),
           threadId,
           agent: selectedAgent || "b-bot",
         })
 
         // Make the request with the new payload
         const response = await fetch(url, {
-          ...options,
+          method: options.method,
+          headers: options.headers,
           body: JSON.stringify(newPayload),
         })
 
@@ -290,7 +292,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         try {
           responseData = JSON.parse(responseText)
         } catch (e) {
-          console.error("Error parsing response:", e)
+          console.error("Error parsing response:", e, "Response text:", responseText)
           throw new Error("Invalid response from server")
         }
 

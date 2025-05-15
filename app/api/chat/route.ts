@@ -64,6 +64,9 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       }
     }
 
+    // Log the raw request data for debugging
+    console.log("Raw request data:", JSON.stringify(requestData, null, 2))
+
     // Extract data from the request using the new structure
     // Handle both the new structure and the old structure for backward compatibility
     let input = ""
@@ -201,6 +204,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
               : "How can I assist you further?"
           }`,
           createdAt: new Date().toISOString(),
+          thread_id: threadId, // Include the thread_id in the response
         }
 
         // Create a stream from the response
@@ -280,17 +284,24 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       // Get the response data
       const responseData = await runResponse.json()
 
+      // Add the thread_id to the response
+      const responseWithThreadId = {
+        ...responseData.response,
+        thread_id: threadId,
+      }
+
       // Create a stream from the response
       const stream = new ReadableStream({
         start(controller) {
           // Add the response to the stream
           controller.enqueue(
             JSON.stringify(
-              responseData.response || {
+              responseWithThreadId || {
                 role: "assistant",
                 content: "I'm sorry, I couldn't process your request.",
                 id: `msg-${Date.now()}`,
                 created_at: new Date().toISOString(),
+                thread_id: threadId,
               },
             ),
           )
