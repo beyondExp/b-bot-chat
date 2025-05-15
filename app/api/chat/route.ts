@@ -40,7 +40,9 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
   try {
     // Get the authorization header from the incoming request
     const authHeader = req.headers.get("Authorization")
-    const bbotApiKey = req.headers.get("bbot-api-key") || "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid"
+
+    // Use a valid API key for B-Bot
+    const bbotApiKey = "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid"
 
     // Log all incoming headers for debugging
     console.log("Incoming request headers:", Object.fromEntries([...req.headers.entries()]))
@@ -150,42 +152,35 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
     // Check if this is a B-Bot request
     const isBBotRequest = agent === "b-bot"
 
-    // Try to get auth token from various sources
-    let authToken = null
-
-    // 1. Try from synapseToken in request body (matching the Vue implementation)
-    if (synapseToken) {
-      authToken = synapseToken
-      console.log("Using synapseToken from request body")
-    }
-    // 2. Try from Authorization header
-    else if (authHeader) {
-      authToken = authHeader.replace("Bearer ", "")
-      console.log("Using token from Authorization header")
-    }
-    // 3. Try from token in request body
-    else if (token) {
-      authToken = token
-      console.log("Using token from request body")
-    }
-
     // Set up headers with the auth token if available
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     }
 
-    if (authToken) {
-      headers["Authorization"] = `Bearer ${authToken}`
-    }
+    // IMPORTANT: Set the bbot-api-key header for authentication
+    // This is the key that the proxy endpoint will use to get a token
+    headers["bbot-api-key"] = bbotApiKey
 
-    if (bbotApiKey) {
-      headers["bbot-api-key"] = bbotApiKey
+    // If we have an auth token, also set the Authorization header as a backup
+    if (synapseToken) {
+      // Make sure the token has the Bearer prefix
+      const formattedToken = synapseToken.startsWith("Bearer ") ? synapseToken : `Bearer ${synapseToken}`
+      headers["Authorization"] = formattedToken
+      console.log("Using synapseToken from request body")
+    } else if (authHeader) {
+      headers["Authorization"] = authHeader
+      console.log("Using token from Authorization header")
+    } else if (token) {
+      // Make sure the token has the Bearer prefix
+      const formattedToken = token.startsWith("Bearer ") ? token : `Bearer ${token}`
+      headers["Authorization"] = formattedToken
+      console.log("Using token from request body")
     }
 
     console.log("Using headers:", {
       contentType: headers["Content-Type"],
-      authorization: headers.Authorization ? "Bearer " + headers.Authorization.substring(0, 15) + "..." : "missing",
-      bbotApiKey: headers["bbot-api-key"] ? "present" : "missing",
+      authorization: headers.Authorization ? headers.Authorization.substring(0, 20) + "..." : "missing",
+      bbotApiKey: headers["bbot-api-key"] ? headers["bbot-api-key"].substring(0, 10) + "..." : "missing",
     })
 
     // If we have a threadId, use it to add a message and run the thread
