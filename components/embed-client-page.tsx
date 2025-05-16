@@ -8,5 +8,5 @@ export function EmbedClientPage() {
   const searchParams = useSearchParams()
   const agentFromUrl = searchParams?.get("agent")
 
-  return <EmbedChatInterface initialAgent={agentFromUrl} />
+  return <EmbedChatInterface initialAgent={agentFromUrl ?? 'bbot'} />
 }

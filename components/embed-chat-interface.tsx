@@ -4,28 +4,33 @@ import type React from "react"
 import { useState, useRef, useEffect, useCallback } from "react"
 import { ChatInput } from "./chat-input"
 import { ChatMessages } from "./chat-messages"
-import { useChat } from "@ai-sdk/react"
 import { useAuth0 } from "@auth0/auth0-react"
 import { getAuthToken, isLocallyAuthenticated } from "@/lib/api"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 import { LangGraphService } from "@/lib/langgraph-service-sdk"
+import { StreamingHandlerService } from "@/lib/streaming-handler-service"
 
 interface EmbedChatInterfaceProps {
-  initialAgent?: string | null
+  initialAgent?: string
 }
 
 export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
   // Use the initialAgent or default to "b-bot"
-  const [selectedAgent] = useState<string | null>(initialAgent || "bbot")
+  const [selectedAgent] = useState<string>(initialAgent ?? "bbot")
   const [tokensUsed, setTokensUsed] = useState(0)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const [cachedAuthToken, setCachedAuthToken] = useState<string | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
+  const [input, setInput] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [messages, setMessages] = useState<any[]>([])
+  const [incomingMessage, setIncomingMessage] = useState("")
 
   const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
 
   // Create a new instance of LangGraphService
   const langGraphService = new LangGraphService()
+  const streamingHandler = new StreamingHandlerService()
 
   // Initialize thread when component mounts
   useEffect(() => {
@@ -37,7 +42,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
         try {
           const thread = await langGraphService.createThread({
             user_id: user?.sub || "anonymous-user",
-            agent_id: selectedAgent || "bbot",
+            agent_id: selectedAgent,
           })
           setThreadId(thread.thread_id)
           console.log("Thread initialized with ID:", thread.thread_id)
@@ -88,180 +93,97 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
     fetchToken()
   }, [isAuthenticated, getAccessTokenSilently])
 
-  // Custom fetch function for chat
-  const customFetch = useCallback(
-    async (url: string, options: RequestInit) => {
-      try {
-        // Parse the request body to get the messages
-        let bodyObj: any = {}
-        if (options.body && typeof options.body === "string") {
-          try {
-            bodyObj = JSON.parse(options.body)
-          } catch (e) {
-            console.error("Error parsing request body:", e)
-            bodyObj = { messages: [] }
-          }
-        }
+  // --- Streaming message logic (like ChatInterface) ---
+  const handleSendMessage = async (messageContent: string) => {
+    if (!messageContent.trim()) return
+    setIsLoading(true)
 
-        // Ensure we have a valid messages array
-        if (!bodyObj.messages) {
-          bodyObj.messages = []
-        } else if (!Array.isArray(bodyObj.messages)) {
-          bodyObj.messages = []
-        }
+    // Create a temporary user message to show immediately
+    const tempUserMessage = {
+      id: `user-temp-${Date.now()}`,
+      role: "user",
+      content: messageContent,
+      timestamp: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, tempUserMessage])
 
-        // Get the latest user message
-        const latestMessage = bodyObj.messages.length > 0 ? bodyObj.messages[bodyObj.messages.length - 1] : null
-
-        if (!latestMessage) {
-          throw new Error("No message to send")
-        }
-
-        // If we have a threadId, use the LangGraphService to handle the chat
-        if (threadId) {
-          // Add the message to the thread
-          await langGraphService.addThreadMessage(threadId, {
-            role: "user",
-            content: latestMessage.content || "",
-            isBBotThread: selectedAgent === "b-bot",
-          })
-
-          // Run the thread with the selected agent
-          const response = await langGraphService.runThread(threadId, selectedAgent || "bbot", {
-            messages: [latestMessage.content || ""],
-          })
-
-          // Create a Response object to return
-          const responseData = response.response || {
-            role: "assistant",
-            content: "I'm sorry, I couldn't process your request.",
-            id: `msg-${Date.now()}`,
-            created_at: new Date().toISOString(),
-          }
-
-          // Create a stream from the response
-          const stream = new ReadableStream({
-            start(controller) {
-              // Add the response to the stream
-              controller.enqueue(JSON.stringify(responseData))
-              controller.close()
-            },
-          })
-
-          // Return the stream as a Response
-          return new Response(stream, {
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              Connection: "keep-alive",
-            },
-          })
-        }
-
-        // If no threadId, create a new thread and handle the chat
-        try {
-          // Create a new thread
-          const thread = await langGraphService.createThread({
-            user_id: user?.sub || "anonymous-user",
-            agent_id: selectedAgent || "bbot",
-          })
-
-          // Set the threadId for future use
-          setThreadId(thread.thread_id)
-
-          // Add the message to the thread
-          await langGraphService.addThreadMessage(thread.thread_id, {
-            role: "user",
-            content: latestMessage.content || "",
-            isBBotThread: selectedAgent === "b-bot",
-          })
-
-          // Run the thread with the selected agent
-          const response = await langGraphService.runThread(thread.thread_id, selectedAgent || "bbot", {
-            messages: [latestMessage.content || ""],
-          })
-
-          // Create a Response object to return
-          const responseData = response.response || {
-            role: "assistant",
-            content: "I'm sorry, I couldn't process your request.",
-            id: `msg-${Date.now()}`,
-            created_at: new Date().toISOString(),
-          }
-
-          // Create a stream from the response
-          const stream = new ReadableStream({
-            start(controller) {
-              // Add the response to the stream
-              controller.enqueue(JSON.stringify(responseData))
-              controller.close()
-            },
-          })
-
-          // Return the stream as a Response
-          return new Response(stream, {
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              Connection: "keep-alive",
-            },
-          })
-        } catch (error) {
-          console.error("Error creating thread and handling chat:", error)
-          return fetch(url, options)
-        }
-      } catch (error) {
-        console.error("Error in customFetch:", error)
-
-        // Create a fallback response
-        const fallbackResponse = {
-          role: "assistant",
-          content: "I'm sorry, I encountered an error processing your request. Please try again.",
-          id: `msg-${Date.now()}`,
-          created_at: new Date().toISOString(),
-        }
-
-        // Create a stream from the fallback response
-        const stream = new ReadableStream({
-          start(controller) {
-            controller.enqueue(JSON.stringify(fallbackResponse))
-            controller.close()
-          },
+    try {
+      // Get the current thread ID or create a new one
+      let currentThreadId = threadId
+      if (!currentThreadId) {
+        const thread = await langGraphService.createThread({
+          user_id: user?.sub || "anonymous-user",
+          agent_id: selectedAgent,
         })
+        currentThreadId = thread.thread_id
+        setThreadId(currentThreadId)
+      }
 
-        // Return the stream as a Response
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          },
+      // Add the message to the thread
+      if (currentThreadId) {
+        await langGraphService.addThreadMessage(currentThreadId, {
+          role: "user",
+          content: messageContent,
         })
       }
-    },
-    [threadId, selectedAgent, user?.sub],
-  )
 
-  // Set up chat with AI SDK
-  const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages } = useChat({
-    api: "/api/chat",
-    body: {
-      agent: selectedAgent || "bbot",
-      threadId: threadId,
-      token: cachedAuthToken,
-      synapseToken: cachedAuthToken,
-      isAnonymous: !isAuthenticated && selectedAgent === "b-bot",
-      messages: [],
-    },
-    id: selectedAgent || "b-bot",
-    onFinish: (message) => {
-      scrollToBottom()
-      // Estimate token usage
-      const newTokens = estimateTokenUsage(message.content)
-      setTokensUsed((prev) => prev + newTokens)
-    },
-    fetcher: customFetch,
-  })
+      const userId = user?.sub || "anonymous-user"
+      const agentId = selectedAgent
+
+      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
+
+      // Prepare the configuration for the stream
+      const streamConfig = {
+        input: {
+          entity_id: entityId,
+          messages: [{ role: "user", content: messageContent }],
+        },
+        config: {
+          thread_id: currentThreadId,
+          agent_id: agentId,
+          user_id: userId,
+          conversation_history: messages,
+          temperature: 0.7,
+          max_tokens: 1024,
+          top_p: 1.0,
+          instructions: "Be helpful and concise.",
+        },
+      }
+
+      // Invoke the streaming graph
+      const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig)
+
+      // Process the streaming response
+      await streamingHandler.processStream(response, {
+        onMessage: (msg) => {
+          setIncomingMessage(msg)
+        },
+        onUpdate: (messagesArr) => {
+          if (messagesArr && messagesArr.length > 0) {
+            const mappedMessages = messagesArr.map((msg: any, idx: number) => ({
+              id: msg.id || `msg-${idx}-${Date.now()}`,
+              role: msg.type === "human" || msg.role === "user" ? "user" : "assistant",
+              content: msg.content || "",
+              timestamp: new Date().toISOString(),
+            }))
+            setMessages(mappedMessages)
+          }
+          setIsLoading(false)
+          setIncomingMessage("")
+          scrollToBottom()
+        },
+        onError: (err) => {
+          setIsLoading(false)
+          alert(`Error: ${err}`)
+        },
+        onScrollDown: scrollToBottom,
+        onSetLoading: setIsLoading,
+        onInterrupt: () => {},
+      })
+    } catch (error) {
+      console.error("Error in handleSendMessage:", error)
+    }
+  }
 
   // Function to estimate token usage (simplified)
   const estimateTokenUsage = (text: string): number => {
@@ -275,11 +197,13 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, incomingMessage])
 
   // Simplified message submission handler
-  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    handleSubmit(e)
+  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>, msg: string) => {
+    e.preventDefault()
+    handleSendMessage(msg)
+    setInput("")
   }
 
   // Add a class to the body to indicate this is an embedded view
@@ -290,6 +214,21 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
     }
   }, [])
 
+  // Minimal agents array for B-Bot
+  const agents = [
+    {
+      id: "bbot",
+      name: "B-Bot",
+      shortDescription: "Your personal AI assistant",
+      description: "B-Bot is your personal AI assistant that can help with a wide range of tasks.",
+      profileImage: "/helpful-robot.png",
+      category: "General",
+      publisherId: "beyond-official",
+      abilities: [],
+      apps: [],
+    },
+  ];
+
   return (
     <div className="embed-container flex flex-col h-screen">
       <div className="flex-1 overflow-auto">
@@ -298,24 +237,17 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
             messages={messages}
             messagesEndRef={messagesEndRef}
             selectedAgent={selectedAgent}
+            agents={agents}
+            incomingMessage={incomingMessage}
             onSuggestionClick={(suggestion) => {
-              const fakeEvent = {
-                preventDefault: () => {},
-              } as unknown as React.FormEvent<HTMLFormElement>
-
-              handleInputChange({
-                target: { value: suggestion },
-              } as React.ChangeEvent<HTMLTextAreaElement>)
-
+              setInput(suggestion)
               setTimeout(() => {
-                handleSubmit(fakeEvent)
+                handleSendMessage(suggestion)
               }, 100)
             }}
           />
           <ChatInput
-            input={input}
-            handleInputChange={handleInputChange}
-            handleSubmit={handleMessageSubmit}
+            onSubmit={handleMessageSubmit}
             isLoading={isLoading}
             selectedAgent={selectedAgent}
           />

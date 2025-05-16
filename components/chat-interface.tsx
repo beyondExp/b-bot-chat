@@ -27,7 +27,7 @@ interface ChatInterfaceProps {
 
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Initialize selectedAgent with the initialAgent prop
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(initialAgent || null)
+  const [selectedAgent, setSelectedAgent] = useState<string>(initialAgent ?? "bbot")
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showDiscover, setShowDiscover] = useState(false)
   const [recentAgents, setRecentAgents] = useState<string[]>([])
@@ -135,7 +135,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   }, [isAuthenticated, getAccessTokenSilently])
 
   // Update the handleSelectAgent function to create a new thread when switching agents
-  const handleSelectAgent = (agentId: string | null) => {
+  const handleSelectAgent = async (agentId: string) => {
+    // Debug log
+    console.log('Selecting agent:', agentId, 'Current recents:', recentAgents, 'Current agents:', agents.map(a => a.id));
+
     // Only allow selecting non-B-Bot agents if authenticated
     if (agentId !== "bbot" && !(isAuthenticated || isLocallyAuthenticated())) {
       // Show login prompt
@@ -153,7 +156,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       setSelectedAgent(agentId)
 
       // Create a new thread for the new agent
-      if ((isAuthenticated || isLocallyAuthenticated() || agentId === "bbot") && agentId) {
+      if ((isAuthenticated || isLocallyAuthenticated() || agentId === "bbot")) {
         const initializeNewThread = async () => {
           try {
             const thread = await langGraphService.createThread({
@@ -183,10 +186,39 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
         initializeNewThread()
       }
+    }
 
-      // Add to recent agents if not already there
-      if (agentId && !recentAgents.includes(agentId)) {
-        setRecentAgents((prev) => [agentId, ...prev].slice(0, 5))
+    // Add to recent agents if not already there
+    if (!recentAgents.includes(agentId)) {
+      setRecentAgents((prev) => [agentId, ...prev].slice(0, 5))
+      console.log('Added to recents:', agentId, 'New recents:', [agentId, ...recentAgents].slice(0, 5))
+    }
+
+    // Ensure the agent is in the loaded agents array (even if it's the current agent)
+    if (!agents.some(agent => agent.id === agentId)) {
+      try {
+        const agent = await getAgent(agentId)
+        if (agent) {
+          setAgents(prev => [...prev, agent])
+          console.log('Added to agents array:', agentId)
+        }
+      } catch (e) {
+        // Fallback: add a minimal agent object
+        setAgents(prev => [
+          ...prev,
+          {
+            id: agentId,
+            name: agentId,
+            shortDescription: '',
+            description: '',
+            profileImage: '/helpful-robot.png',
+            category: 'General',
+            publisherId: '',
+            abilities: [],
+            apps: [],
+          }
+        ])
+        console.log('Added fallback agent to agents array:', agentId)
       }
     }
 
@@ -266,7 +298,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
       // Invoke the streaming graph
       console.log('[Chat] invoking streaming graph with config:', streamConfig)
-      const response = await langGraphService.invokeGraphStream(selectedAgent || "bbot", currentThreadId, streamConfig)
+      const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig)
 
       console.log('[Chat] starting streamingHandler.processStream')
       // Process the streaming response
@@ -411,11 +443,15 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
         <AgentSelector
+          agents={agents}
           selectedAgent={selectedAgent}
-          onSelectAgent={handleSelectAgent}
+          onSelectAgent={handleSelectAgent as (agentId: string) => void}
           onClose={() => setSidebarOpen(false)}
-          onOpenDiscover={() => setShowDiscover(true)}
+          showDiscover={showDiscover}
+          setShowDiscover={setShowDiscover}
           recentAgents={recentAgents}
+          isAuthenticated={isAuthenticated}
+          loginWithRedirect={loginWithRedirect}
         />
       </div>
 

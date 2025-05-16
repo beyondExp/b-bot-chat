@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 
 interface ChatMessagesProps {
   messages: any[]
-  messagesEndRef: React.RefObject<HTMLDivElement>
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
   selectedAgent: string | null
   agents: any[]
   incomingMessage?: string

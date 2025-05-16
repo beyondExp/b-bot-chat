@@ -17,26 +17,31 @@ import { useAuth0 } from "@auth0/auth0-react"
 import type { Agent } from "@/types/agent"
 
 interface AgentSelectorProps {
-  selectedAgent: string | null
-  onSelectAgent: (agentId: string | null) => void
+  agents: Agent[]
+  selectedAgent: string
+  onSelectAgent: (agentId: string) => void
   onClose: () => void
-  onOpenDiscover: () => void
+  showDiscover: boolean
+  setShowDiscover: (show: boolean) => void
   recentAgents: string[]
+  isAuthenticated: boolean
+  loginWithRedirect: () => void
 }
 
 export function AgentSelector({
+  agents,
   selectedAgent,
   onSelectAgent,
   onClose,
-  onOpenDiscover,
+  showDiscover,
+  setShowDiscover,
   recentAgents,
+  isAuthenticated,
+  loginWithRedirect,
 }: AgentSelectorProps) {
-  const [agents, setAgents] = useState<Agent[]>([])
+  const [agentsList, setAgentsList] = useState<Agent[]>([])
   const { getAgents, isLoading, error } = useAgents()
   const isMounted = useRef(true)
-
-  // Get authentication status from Auth0
-  const { isAuthenticated, loginWithRedirect } = useAuth0()
 
   // Fetch agents on mount (regardless of authentication)
   useEffect(() => {
@@ -44,7 +49,7 @@ export function AgentSelector({
       try {
         const agentsData = await getAgents()
         if (isMounted.current) {
-          setAgents(agentsData)
+          setAgentsList(agentsData)
         }
       } catch (err) {
         console.error("Error fetching agents:", err)
@@ -109,6 +114,13 @@ export function AgentSelector({
     return agentsList
   }
 
+  // Merge agents from props and agentsList, deduplicating by id
+  const allAgents = useMemo(() => {
+    const map = new Map();
+    [...agentsList, ...agents].forEach(agent => map.set(agent.id, agent));
+    return Array.from(map.values());
+  }, [agentsList, agents]);
+
   // Update the displayedAgents calculation to only include B-Bot and recent agents
   const displayedAgents = useMemo(() => {
     // Always include B-Bot at the top
@@ -124,10 +136,10 @@ export function AgentSelector({
       apps: [],
     };
     // Filter agents to only those in recentAgents
-    const recentAgentList = agents.filter(agent => recentAgents.includes(agent.id));
+    const recentAgentList = allAgents.filter(agent => recentAgents.includes(agent.id));
     // Always show B-Bot, then recent agents (if any)
     return [defaultBBot, ...recentAgentList];
-  }, [agents, recentAgents]);
+  }, [allAgents, recentAgents]);
 
   return (
     <>
@@ -141,7 +153,7 @@ export function AgentSelector({
       <div className="sidebar-content">
         {/* Discover button - only show if authenticated */}
         {isAuthenticated ? (
-          <button className="discover-button" onClick={onOpenDiscover} aria-label="Discover AI Agents">
+          <button className="discover-button" onClick={() => setShowDiscover(true)} aria-label="Discover AI Agents">
             <CompassIcon size={18} />
             <span>Discover AI Agents</span>
           </button>
@@ -228,8 +240,8 @@ export function AgentSelector({
               ))}
 
             {/* Show "View All" button if authenticated and there are more than 5 agents */}
-            {isAuthenticated && agents.length > 5 && recentAgents.length === 0 && (
-              <button className="view-all-button" onClick={onOpenDiscover}>
+            {isAuthenticated && agentsList.length > 5 && recentAgents.length === 0 && (
+              <button className="view-all-button" onClick={() => setShowDiscover(true)}>
                 View All Agents
               </button>
             )}

@@ -9,5 +9,5 @@ export function ClientPage() {
   const searchParams = useSearchParams()
   const agentFromUrl = searchParams?.get("agent")
 
-  return <ChatInterface initialAgent={agentFromUrl} />
+  return <ChatInterface initialAgent={agentFromUrl ?? 'bbot'} />
 }
