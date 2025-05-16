@@ -6,12 +6,12 @@ import { useEffect, useState } from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { useAgents } from "@/lib/agent-service"
 
 interface ChatMessagesProps {
   messages: any[]
   messagesEndRef: React.RefObject<HTMLDivElement>
   selectedAgent: string | null
+  agents: any[]
   incomingMessage?: string
   onSuggestionClick: (suggestion: string) => void
 }
@@ -20,41 +20,32 @@ export function ChatMessages({
   messages,
   messagesEndRef,
   selectedAgent,
+  agents,
   incomingMessage = "",
   onSuggestionClick,
 }: ChatMessagesProps) {
-  const { getAgent } = useAgents()
-  const [agentDetails, setAgentDetails] = useState<any>(null)
-
-  // Fetch agent details when selectedAgent changes
-  useEffect(() => {
-    if (selectedAgent) {
-      getAgent(selectedAgent)
-        .then((agent) => {
-          setAgentDetails(agent)
-        })
-        .catch((error) => {
-          console.error("Error fetching agent details:", error)
-        })
-    } else {
-      setAgentDetails(null)
-    }
-  }, [selectedAgent, getAgent])
-
   // Get agent avatar
   const getAgentAvatar = () => {
-    if (agentDetails?.avatar) {
-      return agentDetails.avatar
+    if (selectedAgent === "bbot" || !selectedAgent) {
+      return "/helpful-robot.png";
     }
-    return "/helpful-robot.png" // Default avatar
+    const agent = agents.find(a => a.id === selectedAgent);
+    if (agent && agent.profileImage) {
+      return agent.profileImage;
+    }
+    return "/helpful-robot.png";
   }
 
   // Get agent name
   const getAgentName = () => {
-    if (agentDetails?.name) {
-      return agentDetails.name
+    if (selectedAgent === "bbot" || !selectedAgent) {
+      return "B-Bot";
     }
-    return selectedAgent || "B-Bot"
+    const agent = agents.find(a => a.id === selectedAgent);
+    if (agent && agent.name) {
+      return agent.name;
+    }
+    return "AI Agent";
   }
 
   // Welcome message suggestions

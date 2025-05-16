@@ -5,7 +5,7 @@ import { useCallback } from "react"
 
 const API_BASE_URL = "https://api-staging.b-bot.space/api/v2"
 const API_V3_BASE_URL = "https://api-staging.b-bot.space/api/v3"
-export const LANGGRAPH_AUDIENCE = "https://api.b-bot.space"
+export const LANGGRAPH_AUDIENCE = "https://b-bot-synapse-d77722348fc853d1b327916929e45307.us.langgraph.app"
 
 // Token cache (client-side only)
 let cachedToken: string | null = null

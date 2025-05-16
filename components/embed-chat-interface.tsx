@@ -16,7 +16,7 @@ interface EmbedChatInterfaceProps {
 
 export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
   // Use the initialAgent or default to "b-bot"
-  const [selectedAgent] = useState<string | null>(initialAgent || "b-bot")
+  const [selectedAgent] = useState<string | null>(initialAgent || "bbot")
   const [tokensUsed, setTokensUsed] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [cachedAuthToken, setCachedAuthToken] = useState<string | null>(null)
@@ -37,7 +37,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
         try {
           const thread = await langGraphService.createThread({
             user_id: user?.sub || "anonymous-user",
-            agent_id: selectedAgent || "b-bot",
+            agent_id: selectedAgent || "bbot",
           })
           setThreadId(thread.thread_id)
           console.log("Thread initialized with ID:", thread.thread_id)
@@ -127,7 +127,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
           })
 
           // Run the thread with the selected agent
-          const response = await langGraphService.runThread(threadId, selectedAgent || "b-bot", {
+          const response = await langGraphService.runThread(threadId, selectedAgent || "bbot", {
             messages: [latestMessage.content || ""],
           })
 
@@ -163,7 +163,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
           // Create a new thread
           const thread = await langGraphService.createThread({
             user_id: user?.sub || "anonymous-user",
-            agent_id: selectedAgent || "b-bot",
+            agent_id: selectedAgent || "bbot",
           })
 
           // Set the threadId for future use
@@ -177,7 +177,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
           })
 
           // Run the thread with the selected agent
-          const response = await langGraphService.runThread(thread.thread_id, selectedAgent || "b-bot", {
+          const response = await langGraphService.runThread(thread.thread_id, selectedAgent || "bbot", {
             messages: [latestMessage.content || ""],
           })
 
@@ -246,7 +246,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
   const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages } = useChat({
     api: "/api/chat",
     body: {
-      agent: selectedAgent || "b-bot",
+      agent: selectedAgent || "bbot",
       threadId: threadId,
       token: cachedAuthToken,
       synapseToken: cachedAuthToken,

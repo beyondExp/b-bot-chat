@@ -68,6 +68,8 @@ export class StreamingHandlerService {
           const { eventName, eventData } = parseEvent(eventText)
           if (!eventName || !eventData) continue
 
+          console.log('[StreamingHandler] Event:', eventName, eventData)
+
           try {
             // Handle different event types
             switch (eventName) {
@@ -97,6 +99,7 @@ export class StreamingHandlerService {
               case "updates": {
                 try {
                   const updatesData = JSON.parse(eventData)
+                  console.log('[StreamingHandler] updatesData:', updatesData)
                   if (updatesData && updatesData.agent && updatesData.agent.messages) {
                     onUpdate(updatesData.agent.messages)
                     onSetLoading(false)
@@ -110,6 +113,7 @@ export class StreamingHandlerService {
               case "values": {
                 try {
                   const valuesData = JSON.parse(eventData)
+                  console.log('[StreamingHandler] valuesData:', valuesData)
                   if (valuesData && valuesData.messages) {
                     onUpdate(valuesData.messages)
                     onSetLoading(false)

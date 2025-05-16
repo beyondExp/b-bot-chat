@@ -243,26 +243,30 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       }
 
       // Prepare the run request body with all the config options
+      const entityId = userId ? userId.replace(/[|\-]/g, '') + '_' + agent : 'anonymous-entity';
       const runRequestBody: any = {
-        messages: [input || ""],
-      }
-
+        assistant_id: agent || "b-bot",
+        input: {
+          entity_id: entityId,
+          messages: [{ role: "user", content: input || "" }],
+        },
+      };
       // Add optional parameters if they exist
-      if (abilityId) runRequestBody.ability_id = abilityId
-      if (modelId) runRequestBody.model_id = modelId
-      if (Object.keys(apps).length > 0) runRequestBody.apps = apps
-      if (Object.keys(toolActivation).length > 0) runRequestBody.tool_activation = toolActivation
-      if (documentUrls.length > 0) runRequestBody.document_urls = documentUrls
-      if (temperature !== undefined) runRequestBody.temperature = temperature
-      if (maxTokens !== undefined) runRequestBody.max_tokens = maxTokens
-      if (topP !== undefined) runRequestBody.top_p = topP
-      if (instructions) runRequestBody.instructions = instructions
+      if (abilityId) runRequestBody.ability_id = abilityId;
+      if (modelId) runRequestBody.model_id = modelId;
+      if (Object.keys(apps).length > 0) runRequestBody.apps = apps;
+      if (Object.keys(toolActivation).length > 0) runRequestBody.tool_activation = toolActivation;
+      if (documentUrls.length > 0) runRequestBody.document_urls = documentUrls;
+      if (temperature !== undefined) runRequestBody.temperature = temperature;
+      if (maxTokens !== undefined) runRequestBody.max_tokens = maxTokens;
+      if (topP !== undefined) runRequestBody.top_p = topP;
+      if (instructions) runRequestBody.instructions = instructions;
 
       // Run the thread with the selected assistant
       const runUrl = `https://api-staging.b-bot.space/api/v2/threads/${threadId}/graph`
-      console.log(`Running thread ${threadId} with assistant ${agent || "default"}`)
+      console.log(`Running thread ${threadId} with assistant ${agent || "b-bot"}`)
 
-      const runResponse = await fetch(`${runUrl}?assistant_id=${agent || "default"}`, {
+      const runResponse = await fetch(`${runUrl}?assistant_id=${agent || "b-bot"}`, {
         method: "POST",
         headers,
         body: JSON.stringify(runRequestBody),
@@ -319,7 +323,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
 
     // Prepare the request body for creating a thread
     const createThreadBody: any = {
-      assistant_id: agent || "default",
+      assistant_id: agent || "b-bot",
     }
 
     if (userId) createThreadBody.user_id = userId
@@ -370,27 +374,31 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       throw new Error(`Failed to add message to new thread: ${newMessageResponse.status} - ${errorText}`)
     }
 
-    // Prepare the run request body with all the config options
+    // Prepare the run request body with all the config options for new thread
+    const newEntityId = userId ? userId.replace(/[|\-]/g, '') + '_' + agent : 'anonymous-entity';
     const newRunRequestBody: any = {
-      messages: [input || ""],
-    }
-
+      assistant_id: agent || "b-bot",
+      input: {
+        entity_id: newEntityId,
+        messages: [{ role: "user", content: input || "" }],
+      },
+    };
     // Add optional parameters if they exist
-    if (abilityId) newRunRequestBody.ability_id = abilityId
-    if (modelId) newRunRequestBody.model_id = modelId
-    if (Object.keys(apps).length > 0) newRunRequestBody.apps = apps
-    if (Object.keys(toolActivation).length > 0) newRunRequestBody.tool_activation = toolActivation
-    if (documentUrls.length > 0) newRunRequestBody.document_urls = documentUrls
-    if (temperature !== undefined) newRunRequestBody.temperature = temperature
-    if (maxTokens !== undefined) newRunRequestBody.max_tokens = maxTokens
-    if (topP !== undefined) newRunRequestBody.top_p = topP
-    if (instructions) newRunRequestBody.instructions = instructions
+    if (abilityId) newRunRequestBody.ability_id = abilityId;
+    if (modelId) newRunRequestBody.model_id = modelId;
+    if (Object.keys(apps).length > 0) newRunRequestBody.apps = apps;
+    if (Object.keys(toolActivation).length > 0) newRunRequestBody.tool_activation = toolActivation;
+    if (documentUrls.length > 0) newRunRequestBody.document_urls = documentUrls;
+    if (temperature !== undefined) newRunRequestBody.temperature = temperature;
+    if (maxTokens !== undefined) newRunRequestBody.max_tokens = maxTokens;
+    if (topP !== undefined) newRunRequestBody.top_p = topP;
+    if (instructions) newRunRequestBody.instructions = instructions;
 
     // Run the new thread with the selected assistant
     const newRunUrl = `https://api-staging.b-bot.space/api/v2/threads/${newThreadId}/graph`
-    console.log(`Running new thread ${newThreadId} with assistant ${agent || "default"}`)
+    console.log(`Running new thread ${newThreadId} with assistant ${agent || "b-bot"}`)
 
-    const newRunResponse = await fetch(`${newRunUrl}?assistant_id=${agent || "default"}`, {
+    const newRunResponse = await fetch(`${newRunUrl}?assistant_id=${agent || "b-bot"}`, {
       method: "POST",
       headers,
       body: JSON.stringify(newRunRequestBody),
@@ -468,7 +476,7 @@ async function handleDirectChat(
 ) {
   try {
     // If no threadId, fall back to the direct chat endpoint
-    const apiUrl = `https://api-staging.b-bot.space/api/v2/assistants/${agent || "default"}/chat`
+    const apiUrl = `https://api-staging.b-bot.space/api/v2/assistants/${agent || "b-bot"}/chat`
     console.log(`Making direct chat request to ${apiUrl}`)
 
     // Convert conversation history to the expected format if needed
@@ -530,8 +538,16 @@ async function handleDirectChat(
   }
 }
 
-// Update the POST function to use the new thread-based handler
+// Handle both GET and POST methods
+export async function GET(req: NextRequest) {
+  return handleRequest(req)
+}
+
 export async function POST(req: NextRequest) {
+  return handleRequest(req)
+}
+
+async function handleRequest(req: NextRequest) {
   try {
     console.log("Chat API request received")
 
@@ -558,7 +574,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Pass the parsed body to the handler
-    return await handleThreadBasedChat(req, parsedBody)
+    return await handleThreadBasedChat(req as NextRequest, parsedBody)
   } catch (error) {
     console.error("Chat API error:", error)
     return new Response(

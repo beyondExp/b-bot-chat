@@ -2,28 +2,37 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 
-export async function GET(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleProxyRequest(request, params.path, "GET")
+export async function GET(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
+  const { params } = await contextPromise;
+  return handleProxyRequest(request, params.path, "GET");
 }
 
-export async function POST(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleProxyRequest(request, params.path, "POST")
+export async function POST(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
+  const { params } = await contextPromise;
+  return handleProxyRequest(request, params.path, "POST");
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleProxyRequest(request, params.path, "PUT")
+export async function PUT(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
+  const { params } = await contextPromise;
+  return handleProxyRequest(request, params.path, "PUT");
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleProxyRequest(request, params.path, "DELETE")
+export async function DELETE(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
+  const { params } = await contextPromise;
+  return handleProxyRequest(request, params.path, "DELETE");
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { path: string[] } }) {
-  return handleProxyRequest(request, params.path, "PATCH")
+export async function PATCH(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
+  const { params } = await contextPromise;
+  return handleProxyRequest(request, params.path, "PATCH");
 }
 
 async function handleProxyRequest(request: NextRequest, pathSegments: string[], method: string) {
   try {
+    // Log the Authorization header for debugging
+    const incomingAuthHeader = request.headers.get("Authorization");
+    console.log("[Proxy] Incoming Authorization header:", incomingAuthHeader);
+
     // Get the LangGraph API URL from environment variables
     const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://api-staging.b-bot.space/api/v2"
 
@@ -54,6 +63,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     // Forward the Authorization header if present
     const authHeader = request.headers.get("Authorization")
     if (authHeader) {
+      console.log("[Proxy] Forwarding Authorization header:", authHeader);
       headers.set("Authorization", authHeader)
     }
 
@@ -95,27 +105,37 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
 
     // Handle streaming responses
     if (response.headers.get("Content-Type")?.includes("text/event-stream")) {
-      // Create a TransformStream to pass through the response
-      const { readable, writable } = new TransformStream()
-
-      // Pipe the response body to the transform stream
-      if (response.body) {
-        response.body.pipeTo(writable)
+      if (!response.body) {
+        return new Response("No stream", { status: 500 });
       }
-
-      // Return a streaming response
-      return new NextResponse(readable, {
+      const { readable, writable } = new TransformStream();
+      const reader = response.body.getReader();
+      const writer = writable.getWriter();
+      (async () => {
+        const encoder = new TextEncoder();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) {
+            await writer.write(value);
+            await writer.write(encoder.encode("\n")); // helps flush in some environments
+          }
+        }
+        await writer.close();
+      })();
+      // Use the native Response, not NextResponse
+      return new Response(readable, {
         headers: {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
-          Connection: "keep-alive",
+          "Connection": "keep-alive",
         },
-      })
+      });
     }
 
     // For non-streaming responses, return the JSON
-    const data = await response.json()
-    return NextResponse.json(data, { status: response.status })
+    const data = await response.json();
+    return Response.json(data, { status: response.status });
   } catch (error) {
     return NextResponse.json({ error: "Proxy error" }, { status: 500 })
   }

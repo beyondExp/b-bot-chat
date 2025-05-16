@@ -43,7 +43,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
 
   const { isAuthenticated, getAccessTokenSilently, user, loginWithRedirect } = useAuth0()
-  const { getAgent } = useAgents()
+  const { getAgent, getAgents } = useAgents()
   const authenticatedFetch = useAuthenticatedFetch()
 
   // Add this to the ChatInterface component, after the existing state declarations
@@ -52,6 +52,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [chatMessages, setChatMessages] = useState<any[]>([])
   const [conversationHistory, setConversationHistory] = useState<any[]>([])
+  const [agents, setAgents] = useState<any[]>([])
 
   // Create a new instance of LangGraphService
   const langGraphService = new LangGraphService()
@@ -68,7 +69,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           // Default to b-bot if no agent is selected
           const thread = await langGraphService.createThread({
             user_id: user?.sub || "anonymous-user",
-            agent_id: selectedAgent || "b-bot",
+            agent_id: selectedAgent || "bbot",
           })
           setThreadId(thread.thread_id)
         } catch (error) {
@@ -136,7 +137,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Update the handleSelectAgent function to create a new thread when switching agents
   const handleSelectAgent = (agentId: string | null) => {
     // Only allow selecting non-B-Bot agents if authenticated
-    if (agentId !== "b-bot" && !(isAuthenticated || isLocallyAuthenticated())) {
+    if (agentId !== "bbot" && !(isAuthenticated || isLocallyAuthenticated())) {
       // Show login prompt
       if (
         typeof window !== "undefined" &&
@@ -152,7 +153,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       setSelectedAgent(agentId)
 
       // Create a new thread for the new agent
-      if ((isAuthenticated || isLocallyAuthenticated() || agentId === "b-bot") && agentId) {
+      if ((isAuthenticated || isLocallyAuthenticated() || agentId === "bbot") && agentId) {
         const initializeNewThread = async () => {
           try {
             const thread = await langGraphService.createThread({
@@ -166,7 +167,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             setConversationHistory([])
           } catch (error) {
             // If this is B-Bot, create a fallback thread
-            if (agentId === "b-bot") {
+            if (agentId === "bbot") {
               const fallbackThreadId = `bbot-anonymous-${Date.now()}`
               setThreadId(fallbackThreadId)
 
@@ -195,6 +196,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Function to handle sending a message with streaming
   const handleSendMessage = async (messageContent: string) => {
+    console.log('[Chat] handleSendMessage called with:', messageContent)
     if (!messageContent.trim()) return
     setIsLoading(true)
 
@@ -225,7 +227,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       if (!currentThreadId) {
         const thread = await langGraphService.createThread({
           user_id: user?.sub || "anonymous-user",
-          agent_id: selectedAgent || "b-bot",
+          agent_id: selectedAgent || "bbot",
         })
         currentThreadId = thread.thread_id
         setThreadId(currentThreadId)
@@ -239,13 +241,20 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         })
       }
 
+      const userId = user?.sub || "anonymous-user"
+      const agentId = selectedAgent || "bbot"
+      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
+
       // Prepare the configuration for the stream - matching the example payload structure
       const streamConfig = {
-        input: messageContent,
+        input: {
+          entity_id: entityId,
+          messages: [{ role: "user", content: messageContent }],
+        },
         config: {
           thread_id: currentThreadId,
-          agent_id: selectedAgent || "b-bot",
-          user_id: user?.sub || "anonymous-user",
+          agent_id: agentId,
+          user_id: userId,
           conversation_history: updatedHistory,
           // Add any other configuration options as needed
           temperature: 0.7,
@@ -256,8 +265,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       }
 
       // Invoke the streaming graph
-      const response = await langGraphService.invokeGraphStream(selectedAgent || "b-bot", currentThreadId, streamConfig)
+      console.log('[Chat] invoking streaming graph with config:', streamConfig)
+      const response = await langGraphService.invokeGraphStream(selectedAgent || "bbot", currentThreadId, streamConfig)
 
+      console.log('[Chat] starting streamingHandler.processStream')
       // Process the streaming response
       await streamingHandler.processStream(response, {
         onMessage: (msg) => {
@@ -268,29 +279,17 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           // Handle tool events if needed
         },
         onUpdate: (messages) => {
-          // Update the messages with the final response
+          console.log('[Chat] onUpdate raw messages:', messages)
+          // Map the full messages array from the backend into chatMessages
           if (messages && messages.length > 0) {
-            const assistantMessage = {
-              id: `assistant-${Date.now()}`,
-              role: "assistant",
-              content: messages[messages.length - 1].content || "",
+            const mappedMessages = messages.map((msg, idx) => ({
+              id: msg.id || `msg-${idx}-${Date.now()}`,
+              role: msg.type === "human" || msg.role === "user" ? "user" : "assistant",
+              content: msg.content || "",
               timestamp: new Date().toISOString(),
-            }
-
-            setChatMessages((prev) => {
-              // Filter out any temporary messages
-              const filtered = prev.filter((msg) => !msg.id.includes("temp"))
-              return [...filtered, assistantMessage]
-            })
-
-            // Update conversation history
-            setConversationHistory((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                content: messages[messages.length - 1].content || "",
-              },
-            ])
+            }))
+            console.log('[Chat] mappedMessages:', mappedMessages)
+            setChatMessages(mappedMessages)
           }
 
           setIsLoading(false)
@@ -439,6 +438,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                 messages={chatMessages}
                 messagesEndRef={messagesEndRef}
                 selectedAgent={selectedAgent}
+                agents={agents}
                 incomingMessage={incomingMessage}
                 onSuggestionClick={(suggestion) => {
                   handleSendMessage(suggestion)

@@ -32,7 +32,7 @@ export class LangGraphService {
         method: "POST",
         headers: this.getHeaders(),
         body: JSON.stringify({
-          assistant_id: config.agent_id || "b-bot",
+          assistant_id: config.agent_id || "bbot",
           user_id: config.user_id,
           metadata: config,
         }),
@@ -120,28 +120,43 @@ export class LangGraphService {
       // Use the proxy endpoint for streaming
       const url = `${this.baseURL}/threads/${threadId}/runs/stream`
 
-      // Extract the user message from options
-      let userMessage = ""
-      if (options.messages && Array.isArray(options.messages) && options.messages.length > 0) {
-        userMessage = options.messages[0]
+      // Build the messages array as an array of objects
+      let messages: any[] = []
+      if (options.messages && Array.isArray(options.messages)) {
+        messages = options.messages.map((msg: any) =>
+          typeof msg === "string"
+            ? { role: "user", content: msg }
+            : msg
+        )
       } else if (
         options.input &&
         options.input.messages &&
-        Array.isArray(options.input.messages) &&
-        options.input.messages.length > 0
+        Array.isArray(options.input.messages)
       ) {
-        userMessage = options.input.messages[0]
+        messages = options.input.messages.map((msg: any) =>
+          typeof msg === "string"
+            ? { role: "user", content: msg }
+            : msg
+        )
       } else if (typeof options.input === "string") {
-        userMessage = options.input
+        messages = [{ role: "user", content: options.input }]
       }
 
-      // Format the request body according to the example payload structure
+      // Compute entity_id as a mix of user id and agent id
+      let userId = options.config?.user_id || options.input?.user_id || "anonymous-user"
+      let entityId = "anonymous-entity"
+      if (userId && agentId) {
+        entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
+      }
+
+      // Format the request body according to the expected payload structure
       const requestBody = {
-        input: userMessage,
+        assistant_id: agentId || "bbot",
+        input: { entity_id: entityId, messages },
         config: {
           thread_id: threadId,
           agent_id: agentId,
-          user_id: options.config?.entity_id || options.input?.entity_id || "anonymous-user",
+          user_id: userId,
           ability_id: options.config?.ability_id,
           model_id: options.config?.query_model || options.config?.response_model,
           apps: options.config?.apps || options.input?.apps || {},

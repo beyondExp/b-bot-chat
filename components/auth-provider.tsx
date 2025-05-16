@@ -20,11 +20,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     console.log("Local storage auth state:", localAuth)
   }, [])
 
-  // Handle Auth0 initialization errors
-  const onError = (error: Error) => {
-    console.error("Auth0 initialization error:", error)
-  }
-
   // If not on client side yet, render children without Auth0Provider
   if (!isClient) {
     return <>{children}</>
@@ -36,10 +31,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       clientId="RShGzaeQqPJwM850f6MwzyODEDD4wMwK"
       authorizationParams={{
         redirect_uri: window.location.origin,
-        audience: "https://api.b-bot.space",
+        audience: "https://b-bot-synapse-d77722348fc853d1b327916929e45307.us.langgraph.app",
         scope: "openid profile email",
       }}
-      onError={onError}
       skipRedirectCallback={window.location.pathname === "/api/auth/callback"}
       cacheLocation="localstorage" // Use localStorage instead of cookies
     >
