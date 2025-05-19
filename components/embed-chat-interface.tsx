@@ -109,7 +109,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
         return
       }
       try {
-        const agent = await getAgent((selectedAgent ?? ''))
+        const agent = await getAgent(selectedAgent || '', { allowAnonymous: true })
         if (agent && agent.metadata && agent.metadata.distributionChannel && agent.metadata.distributionChannel.type === "Embed") {
           setAgentValid(true)
           setAgentError("")

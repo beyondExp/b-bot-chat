@@ -17,6 +17,8 @@ export const anonymousPublisher: Publisher = {
   followerCount: 0,
 }
 
+const MASTER_KEY = process.env.NEXT_PUBLIC_BBOT_MASTER_KEY || "REPLACE_WITH_MASTER_KEY";
+
 export function useAgents() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -112,17 +114,31 @@ export function useAgents() {
 
   // Function to get a specific agent by ID
   const getAgent = useCallback(
-    async (agentId: string): Promise<Agent | null> => {
+    async (agentId: string, options?: { allowAnonymous?: boolean }): Promise<Agent | null> => {
       setIsLoading(true)
       setError(null)
 
       try {
-        // For individual agents, we'll still use the authenticated endpoint
-        const response = await authenticatedFetch(`/assistants/${agentId}`, {
-          method: "GET",
-        })
+        let responseData
+        if (options?.allowAnonymous) {
+          // Anonymous fetch using master key
+          const response = await fetch(`https://api-staging.b-bot.space/api/v2/assistants/${agentId}`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${MASTER_KEY}`,
+            },
+          })
+          if (!response.ok) throw new Error(`API error: ${response.status} ${response.statusText}`)
+          responseData = await response.json()
+        } else {
+          // Authenticated fetch as before
+          responseData = await authenticatedFetch(`/assistants/${agentId}`, {
+            method: "GET",
+          })
+        }
 
-        return transformApiAssistantToAgent(response) || null
+        return transformApiAssistantToAgent(responseData) || null
       } catch (err) {
         console.error(`Error fetching agent ${agentId}:`, err)
         setError("Failed to load agent")
