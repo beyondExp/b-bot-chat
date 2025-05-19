@@ -9,6 +9,7 @@ import { getAuthToken, isLocallyAuthenticated } from "@/lib/api"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 import { LangGraphService } from "@/lib/langgraph-service-sdk"
 import { StreamingHandlerService } from "@/lib/streaming-handler-service"
+import { useAgents } from "@/lib/agent-service"
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
@@ -25,6 +26,9 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [messages, setMessages] = useState<any[]>([])
   const [incomingMessage, setIncomingMessage] = useState("")
+  const [agentValid, setAgentValid] = useState<boolean>(false)
+  const [agentError, setAgentError] = useState<string>("")
+  const { getAgent } = useAgents()
 
   const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
 
@@ -92,6 +96,38 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
 
     fetchToken()
   }, [isAuthenticated, getAccessTokenSilently])
+
+  useEffect(() => {
+    const checkAgent = async () => {
+      console.log('[EmbedChatInterface] checkAgent: initialAgent =', initialAgent, 'selectedAgent =', selectedAgent)
+      // Only skip fetch if this embed is for the built-in B-Bot (the default embed agent)
+      // If initialAgent is undefined or 'bbot', treat as B-Bot embed
+      if (!initialAgent || initialAgent === "bbot" || initialAgent === "b-bot") {
+        console.log('[EmbedChatInterface] Skipping fetch for built-in B-Bot embed')
+        setAgentValid(true)
+        setAgentError("")
+        return
+      }
+      try {
+        const agent = await getAgent((selectedAgent ?? ''))
+        if (agent && agent.metadata && agent.metadata.distributionChannel && agent.metadata.distributionChannel.type === "Embed") {
+          setAgentValid(true)
+          setAgentError("")
+        } else {
+          setAgentError("This assistant is not enabled for embed usage.")
+          setAgentValid(false)
+        }
+      } catch (e) {
+        setAgentError("Failed to load assistant or check embed permissions.")
+        setAgentValid(false)
+      }
+    }
+    checkAgent()
+  }, [selectedAgent, getAgent, initialAgent])
+
+  if (!agentValid) {
+    return <div className="flex items-center justify-center h-screen text-red-500">{agentError || "Checking assistant permissions..."}</div>
+  }
 
   // --- Streaming message logic (like ChatInterface) ---
   const handleSendMessage = async (messageContent: string) => {
