@@ -7,6 +7,7 @@ export function EmbedClientPage() {
   // Get agent from URL query parameters
   const searchParams = useSearchParams()
   const agentFromUrl = searchParams?.get("agent")
+  const userIdFromUrl = searchParams?.get("user_id")
 
-  return <EmbedChatInterface initialAgent={agentFromUrl ?? 'bbot'} />
+  return <EmbedChatInterface initialAgent={agentFromUrl ?? 'bbot'} embedUserId={userIdFromUrl} />
 }

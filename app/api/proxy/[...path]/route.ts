@@ -53,12 +53,22 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
       url.searchParams.append(key, value)
     }
 
-    // Prepare headers
-    const headers = new Headers()
-    headers.set("Content-Type", "application/json")
+    // Prepare headers: copy all incoming headers
+    const headers = new Headers(request.headers);
 
-    // Add the API key header
-    headers.set("bbot-api-key", apiKey)
+    // Always set Content-Type to application/json (or preserve original if needed)
+    headers.set("Content-Type", "application/json");
+
+    // Always set the API key headers (override if present)
+    headers.set("X-API-Key", apiKey);
+    headers.set("Admin-API-Key", apiKey);
+
+    // Optionally, log forwarded headers for debugging
+    console.log("[Proxy] Forwarding headers:", {
+      "Admin-API-Key": headers.get("Admin-API-Key"),
+      "X-User-ID": headers.get("X-User-ID"),
+      "Authorization": headers.get("Authorization"),
+    });
 
     // Forward the Authorization header if present
     const authHeader = request.headers.get("Authorization")

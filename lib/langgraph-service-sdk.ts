@@ -26,11 +26,11 @@ export class LangGraphService {
   }
 
   // Create a new thread
-  async createThread(config: any = {}) {
+  async createThread(config: any = {}, headersOverride?: Record<string, string>) {
     try {
       const response = await fetch(`${this.baseURL}/threads`, {
         method: "POST",
-        headers: this.getHeaders(),
+        headers: headersOverride || this.getHeaders(),
         body: JSON.stringify({
           assistant_id: config.agent_id || "bbot",
           user_id: config.user_id,
@@ -93,11 +93,11 @@ export class LangGraphService {
   }
 
   // Add a message to a thread
-  async addThreadMessage(threadId: string, message: { role: string; content: string }) {
+  async addThreadMessage(threadId: string, message: { role: string; content: string }, headersOverride?: Record<string, string>) {
     try {
       const response = await fetch(`${this.baseURL}/threads/${threadId}/messages`, {
         method: "POST",
-        headers: this.getHeaders(),
+        headers: headersOverride || this.getHeaders(),
         body: JSON.stringify({
           role: message.role,
           content: message.content,
@@ -115,7 +115,7 @@ export class LangGraphService {
   }
 
   // Invoke a graph with streaming - updated to match the example payload structure
-  async invokeGraphStream(agentId: string, threadId: string, options: any = {}) {
+  async invokeGraphStream(agentId: string, threadId: string, options: any = {}, headersOverride?: Record<string, string>) {
     try {
       // Use the proxy endpoint for streaming
       const url = `${this.baseURL}/threads/${threadId}/runs/stream`
@@ -177,7 +177,7 @@ export class LangGraphService {
 
       const response = await fetch(url, {
         method: "POST",
-        headers: this.getHeaders(),
+        headers: headersOverride || this.getHeaders(),
         body: JSON.stringify(requestBody),
       })
 

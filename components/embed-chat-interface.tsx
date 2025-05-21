@@ -13,9 +13,10 @@ import { useAgents } from "@/lib/agent-service"
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
+  embedUserId?: string | null
 }
 
-export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
+export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInterfaceProps) {
   // Normalize agent id: treat 'b-bot' and 'bbot' as the same
   const normalizedAgent = (!initialAgent || initialAgent === "b-bot" || initialAgent === "bbot") ? "bbot" : initialAgent;
   const [selectedAgent] = useState<string>(normalizedAgent);
@@ -37,18 +38,36 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
   const langGraphService = new LangGraphService()
   const streamingHandler = new StreamingHandlerService()
 
+  const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
+
+  // Helper to get headers for embed mode
+  const getEmbedHeaders = () => {
+    if (embedUserId && ADMIN_API_KEY) {
+      return {
+        "Admin-API-Key": ADMIN_API_KEY,
+        "X-User-ID": embedUserId,
+        "Content-Type": "application/json",
+      };
+    }
+    return undefined;
+  };
+
   // Initialize thread when component mounts
   useEffect(() => {
     // Allow B-Bot without authentication, but require auth for other agents
-    const shouldCreateThread = (isAuthenticated || isLocallyAuthenticated() || selectedAgent === "b-bot") && !threadId
+    const shouldCreateThread = (isAuthenticated || isLocallyAuthenticated() || selectedAgent === "b-bot" || embedUserId) && !threadId
 
     if (shouldCreateThread) {
       const initializeThread = async () => {
         try {
+          const embedHeaders = getEmbedHeaders();
+          if (embedHeaders) {
+            console.log("[EmbedChatInterface] Sending headers for createThread:", embedHeaders);
+          }
           const thread = await langGraphService.createThread({
-            user_id: user?.sub || "anonymous-user",
+            user_id: embedUserId || user?.sub || "anonymous-user",
             agent_id: selectedAgent,
-          })
+          }, embedHeaders)
           setThreadId(thread.thread_id)
           console.log("Thread initialized with ID:", thread.thread_id)
         } catch (error) {
@@ -64,7 +83,7 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
 
       initializeThread()
     }
-  }, [isAuthenticated, threadId, user?.sub, selectedAgent])
+  }, [isAuthenticated, threadId, user?.sub, selectedAgent, embedUserId])
 
   // Fetch and cache the auth token
   useEffect(() => {
@@ -144,23 +163,31 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
       // Get the current thread ID or create a new one
       let currentThreadId = threadId
       if (!currentThreadId) {
+        const embedHeaders = getEmbedHeaders();
+        if (embedHeaders) {
+          console.log("[EmbedChatInterface] Sending headers for createThread:", embedHeaders);
+        }
         const thread = await langGraphService.createThread({
-          user_id: user?.sub || "anonymous-user",
+          user_id: embedUserId || user?.sub || "anonymous-user",
           agent_id: selectedAgent,
-        })
+        }, embedHeaders)
         currentThreadId = thread.thread_id
         setThreadId(currentThreadId)
       }
 
       // Add the message to the thread
       if (currentThreadId) {
+        const embedHeaders = getEmbedHeaders();
+        if (embedHeaders) {
+          console.log("[EmbedChatInterface] Sending headers for addThreadMessage:", embedHeaders);
+        }
         await langGraphService.addThreadMessage(currentThreadId, {
           role: "user",
           content: messageContent,
-        })
+        }, embedHeaders)
       }
 
-      const userId = user?.sub || "anonymous-user"
+      const userId = embedUserId || user?.sub || "anonymous-user"
       const agentId = selectedAgent
 
       const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
@@ -184,7 +211,11 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
       }
 
       // Invoke the streaming graph
-      const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig)
+      const embedHeaders = getEmbedHeaders();
+      if (embedHeaders) {
+        console.log("[EmbedChatInterface] Sending headers for invokeGraphStream:", embedHeaders);
+      }
+      const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig, embedHeaders)
 
       // Process the streaming response
       await streamingHandler.processStream(response, {
