@@ -16,8 +16,9 @@ interface EmbedChatInterfaceProps {
 }
 
 export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
-  // Use the initialAgent or default to "b-bot"
-  const [selectedAgent] = useState<string>(initialAgent ?? "bbot")
+  // Normalize agent id: treat 'b-bot' and 'bbot' as the same
+  const normalizedAgent = (!initialAgent || initialAgent === "b-bot" || initialAgent === "bbot") ? "bbot" : initialAgent;
+  const [selectedAgent] = useState<string>(normalizedAgent);
   const [tokensUsed, setTokensUsed] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const [cachedAuthToken, setCachedAuthToken] = useState<string | null>(null)
@@ -124,10 +125,6 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
     }
     checkAgent()
   }, [selectedAgent, getAgent, initialAgent])
-
-  if (!agentValid) {
-    return <div className="flex items-center justify-center h-screen text-red-500">{agentError || "Checking assistant permissions..."}</div>
-  }
 
   // --- Streaming message logic (like ChatInterface) ---
   const handleSendMessage = async (messageContent: string) => {
@@ -267,28 +264,34 @@ export function EmbedChatInterface({ initialAgent }: EmbedChatInterfaceProps) {
 
   return (
     <div className="embed-container flex flex-col h-screen">
-      <div className="flex-1 overflow-auto">
-        <div className="chat-container">
-          <ChatMessages
-            messages={messages}
-            messagesEndRef={messagesEndRef}
-            selectedAgent={selectedAgent}
-            agents={agents}
-            incomingMessage={incomingMessage}
-            onSuggestionClick={(suggestion) => {
-              setInput(suggestion)
-              setTimeout(() => {
-                handleSendMessage(suggestion)
-              }, 100)
-            }}
-          />
-          <ChatInput
-            onSubmit={handleMessageSubmit}
-            isLoading={isLoading}
-            selectedAgent={selectedAgent}
-          />
+      {!agentValid ? (
+        <div className="flex items-center justify-center h-screen text-red-500">
+          {agentError || "Checking assistant permissions..."}
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-auto">
+          <div className="chat-container">
+            <ChatMessages
+              messages={messages}
+              messagesEndRef={messagesEndRef}
+              selectedAgent={selectedAgent}
+              agents={agents}
+              incomingMessage={incomingMessage}
+              onSuggestionClick={(suggestion) => {
+                setInput(suggestion)
+                setTimeout(() => {
+                  handleSendMessage(suggestion)
+                }, 100)
+              }}
+            />
+            <ChatInput
+              onSubmit={handleMessageSubmit}
+              isLoading={isLoading}
+              selectedAgent={selectedAgent}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
