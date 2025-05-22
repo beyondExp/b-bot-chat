@@ -17,8 +17,6 @@ export const anonymousPublisher: Publisher = {
   followerCount: 0,
 }
 
-const MASTER_KEY = process.env.NEXT_PUBLIC_BBOT_MASTER_KEY || "REPLACE_WITH_MASTER_KEY";
-
 export function useAgents() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -121,12 +119,11 @@ export function useAgents() {
       try {
         let responseData
         if (options?.allowAnonymous) {
-          // Anonymous fetch using master key
-          const response = await fetch(`https://api-staging.b-bot.space/api/v2/assistants/${agentId}`, {
+          // Anonymous fetch using proxy endpoint, no Authorization header
+          const response = await fetch(`/api/proxy/assistants/${agentId}`, {
             method: "GET",
             headers: {
               "Content-Type": "application/json",
-              "Authorization": `Bearer ${MASTER_KEY}`,
             },
           })
           if (!response.ok) throw new Error(`API error: ${response.status} ${response.statusText}`)
