@@ -31,6 +31,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   const [agentValid, setAgentValid] = useState<boolean>(false)
   const [agentError, setAgentError] = useState<string>("")
   const { getAgent } = useAgents()
+  const [agentObj, setAgentObj] = useState<any>(null);
 
   const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
 
@@ -144,6 +145,38 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     }
     checkAgent()
   }, [selectedAgent, getAgent, initialAgent])
+
+  // Fetch agent object on mount
+  useEffect(() => {
+    const fetchAgent = async () => {
+      if (!initialAgent || initialAgent === "bbot" || initialAgent === "b-bot") {
+        setAgentObj({
+          id: "bbot",
+          name: "B-Bot",
+          shortDescription: "Your personal AI assistant",
+          description: "B-Bot is your personal AI assistant that can help with a wide range of tasks.",
+          profileImage: "/helpful-robot.png",
+          category: "General",
+          publisherId: "beyond-official",
+          abilities: [],
+          apps: [],
+          templates: [
+            { text: "Hello! How can you help me?" },
+            { text: "What can you do?" },
+            { text: "Tell me about yourself" }
+          ]
+        });
+        return;
+      }
+      try {
+        const agent = await getAgent(selectedAgent || '', { allowAnonymous: true });
+        setAgentObj(agent);
+      } catch (e) {
+        setAgentObj(null);
+      }
+    };
+    fetchAgent();
+  }, [selectedAgent, getAgent, initialAgent]);
 
   // --- Streaming message logic (like ChatInterface) ---
   const handleSendMessage = async (messageContent: string) => {
@@ -278,21 +311,6 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     }
   }, [])
 
-  // Minimal agents array for B-Bot
-  const agents = [
-    {
-      id: "bbot",
-      name: "B-Bot",
-      shortDescription: "Your personal AI assistant",
-      description: "B-Bot is your personal AI assistant that can help with a wide range of tasks.",
-      profileImage: "/helpful-robot.png",
-      category: "General",
-      publisherId: "beyond-official",
-      abilities: [],
-      apps: [],
-    },
-  ];
-
   return (
     <div className="embed-container flex flex-col h-screen">
       {!agentValid ? (
@@ -306,8 +324,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
               messages={messages}
               messagesEndRef={messagesEndRef}
               selectedAgent={selectedAgent}
-              agents={agents}
+              agents={agentObj ? [agentObj] : []}
               incomingMessage={incomingMessage}
+              suggestions={agentObj && agentObj.templates && agentObj.templates.length > 0 ? agentObj.templates.map((t: any) => t.text || t) : undefined}
               onSuggestionClick={(suggestion) => {
                 setInput(suggestion)
                 setTimeout(() => {

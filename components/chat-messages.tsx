@@ -14,6 +14,7 @@ interface ChatMessagesProps {
   agents: any[]
   incomingMessage?: string
   onSuggestionClick: (suggestion: string) => void
+  suggestions?: string[]
 }
 
 export function ChatMessages({
@@ -23,6 +24,7 @@ export function ChatMessages({
   agents,
   incomingMessage = "",
   onSuggestionClick,
+  suggestions,
 }: ChatMessagesProps) {
   // Get agent avatar
   const getAgentAvatar = () => {
@@ -49,7 +51,7 @@ export function ChatMessages({
   }
 
   // Welcome message suggestions
-  const suggestions = ["Hello! How can you help me?", "What can you do?", "Tell me about yourself"]
+  const welcomeSuggestions = suggestions && suggestions.length > 0 ? suggestions : ["Hello! How can you help me?", "What can you do?", "Tell me about yourself"];
 
   return (
     <div className="chat-messages flex-1 overflow-y-auto p-4 space-y-4">
@@ -64,7 +66,7 @@ export function ChatMessages({
             Start a conversation by sending a message or try one of these suggestions:
           </p>
           <div className="flex flex-wrap gap-2 justify-center">
-            {suggestions.map((suggestion) => (
+            {welcomeSuggestions.map((suggestion) => (
               <Button
                 key={suggestion}
                 variant="outline"
