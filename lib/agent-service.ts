@@ -98,12 +98,13 @@ export function useAgents() {
       name: assistant.name || "Unnamed Assistant",
       shortDescription: assistant.description || "No description available",
       description: assistant.description || "No description available",
-      profileImage: "/placeholder.svg?height=200&width=200", // Default image
+      profileImage: metadata.profileImage || "/placeholder.svg?height=200&width=200", // Use metadata image if present
       category: metadata.expert_profession || "General",
       publisherId: metadata.owner || "anonymous",
       publisher: anonymousPublisher, // Always use anonymous publisher for now
-      abilities: [],
+      abilities: metadata.abilities || [],
       apps: [],
+      templates: metadata.templates || [],
       metadata: metadata,
       // Add raw data for debugging
       rawData: assistant,

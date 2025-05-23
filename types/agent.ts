@@ -29,4 +29,5 @@ export interface Agent {
   isPublishedByUser?: boolean
   metadata?: any
   rawData?: any
+  templates?: any[]
 }
