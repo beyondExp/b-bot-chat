@@ -42,12 +42,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
 
   // Helper to get headers for embed mode
-  const getEmbedHeaders = () => {
+  const getEmbedHeaders = (isStream = false) => {
     if (embedUserId && ADMIN_API_KEY) {
       return {
         "Admin-API-Key": ADMIN_API_KEY,
         "X-User-ID": embedUserId,
         "Content-Type": "application/json",
+        "Accept": isStream ? "text/event-stream" : "application/json",
       };
     }
     return undefined;
@@ -244,26 +245,36 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       }
 
       // Invoke the streaming graph
-      const embedHeaders = getEmbedHeaders();
+      const embedHeaders = getEmbedHeaders(true);
       if (embedHeaders) {
         console.log("[EmbedChatInterface] Sending headers for invokeGraphStream:", embedHeaders);
+      }
+      if (!currentThreadId) {
+        throw new Error("No thread ID available for streaming");
       }
       const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig, embedHeaders)
 
       // Process the streaming response
       await streamingHandler.processStream(response, {
-        onMessage: (msg) => {
-          setIncomingMessage(msg)
+        onMessage: (msgObj) => {
+          setIncomingMessage(msgObj.content)
         },
         onUpdate: (messagesArr) => {
           if (messagesArr && messagesArr.length > 0) {
             const mappedMessages = messagesArr.map((msg: any, idx: number) => ({
-              id: msg.id || `msg-${idx}-${Date.now()}`,
+              id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
               role: msg.type === "human" || msg.role === "user" ? "user" : "assistant",
               content: msg.content || "",
               timestamp: new Date().toISOString(),
             }))
-            setMessages(mappedMessages)
+            setMessages(prev => {
+              // Replace or add messages by id
+              const msgMap = new Map(prev.map(m => [m.id, m]));
+              for (const m of mappedMessages) {
+                msgMap.set(m.id, m); // Update if exists, add if new
+              }
+              return Array.from(msgMap.values());
+            })
           }
           setIsLoading(false)
           setIncomingMessage("")

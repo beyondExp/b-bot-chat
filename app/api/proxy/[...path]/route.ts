@@ -46,7 +46,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     // Construct the target URL
     const targetPath = pathSegments.join("/")
     const url = new URL(`${langGraphApiUrl}/${targetPath}`)
-
+    console.log("[Proxy] URL :", url);
     // Copy query parameters
     const searchParams = new URLSearchParams(request.nextUrl.search)
     for (const [key, value] of searchParams.entries()) {
@@ -77,6 +77,9 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
       headers.set("Authorization", authHeader)
     }
 
+    console.log("[Proxy] targetPath:", targetPath);
+    console.log("[Proxy] headers:", Object.fromEntries(headers.entries()));
+
     // Get the request body if it's not a GET request
     let body = null
     if (method !== "GET" && method !== "HEAD") {
@@ -85,10 +88,12 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
 
         // If this is a streaming request to /threads/{threadId}/runs/stream
         // Format the payload according to the expected structure
-        if (targetPath.includes("/threads/") && targetPath.includes("/runs/stream")) {
+        if (targetPath.includes("/runs/stream")) {
           // Extract the input and config from the request body
           const { input, config } = body
-
+          headers.set("Content-Type", "text/event-stream");
+          headers.set("Accept", "text/event-stream");
+          console.log("[Proxy] Streaming request detected");
           // Create the properly formatted payload
           const formattedBody = {
             input,
@@ -97,14 +102,19 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
             stream_subgraphs: body.stream_subgraphs !== false,
             subgraphs: body.subgraphs !== false,
             on_disconnect: body.on_disconnect || "cancel",
+            assistant_id: config?.agent_id || body.assistant_id
           }
 
           body = formattedBody
         }
       } catch (error) {
+        console.log("[Proxy] Error parsing request body:", error);
         // Silent error handling for body parsing
       }
     }
+
+    // Always remove Content-Length if body is changed
+    headers.delete("Content-Length");
 
     // Make the request to the LangGraph API
     const response = await fetch(url.toString(), {
@@ -127,6 +137,13 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
           const { value, done } = await reader.read();
           if (done) break;
           if (value) {
+            // Log the incoming stream chunk for debugging
+            try {
+              const chunkStr = new TextDecoder().decode(value);
+              console.log(`[Proxy][Stream][${new Date().toISOString()}] Incoming chunk:`, chunkStr.slice(0, 200));
+            } catch (e) {
+              console.log('[Proxy][Stream] Incoming chunk (binary, not decoded)');
+            }
             await writer.write(value);
             await writer.write(encoder.encode("\n")); // helps flush in some environments
           }
@@ -147,6 +164,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     const data = await response.json();
     return Response.json(data, { status: response.status });
   } catch (error) {
+    console.log("[Proxy] Error:", error);
     return NextResponse.json({ error: "Proxy error" }, { status: 500 })
   }
 }
