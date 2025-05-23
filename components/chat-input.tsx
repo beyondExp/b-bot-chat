@@ -11,6 +11,7 @@ interface ChatInputProps {
   onSubmit: (e: React.FormEvent<HTMLFormElement>, input: string) => void
   isLoading: boolean
   selectedAgent: string | null
+  agentName?: string
 }
 
 interface Ability {
@@ -30,7 +31,7 @@ interface App {
   isConnected: boolean
 }
 
-export function ChatInput({ onSubmit, isLoading, selectedAgent }: ChatInputProps) {
+export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName }: ChatInputProps) {
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -228,6 +229,8 @@ export function ChatInput({ onSubmit, isLoading, selectedAgent }: ChatInputProps
     }
   }
 
+  const placeholderName = agentName || selectedAgent || "Assistant"
+
   return (
     <div className="chat-input-container p-4 border-t">
       <form onSubmit={handleSubmit} className="flex items-end gap-2">
@@ -236,7 +239,7 @@ export function ChatInput({ onSubmit, isLoading, selectedAgent }: ChatInputProps
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`Message ${selectedAgent || "B-Bot"}...`}
+          placeholder={`Message ${placeholderName}`}
           className="min-h-[40px] max-h-[200px] resize-none"
           disabled={isLoading}
         />

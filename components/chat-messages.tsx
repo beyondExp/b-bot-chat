@@ -62,7 +62,7 @@ export function ChatMessages({
             <AvatarImage src={getAgentAvatar() || "/placeholder.svg"} alt={getAgentName()} />
             <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
           </Avatar>
-          <h2 className="text-2xl font-bold mb-2">Welcome to {getAgentName()}</h2>
+          <h2 className="text-2xl font-bold mb-2">Hello I am {getAgentName()}</h2>
           <p className="text-gray-500 mb-6 text-center max-w-md">
             Start a conversation by sending a message or try one of these suggestions:
           </p>

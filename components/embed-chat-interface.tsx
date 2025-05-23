@@ -338,6 +338,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
               onSubmit={handleMessageSubmit}
               isLoading={isLoading}
               selectedAgent={selectedAgent}
+              agentName={agentObj?.name}
             />
           </div>
         </div>
