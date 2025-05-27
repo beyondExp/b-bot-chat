@@ -316,11 +316,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           if (messages && messages.length > 0) {
             const mappedMessages = messages.map((msg, idx) => ({
               id: msg.id || `msg-${idx}-${Date.now()}`,
-              role: msg.type === "human" || msg.role === "user" ? "user" : "assistant",
+              role: msg.type === "ai"
+                ? "assistant"
+                : msg.type === "human"
+                  ? "user"
+                  : msg.role || "user",
               content: msg.content || "",
               timestamp: new Date().toISOString(),
             }))
             console.log('[Chat] mappedMessages:', mappedMessages)
+            console.log('[DEBUG][mappedMessages][normal chat]', mappedMessages);
             setChatMessages(mappedMessages)
           }
 

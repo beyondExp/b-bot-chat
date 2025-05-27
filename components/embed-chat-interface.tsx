@@ -33,6 +33,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   const { getAgent } = useAgents()
   const [agentObj, setAgentObj] = useState<any>(null);
 
+  // Debug log after state is defined
+  console.log('[UI][render] messages:', messages, 'incomingMessage:', incomingMessage);
+
   const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
 
   // Create a new instance of LangGraphService
@@ -191,7 +194,11 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       content: messageContent,
       timestamp: new Date().toISOString(),
     }
-    setMessages((prev) => [...prev, tempUserMessage])
+    setMessages((prev) => {
+      const newMessages = [...prev, tempUserMessage];
+      console.log('[DEBUG][setMessages][tempUserMessage]', newMessages);
+      return newMessages;
+    });
 
     try {
       // Get the current thread ID or create a new one
@@ -255,32 +262,81 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig, embedHeaders)
 
       // Process the streaming response
-      await streamingHandler.processStream(response, {
-        onMessage: (msgObj) => {
-          setIncomingMessage(msgObj.content)
+      console.log('[UI][processStream] About to call streamingHandler.processStream with callbacks:', {
+        onMessage: (msgObj: any) => {
+          console.log('[UI][onMessage] incomingMessage:', msgObj);
+          setIncomingMessage((prev) => {
+            console.log('[DEBUG][setIncomingMessage][onMessage]', msgObj.content);
+            return msgObj.content;
+          });
         },
-        onUpdate: (messagesArr) => {
+        onUpdate: (messagesArr: any[]) => {
+          console.log('[UI][onUpdate] messagesArr:', messagesArr);
           if (messagesArr && messagesArr.length > 0) {
+            messagesArr.forEach((msg: any, idx: number) => {
+              console.log(`[UI][onUpdate][message ${idx}] id: ${msg.id}, type: ${msg.type}, role: ${msg.role}, content: ${msg.content}`);
+            });
             const mappedMessages = messagesArr.map((msg: any, idx: number) => ({
               id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-              role: msg.type === "human" || msg.role === "user" ? "user" : "assistant",
+              role: msg.type === "ai"
+                ? "assistant"
+                : msg.type === "human"
+                  ? "user"
+                  : msg.role || "user",
               content: msg.content || "",
               timestamp: new Date().toISOString(),
-            }))
-            setMessages(prev => {
-              // Replace or add messages by id
-              const msgMap = new Map(prev.map(m => [m.id, m]));
-              for (const m of mappedMessages) {
-                msgMap.set(m.id, m); // Update if exists, add if new
-              }
-              return Array.from(msgMap.values());
-            })
+            }));
+            console.log('[DEBUG][setMessages][onUpdate]', mappedMessages);
+            console.log('[DEBUG][mappedMessages][embed chat]', mappedMessages);
+            setMessages(mappedMessages); // Replace the entire array
           }
+          console.log('[DEBUG][setIncomingMessage][onUpdate] clear incomingMessage');
+          setIncomingMessage(""); // Always clear
           setIsLoading(false)
-          setIncomingMessage("")
           scrollToBottom()
         },
-        onError: (err) => {
+        onError: (err: any) => {
+          setIsLoading(false)
+          alert(`Error: ${err}`)
+        },
+        onScrollDown: scrollToBottom,
+        onSetLoading: setIsLoading,
+        onInterrupt: () => {},
+      });
+      await streamingHandler.processStream(response, {
+        onMessage: (msgObj: any) => {
+          console.log('[UI][onMessage] incomingMessage:', msgObj);
+          setIncomingMessage((prev) => {
+            console.log('[DEBUG][setIncomingMessage][onMessage]', msgObj.content);
+            return msgObj.content;
+          });
+        },
+        onUpdate: (messagesArr: any[]) => {
+          console.log('[UI][onUpdate] messagesArr:', messagesArr);
+          if (messagesArr && messagesArr.length > 0) {
+            messagesArr.forEach((msg: any, idx: number) => {
+              console.log(`[UI][onUpdate][message ${idx}] id: ${msg.id}, type: ${msg.type}, role: ${msg.role}, content: ${msg.content}`);
+            });
+            const mappedMessages = messagesArr.map((msg: any, idx: number) => ({
+              id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+              role: msg.type === "ai"
+                ? "assistant"
+                : msg.type === "human"
+                  ? "user"
+                  : msg.role || "user",
+              content: msg.content || "",
+              timestamp: new Date().toISOString(),
+            }));
+            console.log('[DEBUG][setMessages][onUpdate]', mappedMessages);
+            console.log('[DEBUG][mappedMessages][embed chat]', mappedMessages);
+            setMessages(mappedMessages); // Replace the entire array
+          }
+          console.log('[DEBUG][setIncomingMessage][onUpdate] clear incomingMessage');
+          setIncomingMessage(""); // Always clear
+          setIsLoading(false)
+          scrollToBottom()
+        },
+        onError: (err: any) => {
           setIsLoading(false)
           alert(`Error: ${err}`)
         },
@@ -305,6 +361,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
 
   useEffect(() => {
     scrollToBottom()
+    console.log('[DEBUG][useEffect][messages/incomingMessage]', { messages, incomingMessage });
   }, [messages, incomingMessage])
 
   // Simplified message submission handler
@@ -321,6 +378,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       document.body.classList.remove("embedded-chat")
     }
   }, [])
+
+  // Add debug log for ChatMessages props before return
+  const debugChatMessagesProps = { messages, incomingMessage };
+  console.log('[DEBUG][render][ChatMessages props]', debugChatMessagesProps);
 
   return (
     <div className="embed-container flex flex-col h-screen">
