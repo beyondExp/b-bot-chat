@@ -66,13 +66,13 @@ export function ChatMessages({
           <p className="text-gray-500 mb-6 text-center max-w-md">
             Start a conversation by sending a message or try one of these suggestions:
           </p>
-          <div className="flex flex-wrap gap-2 justify-center">
+          <div className="flex flex-col gap-2 items-center w-full max-w-md mx-auto px-2">
             {welcomeSuggestions.map((suggestion) => (
               <Button
                 key={suggestion}
                 variant="outline"
                 onClick={() => onSuggestionClick(suggestion)}
-                className="text-sm"
+                className="w-full h-auto items-start text-left text-sm whitespace-normal break-words"
               >
                 {suggestion}
               </Button>

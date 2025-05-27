@@ -398,7 +398,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
               selectedAgent={selectedAgent}
               agents={agentObj ? [agentObj] : []}
               incomingMessage={incomingMessage}
-              suggestions={agentObj && agentObj.templates && agentObj.templates.length > 0 ? agentObj.templates.map((t: any) => t.text || t) : undefined}
+              suggestions={
+                agentObj && agentObj.templates && agentObj.templates.length > 0
+                  ? agentObj.templates.map((t: any) =>
+                      t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
+                    )
+                  : undefined
+              }
               onSuggestionClick={(suggestion) => {
                 setInput(suggestion)
                 setTimeout(() => {
