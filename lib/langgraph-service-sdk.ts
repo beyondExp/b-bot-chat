@@ -159,7 +159,7 @@ export class LangGraphService {
           user_id: userId,
           ability_id: options.config?.ability_id,
           model_id: options.config?.query_model || options.config?.response_model,
-          apps: options.config?.apps || options.input?.apps || {},
+          //apps: options.config?.apps || options.input?.apps || {},
           tool_activation: options.config?.tool_activation || {},
           document_urls: options.config?.document_urls || [],
           conversation_history: options.config?.conversation_history || [],

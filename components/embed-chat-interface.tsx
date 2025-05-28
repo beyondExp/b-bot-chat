@@ -10,6 +10,7 @@ import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 import { LangGraphService } from "@/lib/langgraph-service-sdk"
 import { StreamingHandlerService } from "@/lib/streaming-handler-service"
 import { useAgents } from "@/lib/agent-service"
+import { useRouter } from 'next/router'
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
@@ -32,6 +33,20 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   const [agentError, setAgentError] = useState<string>("")
   const { getAgent } = useAgents()
   const [agentObj, setAgentObj] = useState<any>(null);
+  const [toolEvents, setToolEvents] = useState<any[]>([]);
+
+  // Get streaming and color from query params
+  let streaming = true;
+  let userColor = '#2563eb'; // default blue
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('streaming')) {
+      streaming = params.get('streaming') !== 'false';
+    }
+    if (params.has('color')) {
+      userColor = params.get('color') || userColor;
+    }
+  }
 
   // Debug log after state is defined
   console.log('[UI][render] messages:', messages, 'incomingMessage:', incomingMessage);
@@ -184,21 +199,18 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
 
   // --- Streaming message logic (like ChatInterface) ---
   const handleSendMessage = async (messageContent: string) => {
+    setToolEvents([]); // Clear previous tool events
     if (!messageContent.trim()) return
     setIsLoading(true)
 
     // Create a temporary user message to show immediately
-    const tempUserMessage = {
+    const userMessage = {
       id: `user-temp-${Date.now()}`,
       role: "user",
       content: messageContent,
       timestamp: new Date().toISOString(),
-    }
-    setMessages((prev) => {
-      const newMessages = [...prev, tempUserMessage];
-      console.log('[DEBUG][setMessages][tempUserMessage]', newMessages);
-      return newMessages;
-    });
+    };
+    setMessages((prev) => [...prev, userMessage]);
 
     try {
       // Get the current thread ID or create a new one
@@ -233,6 +245,11 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
 
       const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
 
+      // Merge assistant apps with user apps (user apps take precedence)
+      const userApps = {};
+      const assistantApps = agentObj?.rawData?.config?.apps || {};
+      const mergedApps = { ...assistantApps, ...userApps };
+
       // Prepare the configuration for the stream
       const streamConfig = {
         input: {
@@ -248,6 +265,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
           max_tokens: 1024,
           top_p: 1.0,
           instructions: "Be helpful and concise.",
+          apps: mergedApps,
         },
       }
 
@@ -264,31 +282,112 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       // Process the streaming response
       console.log('[UI][processStream] About to call streamingHandler.processStream with callbacks:', {
         onMessage: (msgObj: any) => {
-          console.log('[UI][onMessage] incomingMessage:', msgObj);
-          setIncomingMessage((prev) => {
-            console.log('[DEBUG][setIncomingMessage][onMessage]', msgObj.content);
-            return msgObj.content;
+          if (!streaming) return; // Ignore if not streaming
+          setMessages(prev => {
+            // Try to match by id first
+            const idx = prev.findIndex(m => m.role === "assistant" && m.id === msgObj.id);
+            if (idx !== -1) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: msgObj.content };
+              return updated;
+            }
+            // Fallback: match by last assistant
+            const lastIdx = [...prev].reverse().findIndex(m => m.role === "assistant");
+            if (lastIdx !== -1) {
+              const idx = prev.length - 1 - lastIdx;
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: msgObj.content };
+              return updated;
+            }
+            // If no assistant message, append a new one
+            return [...prev, { id: msgObj.id || `msg-${Date.now()}`, role: "assistant", content: msgObj.content, timestamp: new Date().toISOString() }];
           });
+          scrollToBottom();
         },
-        onUpdate: (messagesArr: any[]) => {
-          console.log('[UI][onUpdate] messagesArr:', messagesArr);
+        onUpdate: (messagesArr: any[], options?: { replace: boolean }) => {
+          if (!streaming && !(options && options.replace)) {
+            // Ignore updates/partials if not streaming
+            return;
+          }
+          console.log('[UI][onUpdate] messagesArr:', messagesArr, options);
           if (messagesArr && messagesArr.length > 0) {
-            messagesArr.forEach((msg: any, idx: number) => {
-              console.log(`[UI][onUpdate][message ${idx}] id: ${msg.id}, type: ${msg.type}, role: ${msg.role}, content: ${msg.content}`);
+            const mappedMessages = messagesArr.flatMap((msg: any, idx: number) => {
+              // Only map 'ai' messages if content is non-empty
+              if (msg.type === "ai") {
+                if (msg.content && msg.content.trim() !== "") {
+                  return [{
+                    id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                    role: "assistant",
+                    content: msg.content,
+                    timestamp: new Date().toISOString(),
+                  }];
+                } else {
+                  return [];
+                }
+              }
+              // User message
+              if (msg.type === "human" || msg.role === "user") {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: "user",
+                  content: msg.content || "",
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Tool call request (function call) - only if content is empty
+              const toolCall = (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)
+                ? msg.tool_calls[0]
+                : (msg.additional_kwargs && Array.isArray(msg.additional_kwargs.tool_calls) && msg.additional_kwargs.tool_calls.length > 0)
+                  ? msg.additional_kwargs.tool_calls[0]
+                  : null;
+              if (
+                toolCall &&
+                (!msg.content || msg.content.trim() === "")
+              ) {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: 'tool_call',
+                  content: `[Tool call: ${toolCall.name || toolCall.function?.name || 'unknown'}]`,
+                  args: toolCall.args || toolCall.function?.arguments,
+                  tool_call_id: toolCall.id,
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Tool response
+              if (msg.type === 'tool' || msg.role === 'tool') {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: 'tool_response',
+                  content: msg.content || '[Tool response]',
+                  tool_name: msg.name || msg.tool_name,
+                  status: msg.status,
+                  tool_call_id: msg.tool_call_id,
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Fallback: skip unknown/empty types
+              return [];
             });
-            const mappedMessages = messagesArr.map((msg: any, idx: number) => ({
-              id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-              role: msg.type === "ai"
-                ? "assistant"
-                : msg.type === "human"
-                  ? "user"
-                  : msg.role || "user",
-              content: msg.content || "",
-              timestamp: new Date().toISOString(),
-            }));
             console.log('[DEBUG][setMessages][onUpdate]', mappedMessages);
-            console.log('[DEBUG][mappedMessages][embed chat]', mappedMessages);
-            setMessages(mappedMessages); // Replace the entire array
+            if (options && options.replace) {
+              // Sort by timestamp or id if available
+              const sortedMessages = [...mappedMessages].sort((a, b) => {
+                if (a.timestamp && b.timestamp) {
+                  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                }
+                if (a.id && b.id) {
+                  return a.id.localeCompare(b.id);
+                }
+                return 0;
+              });
+              setMessages(sortedMessages);
+            } else {
+              setMessages(prev => {
+                const existingIds = new Set(prev.map(m => m.id));
+                const newMessages = mappedMessages.filter(m => !existingIds.has(m.id));
+                return [...prev, ...newMessages];
+              });
+            }
           }
           console.log('[DEBUG][setIncomingMessage][onUpdate] clear incomingMessage');
           setIncomingMessage(""); // Always clear
@@ -298,6 +397,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
         onError: (err: any) => {
           setIsLoading(false)
           alert(`Error: ${err}`)
+        },
+        onToolEvent: (toolEventArr: any[]) => {
+          setToolEvents((prev) => [...prev, ...toolEventArr]);
+          console.log('[UI][onToolEvent]', toolEventArr);
         },
         onScrollDown: scrollToBottom,
         onSetLoading: setIsLoading,
@@ -305,31 +408,112 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       });
       await streamingHandler.processStream(response, {
         onMessage: (msgObj: any) => {
-          console.log('[UI][onMessage] incomingMessage:', msgObj);
-          setIncomingMessage((prev) => {
-            console.log('[DEBUG][setIncomingMessage][onMessage]', msgObj.content);
-            return msgObj.content;
+          if (!streaming) return; // Ignore if not streaming
+          setMessages(prev => {
+            // Try to match by id first
+            const idx = prev.findIndex(m => m.role === "assistant" && m.id === msgObj.id);
+            if (idx !== -1) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: msgObj.content };
+              return updated;
+            }
+            // Fallback: match by last assistant
+            const lastIdx = [...prev].reverse().findIndex(m => m.role === "assistant");
+            if (lastIdx !== -1) {
+              const idx = prev.length - 1 - lastIdx;
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: msgObj.content };
+              return updated;
+            }
+            // If no assistant message, append a new one
+            return [...prev, { id: msgObj.id || `msg-${Date.now()}`, role: "assistant", content: msgObj.content, timestamp: new Date().toISOString() }];
           });
+          scrollToBottom();
         },
-        onUpdate: (messagesArr: any[]) => {
-          console.log('[UI][onUpdate] messagesArr:', messagesArr);
+        onUpdate: (messagesArr: any[], options?: { replace: boolean }) => {
+          if (!streaming && !(options && options.replace)) {
+            // Ignore updates/partials if not streaming
+            return;
+          }
+          console.log('[UI][onUpdate] messagesArr:', messagesArr, options);
           if (messagesArr && messagesArr.length > 0) {
-            messagesArr.forEach((msg: any, idx: number) => {
-              console.log(`[UI][onUpdate][message ${idx}] id: ${msg.id}, type: ${msg.type}, role: ${msg.role}, content: ${msg.content}`);
+            const mappedMessages = messagesArr.flatMap((msg: any, idx: number) => {
+              // Only map 'ai' messages if content is non-empty
+              if (msg.type === "ai") {
+                if (msg.content && msg.content.trim() !== "") {
+                  return [{
+                    id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                    role: "assistant",
+                    content: msg.content,
+                    timestamp: new Date().toISOString(),
+                  }];
+                } else {
+                  return [];
+                }
+              }
+              // User message
+              if (msg.type === "human" || msg.role === "user") {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: "user",
+                  content: msg.content || "",
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Tool call request (function call) - only if content is empty
+              const toolCall = (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)
+                ? msg.tool_calls[0]
+                : (msg.additional_kwargs && Array.isArray(msg.additional_kwargs.tool_calls) && msg.additional_kwargs.tool_calls.length > 0)
+                  ? msg.additional_kwargs.tool_calls[0]
+                  : null;
+              if (
+                toolCall &&
+                (!msg.content || msg.content.trim() === "")
+              ) {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: 'tool_call',
+                  content: `[Tool call: ${toolCall.name || toolCall.function?.name || 'unknown'}]`,
+                  args: toolCall.args || toolCall.function?.arguments,
+                  tool_call_id: toolCall.id,
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Tool response
+              if (msg.type === 'tool' || msg.role === 'tool') {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: 'tool_response',
+                  content: msg.content || '[Tool response]',
+                  tool_name: msg.name || msg.tool_name,
+                  status: msg.status,
+                  tool_call_id: msg.tool_call_id,
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Fallback: skip unknown/empty types
+              return [];
             });
-            const mappedMessages = messagesArr.map((msg: any, idx: number) => ({
-              id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-              role: msg.type === "ai"
-                ? "assistant"
-                : msg.type === "human"
-                  ? "user"
-                  : msg.role || "user",
-              content: msg.content || "",
-              timestamp: new Date().toISOString(),
-            }));
             console.log('[DEBUG][setMessages][onUpdate]', mappedMessages);
-            console.log('[DEBUG][mappedMessages][embed chat]', mappedMessages);
-            setMessages(mappedMessages); // Replace the entire array
+            if (options && options.replace) {
+              // Sort by timestamp or id if available
+              const sortedMessages = [...mappedMessages].sort((a, b) => {
+                if (a.timestamp && b.timestamp) {
+                  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                }
+                if (a.id && b.id) {
+                  return a.id.localeCompare(b.id);
+                }
+                return 0;
+              });
+              setMessages(sortedMessages);
+            } else {
+              setMessages(prev => {
+                const existingIds = new Set(prev.map(m => m.id));
+                const newMessages = mappedMessages.filter(m => !existingIds.has(m.id));
+                return [...prev, ...newMessages];
+              });
+            }
           }
           console.log('[DEBUG][setIncomingMessage][onUpdate] clear incomingMessage');
           setIncomingMessage(""); // Always clear
@@ -339,6 +523,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
         onError: (err: any) => {
           setIsLoading(false)
           alert(`Error: ${err}`)
+        },
+        onToolEvent: (toolEventArr: any[]) => {
+          setToolEvents((prev) => [...prev, ...toolEventArr]);
+          console.log('[UI][onToolEvent]', toolEventArr);
         },
         onScrollDown: scrollToBottom,
         onSetLoading: setIsLoading,
@@ -392,12 +580,20 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       ) : (
         <div className="flex-1 overflow-auto">
           <div className="chat-container">
+            {toolEvents.length > 0 && (
+              <div className="tool-events-container mb-4">
+                {toolEvents.map((event, idx) => (
+                  <div key={event.id || idx} className="tool-event bg-gray-100 p-2 rounded mb-2">
+                    <pre className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(event, null, 2)}</pre>
+                  </div>
+                ))}
+              </div>
+            )}
             <ChatMessages
               messages={messages}
               messagesEndRef={messagesEndRef}
               selectedAgent={selectedAgent}
               agents={agentObj ? [agentObj] : []}
-              incomingMessage={incomingMessage}
               suggestions={
                 agentObj && agentObj.templates && agentObj.templates.length > 0
                   ? agentObj.templates.map((t: any) =>
@@ -405,6 +601,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
                     )
                   : undefined
               }
+              userColor={userColor}
               onSuggestionClick={(suggestion) => {
                 setInput(suggestion)
                 setTimeout(() => {
@@ -417,6 +614,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
               isLoading={isLoading}
               selectedAgent={selectedAgent}
               agentName={agentObj?.name}
+              userColor={userColor}
             />
           </div>
         </div>

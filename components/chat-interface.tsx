@@ -53,6 +53,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [chatMessages, setChatMessages] = useState<any[]>([])
   const [conversationHistory, setConversationHistory] = useState<any[]>([])
   const [agents, setAgents] = useState<any[]>([])
+  const [toolEvents, setToolEvents] = useState<any[]>([])
 
   // Create a new instance of LangGraphService
   const langGraphService = new LangGraphService()
@@ -228,12 +229,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Function to handle sending a message with streaming
   const handleSendMessage = async (messageContent: string) => {
+    setToolEvents([]); // Clear previous tool events
     console.log('[Chat] handleSendMessage called with:', messageContent)
     if (!messageContent.trim()) return
     setIsLoading(true)
 
     // Create a temporary user message to show immediately
-    const tempUserMessage = {
+    const userMessage = {
       id: `user-temp-${Date.now()}`,
       role: "user",
       content: messageContent,
@@ -241,7 +243,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }
 
     // Add the user message to the chat
-    setChatMessages((prev) => [...prev, tempUserMessage])
+    setChatMessages((prev) => [...prev, userMessage])
 
     // Update conversation history
     const updatedHistory = [
@@ -277,6 +279,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const agentId = selectedAgent || "bbot"
       const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
 
+      // Merge assistant apps with user apps (user apps take precedence)
+      const agentObj = agents.find(a => a.id === selectedAgent);
+      const assistantApps = agentObj?.rawData?.config?.apps || {};
+      const userApps = {};
+      const mergedApps = { ...assistantApps, ...userApps };
+
       // Prepare the configuration for the stream - matching the example payload structure
       const streamConfig = {
         input: {
@@ -293,6 +301,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           max_tokens: 1024,
           top_p: 1.0,
           instructions: "Be helpful and concise.",
+          apps: mergedApps,
         },
       }
 
@@ -304,41 +313,110 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       // Process the streaming response
       await streamingHandler.processStream(response, {
         onMessage: (msg) => {
-          setIncomingMessage(msg)
-          scrollToBottom()
+          setChatMessages(prev => {
+            // Try to match by id first
+            const idx = prev.findIndex(m => m.role === "assistant" && m.id === msg.id);
+            if (idx !== -1) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: msg.content };
+              return updated;
+            }
+            // Fallback: match by last assistant
+            const lastIdx = [...prev].reverse().findIndex(m => m.role === "assistant");
+            if (lastIdx !== -1) {
+              const idx = prev.length - 1 - lastIdx;
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: msg.content };
+              return updated;
+            }
+            // If no assistant message, append a new one
+            return [...prev, { id: msg.id || `msg-${Date.now()}`, role: "assistant", content: msg.content, timestamp: new Date().toISOString() }];
+          });
+          scrollToBottom();
         },
-        onToolEvent: (event) => {
-          // Handle tool events if needed
+        onToolEvent: (toolEventArr: any[]) => {
+          setToolEvents((prev) => [...prev, ...toolEventArr]);
+          console.log('[UI][onToolEvent]', toolEventArr);
         },
-        onUpdate: (messages) => {
-          console.log('[Chat] onUpdate raw messages:', messages)
-          // Map the full messages array from the backend into chatMessages
+        onUpdate: (messages, options) => {
+          console.log('[Chat] onUpdate raw messages:', messages, options)
           if (messages && messages.length > 0) {
-            const mappedMessages = messages.map((msg, idx) => ({
-              id: msg.id || `msg-${idx}-${Date.now()}`,
-              role: msg.type === "ai"
-                ? "assistant"
-                : msg.type === "human"
-                  ? "user"
-                  : msg.role || "user",
-              content: msg.content || "",
-              timestamp: new Date().toISOString(),
-            }))
+            const mappedMessages = messages.flatMap((msg, idx) => {
+              // Only map 'ai' messages if content is non-empty
+              if (msg.type === "ai") {
+                if (msg.content && msg.content.trim() !== "") {
+                  return [{
+                    id: msg.id || `msg-${idx}-${Date.now()}`,
+                    role: "assistant",
+                    content: msg.content,
+                    timestamp: new Date().toISOString(),
+                  }];
+                } else {
+                  return [];
+                }
+              }
+              // User message
+              if (msg.type === "human" || msg.role === "user") {
+                return [{
+                  id: msg.id || `msg-${idx}-${Date.now()}`,
+                  role: "user",
+                  content: msg.content || "",
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Tool call request (function call) - only if content is empty
+              const toolCall = (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)
+                ? msg.tool_calls[0]
+                : (msg.additional_kwargs && Array.isArray(msg.additional_kwargs.tool_calls) && msg.additional_kwargs.tool_calls.length > 0)
+                  ? msg.additional_kwargs.tool_calls[0]
+                  : null;
+              if (
+                toolCall &&
+                (!msg.content || msg.content.trim() === "")
+              ) {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: 'tool_call',
+                  content: `[Tool call: ${toolCall.name || toolCall.function?.name || 'unknown'}]`,
+                  args: toolCall.args || toolCall.function?.arguments,
+                  tool_call_id: toolCall.id,
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Tool response
+              if (msg.type === 'tool' || msg.role === 'tool') {
+                return [{
+                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
+                  role: 'tool_response',
+                  content: msg.content || '[Tool response]',
+                  tool_name: msg.name || msg.tool_name,
+                  status: msg.status,
+                  tool_call_id: msg.tool_call_id,
+                  timestamp: new Date().toISOString(),
+                }];
+              }
+              // Fallback: skip unknown/empty types
+              return [];
+            });
             console.log('[Chat] mappedMessages:', mappedMessages)
-            console.log('[DEBUG][mappedMessages][normal chat]', mappedMessages);
-            setChatMessages(mappedMessages)
+            if (options && options.replace) {
+              setChatMessages(mappedMessages);
+            } else {
+              setChatMessages(prev => {
+                // Avoid duplicates by id
+                const existingIds = new Set(prev.map(m => m.id));
+                const newMessages = mappedMessages.filter(m => !existingIds.has(m.id));
+                return [...prev, ...newMessages];
+              });
+            }
           }
-
           setIsLoading(false)
-          setIncomingMessage("")
           scrollToBottom()
-
           // Estimate token usage
           if (messages && messages.length > 0) {
             const lastMessage = messages[messages.length - 1]
             const newTokens = estimateTokenUsage(lastMessage.content || "")
             setTokensUsed((prev) => prev + newTokens)
-
             // Deduct from balance
             const cost = calculateTokenCost(newTokens)
             setBalance((prev) => prev - cost)
@@ -372,7 +450,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   useEffect(() => {
     scrollToBottom()
-  }, [chatMessages, incomingMessage])
+  }, [chatMessages])
 
   // Check if auto recharge should be triggered
   const checkAutoRecharge = () => {
@@ -475,12 +553,20 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         ) : (
           <div className="flex-1 overflow-auto">
             <div className="chat-container">
+              {toolEvents.length > 0 && (
+                <div className="tool-events-container mb-4">
+                  {toolEvents.map((event, idx) => (
+                    <div key={event.id || idx} className="tool-event bg-gray-100 p-2 rounded mb-2">
+                      <pre className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(event, null, 2)}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
               <ChatMessages
                 messages={chatMessages}
                 messagesEndRef={messagesEndRef}
                 selectedAgent={selectedAgent}
                 agents={agents}
-                incomingMessage={incomingMessage}
                 onSuggestionClick={(suggestion) => {
                   handleSendMessage(suggestion)
                 }}

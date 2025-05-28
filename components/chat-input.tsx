@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Send } from "lucide-react"
+import { Send, Loader2 } from "lucide-react"
 import type React from "react"
 import type { FormEvent } from "react"
 
@@ -12,6 +12,7 @@ interface ChatInputProps {
   isLoading: boolean
   selectedAgent: string | null
   agentName?: string
+  userColor?: string
 }
 
 interface Ability {
@@ -31,7 +32,7 @@ interface App {
   isConnected: boolean
 }
 
-export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName }: ChatInputProps) {
+export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName, userColor = '#2563eb' }: ChatInputProps) {
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -243,8 +244,13 @@ export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName }: Cha
           className="min-h-[40px] max-h-[200px] resize-none"
           disabled={isLoading}
         />
-        <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
-          <Send className="h-4 w-4" />
+        <Button
+          type="submit"
+          disabled={isLoading || !input.trim()}
+          className="ml-2"
+          style={{ backgroundColor: userColor, color: '#fff' }}
+        >
+          {isLoading ? <Loader2 className="animate-spin w-4 h-4" /> : <Send className="w-4 h-4" />}
         </Button>
       </form>
       {isLoading && <div className="text-sm text-gray-500 mt-2">Generating response...</div>}
