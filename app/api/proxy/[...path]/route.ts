@@ -34,7 +34,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     console.log("[Proxy] Incoming Authorization header:", incomingAuthHeader);
 
     // Get the LangGraph API URL from environment variables
-    const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://api-staging.b-bot.space/api/v2"
+    const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api/v2"
 
     // Get the API key from environment variables (server-side only)
     const apiKey = process.env.ADMIN_API_KEY

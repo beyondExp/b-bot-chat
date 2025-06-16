@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 // Base URL for the API
-const API_V3_BASE_URL = "https://api-staging.b-bot.space/api/v3"
+const API_V3_BASE_URL = "https://api.b-bot.space/api/v3"
 
 // Handle both GET and POST methods
 export async function GET(req: Request) {

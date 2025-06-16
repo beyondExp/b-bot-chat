@@ -58,7 +58,7 @@ export function useLangGraphService() {
             .join(", "),
         )
 
-        const response = await fetch("https://api-staging.b-bot.space/api/v2/threads", {
+        const response = await fetch("https://api.b-bot.space/api/v2/threads", {
           method: "POST",
           headers,
           body: JSON.stringify(data),
@@ -166,7 +166,7 @@ export function useLangGraphService() {
         )
 
         const response = await fetch(
-          `https://api-staging.b-bot.space/api/v2/threads/${threadId}/graph?assistant_id=${assistantId}`,
+          `https://api.b-bot.space/api/v2/threads/${threadId}/graph?assistant_id=${assistantId}`,
           {
             method: "POST",
             headers,
@@ -277,7 +277,7 @@ export function useLangGraphService() {
             .join(", "),
         )
 
-        const response = await fetch(`https://api-staging.b-bot.space/api/v2/threads/${threadId}/messages`, {
+        const response = await fetch(`https://api.b-bot.space/api/v2/threads/${threadId}/messages`, {
           method: "POST",
           headers,
           body: JSON.stringify(message),
