@@ -5,7 +5,7 @@ export const auth0Config: Auth0ProviderOptions = {
   clientId: "RShGzaeQqPJwM850f6MwzyODEDD4wMwK",
   authorizationParams: {
     redirect_uri: typeof window !== "undefined" ? window.location.origin : "",
-    audience: "https://b-bot-synapse-d77722348fc853d1b327916929e45307.us.langgraph.app",
+    audience: "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app",
     scope: "openid profile email",
   },
 }

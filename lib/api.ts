@@ -5,7 +5,7 @@ import { useCallback } from "react"
 
 const API_BASE_URL = "https://api-staging.b-bot.space/api/v2"
 const API_V3_BASE_URL = "https://api-staging.b-bot.space/api/v3"
-export const LANGGRAPH_AUDIENCE = "https://b-bot-synapse-d77722348fc853d1b327916929e45307.us.langgraph.app"
+export const LANGGRAPH_AUDIENCE = "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app"
 
 // Token cache (client-side only)
 let cachedToken: string | null = null
@@ -258,4 +258,39 @@ export function clearAuthData(): void {
   // Also clear the cached token
   cachedToken = null
   tokenExpiryTime = null
+}
+
+/**
+ * Get the full Auth0 user profile (including hub_user_metadata, token usage, etc.) from localStorage.
+ */
+export function getFullAuth0User(): any | null {
+  if (typeof window === "undefined") {
+    console.log("getFullAuth0User: not running on client");
+    return null;
+  }
+  try {
+    // Log all localStorage keys and values
+    console.log("getFullAuth0User: localStorage keys/values:");
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        console.log(key, localStorage.getItem(key));
+      }
+    }
+
+    // Find the Auth0 SPA JS user key
+    const userKey = Object.keys(localStorage).find(
+      (key) => key.includes("@@auth0spajs@@") && key.endsWith("@@user@@")
+    );
+    console.log("getFullAuth0User: found userKey", userKey);
+
+    if (!userKey) return null;
+    const userObj = JSON.parse(localStorage.getItem(userKey) || "null");
+    console.log("getFullAuth0User: userObj", userObj);
+
+    return userObj;
+  } catch (e) {
+    console.error("Error extracting full Auth0 user from localStorage:", e);
+    return null;
+  }
 }
