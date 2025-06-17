@@ -7,8 +7,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import ReactMarkdown from "react-markdown"
+import type { Components } from 'react-markdown'
 import clsx from "clsx"
 import { Wrench, CheckCircle } from 'lucide-react'
+import { MermaidDiagram } from "./mermaid-diagram"
 
 interface ChatMessagesProps {
   messages: any[]
@@ -32,6 +34,30 @@ function getContrastYIQ(hexcolor: string) {
   const b = parseInt(hexcolor.substr(4,2),16);
   const yiq = ((r*299)+(g*587)+(b*114))/1000;
   return (yiq >= 128) ? '#000' : '#fff';
+}
+
+// Add this function before the ChatMessages component
+function isMermaidCodeBlock(code: string, language: string) {
+  return language === 'mermaid' || code.trim().startsWith('graph') || code.trim().startsWith('sequenceDiagram')
+}
+
+// Update the ReactMarkdown components
+const components: Components = {
+  code({ className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className || '')
+    const language = match ? match[1] : ''
+    const code = String(children).replace(/\n$/, '')
+
+    if (language === 'mermaid' || code.trim().startsWith('graph') || code.trim().startsWith('sequenceDiagram')) {
+      return <MermaidDiagram chart={code} />
+    }
+
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    )
+  }
 }
 
 export function ChatMessages({
@@ -130,7 +156,9 @@ export function ChatMessages({
                   <Card className={`p-3 ${message.role === "user" ? "" : "bg-muted"}`}
                     style={message.role === "user" ? { backgroundColor: userColor, color: getContrastYIQ(userColor) } : {}}>
                     <div className="prose prose-sm dark:prose-invert">
-                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                      <ReactMarkdown components={components}>
+                        {message.content}
+                      </ReactMarkdown>
                     </div>
                   </Card>
                 </div>
@@ -148,7 +176,9 @@ export function ChatMessages({
                 </Avatar>
                 <Card className="p-3 bg-muted">
                   <div className="prose prose-sm dark:prose-invert">
-                    <ReactMarkdown>{incomingMessage}</ReactMarkdown>
+                    <ReactMarkdown components={components}>
+                      {incomingMessage}
+                    </ReactMarkdown>
                   </div>
                 </Card>
               </div>
