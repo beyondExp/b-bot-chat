@@ -1,9 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { ChatInput } from "./chat-input"
 import { ChatMessages } from "./chat-messages"
+import { EmbedChatHeader } from "./embed-chat-header"
+import { ChatHistorySidebar } from "./chat-history-sidebar"
 import { useAuth0 } from "@auth0/auth0-react"
 import { getAuthToken, isLocallyAuthenticated } from "@/lib/api"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
@@ -11,6 +13,7 @@ import { useAgents } from "@/lib/agent-service"
 import { useRouter } from 'next/router'
 import { useStream } from "@langchain/langgraph-sdk/react"
 import type { Message } from "@langchain/langgraph-sdk"
+import { ChatHistoryManager, ChatSession } from "@/lib/chat-history"
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
@@ -29,6 +32,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   const { getAgent } = useAgents()
   const [agentObj, setAgentObj] = useState<any>(null);
   const [toolEvents, setToolEvents] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
 
   // Get streaming and color from query params
   let streaming = true;
@@ -173,11 +178,17 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     return userId.replace(/[|\-]/g, '') + '_' + agentId;
   };
 
+  // Get stored thread ID or use current session thread ID
+  const getThreadId = () => {
+    return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId();
+  };
+
   // Initialize the useStream hook - proxy handles authentication
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
     apiUrl: getApiUrl(),
     apiKey: undefined, // Proxy handles authentication
     assistantId: getAssistantId(), // Only set if valid UUID, otherwise use default
+    threadId: getThreadId(),
     messagesKey: "messages",
     onError: (error: unknown) => {
       console.error("Stream error:", error);
@@ -187,6 +198,11 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     onFinish: () => {
       console.log("Stream finished");
       scrollToBottom();
+      saveCurrentSession();
+    },
+    onThreadId: (threadId: string) => {
+      console.log("Thread ID received:", threadId);
+      ChatHistoryManager.setCurrentThreadId(threadId);
     },
   });
 
@@ -216,12 +232,67 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     }
   }, [thread.messages]);
 
+  // Save current session to chat history
+  const saveCurrentSession = useCallback(() => {
+    const messages = streamingMessages.length > 0 ? streamingMessages : thread.messages;
+    if (!messages || messages.length === 0) return;
+
+    const userMessage = messages.find(msg => msg.type === 'human');
+    const aiMessage = messages.find(msg => msg.type === 'ai');
+    
+    if (!userMessage) return;
+
+    const userId = embedUserId || user?.sub;
+    const threadId = ChatHistoryManager.getCurrentThreadId();
+    
+    if (!threadId) return;
+
+    const session: ChatSession = {
+      id: currentSession?.id || `${threadId}-${Date.now()}`,
+      threadId: threadId,
+      agentId: selectedAgent,
+      title: currentSession?.title || ChatHistoryManager.generateChatTitle(
+        typeof userMessage.content === 'string' ? userMessage.content : 'New Chat'
+      ),
+      lastMessage: aiMessage && typeof aiMessage.content === 'string' 
+        ? aiMessage.content.substring(0, 100) + (aiMessage.content.length > 100 ? '...' : '')
+        : 'No response yet',
+      timestamp: Date.now(),
+      userId: userId
+    };
+
+    ChatHistoryManager.saveChatSession(session);
+    setCurrentSession(session);
+  }, [streamingMessages, thread.messages, currentSession, selectedAgent, embedUserId, user?.sub]);
+
   // Update streaming messages when SDK finally updates
   useEffect(() => {
     if (thread.messages && thread.messages.length > 0) {
       setStreamingMessages(thread.messages);
+      // Save session when messages are updated (debounced)
+      const timeoutId = setTimeout(() => {
+        saveCurrentSession();
+      }, 1000);
+      return () => clearTimeout(timeoutId);
     }
-  }, [thread.messages]);
+  }, [thread.messages, saveCurrentSession]);
+
+  // Start a new chat
+  const handleNewChat = () => {
+    ChatHistoryManager.clearCurrentThreadId();
+    setCurrentSession(null);
+    setStreamingMessages([]);
+    // The thread will automatically create a new thread ID on next message
+    window.location.reload(); // Simple way to reset the chat state
+  };
+
+  // Select a chat from history
+  const handleSelectChat = (session: ChatSession) => {
+    setCurrentSession(session);
+    ChatHistoryManager.setCurrentThreadId(session.threadId);
+    // Reload to load the selected thread
+    window.location.reload();
+  };
 
   // Scroll to bottom function
   const scrollToBottom = () => {
@@ -338,39 +409,54 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
 
   return (
     <div className="flex flex-col h-screen bg-background">
+      <EmbedChatHeader
+        agentName={agentObj?.name}
+        onNewChat={handleNewChat}
+        onShowHistory={() => setShowHistory(true)}
+      />
+      
       <div className="flex-1 overflow-hidden">
-            <ChatMessages
+        <ChatMessages
           messages={streamingMessages.length > 0 ? streamingMessages : thread.messages}
-              messagesEndRef={messagesEndRef}
-              selectedAgent={selectedAgent}
-              agents={agentObj ? [agentObj] : []}
+          messagesEndRef={messagesEndRef}
+          selectedAgent={selectedAgent}
+          agents={agentObj ? [agentObj] : []}
           userColor={userColor}
           onSuggestionClick={handleSuggestionClick}
-              suggestions={
-                agentObj && agentObj.templates && agentObj.templates.length > 0
-                  ? agentObj.templates.map((t: any) =>
-                      t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
-                    )
-                  : undefined
-              }
+          suggestions={
+            agentObj && agentObj.templates && agentObj.templates.length > 0
+              ? agentObj.templates.map((t: any) =>
+                  t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
+                )
+              : undefined
+          }
         />
       </div>
       
       <div className="border-t bg-background p-4">
-            <ChatInput
+        <ChatInput
           onSubmit={handleFormSubmit}
           isLoading={thread.isLoading}
-              selectedAgent={selectedAgent}
-              agentName={agentObj?.name}
-              userColor={userColor}
-            />
-          </div>
+          selectedAgent={selectedAgent}
+          agentName={agentObj?.name}
+          userColor={userColor}
+        />
+      </div>
       
       {agentError && (
         <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-2 m-4 rounded">
           {agentError}
         </div>
       )}
+
+      <ChatHistorySidebar
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        onSelectChat={handleSelectChat}
+        currentThreadId={getThreadId() || undefined}
+        agentId={selectedAgent}
+        userId={embedUserId || user?.sub}
+      />
     </div>
   );
 }
