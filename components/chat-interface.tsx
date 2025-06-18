@@ -18,588 +18,351 @@ import { useAuthenticatedFetch, getAuthToken, isLocallyAuthenticated } from "@/l
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 // Add these imports at the top of the file
-import { LangGraphService } from "@/lib/langgraph-service-sdk"
-import { StreamingHandlerService } from "@/lib/streaming-handler-service"
+import { useStream } from "@langchain/langgraph-sdk/react"
+import type { Message } from "@langchain/langgraph-sdk"
 
 interface ChatInterfaceProps {
   initialAgent?: string | null
 }
 
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
-  // Initialize selectedAgent with the initialAgent prop
-  const [selectedAgent, setSelectedAgent] = useState<string>(initialAgent ?? "bbot")
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [showDiscover, setShowDiscover] = useState(false)
-  const [recentAgents, setRecentAgents] = useState<string[]>([])
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(initialAgent || "bbot")
   const [tokensUsed, setTokensUsed] = useState(0)
-  const [balance, setBalance] = useState(1000) // $10.00 initial balance for demo
-  const [showPaymentRequired, setShowPaymentRequired] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [cachedAuthToken, setCachedAuthToken] = useState<string | null>(null)
-
-  const [autoRechargeEnabled, setAutoRechargeEnabled] = useState(false)
-  const [rechargeThreshold, setRechargeThreshold] = useState(200) // $2.00
-  const [rechargeAmount, setRechargeAmount] = useState(2000) // $20.00
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
-
-  const { isAuthenticated, getAccessTokenSilently, user, loginWithRedirect } = useAuth0()
-  const { getAgent, getAgents } = useAgents()
-  const authenticatedFetch = useAuthenticatedFetch()
-
-  // Add this to the ChatInterface component, after the existing state declarations
-  const [threadId, setThreadId] = useState<string | null>(null)
-  const [incomingMessage, setIncomingMessage] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [chatMessages, setChatMessages] = useState<any[]>([])
+  const [autoRechargeAmount, setAutoRechargeAmount] = useState(0)
+  const [remainingCredits, setRemainingCredits] = useState(0)
   const [conversationHistory, setConversationHistory] = useState<any[]>([])
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [transcription, setTranscription] = useState<string>("")
   const [agents, setAgents] = useState<any[]>([])
-  const [toolEvents, setToolEvents] = useState<any[]>([])
 
-  // Create a new instance of LangGraphService
-  const langGraphService = new LangGraphService()
-  const streamingHandler = new StreamingHandlerService()
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const [toolEvents, setToolEvents] = useState<any[]>([]);
 
-  // Add this effect to create a thread when the component mounts
+  const { user, isAuthenticated, getAccessTokenSilently } = useAuth0()
+  const { getAgents, getAgent, isLoading: agentsLoading, error: agentsError } = useAgents()
+
+  // Load agents on mount
   useEffect(() => {
-    // Allow B-Bot without authentication, but require auth for other agents
-    const shouldCreateThread = (isAuthenticated || isLocallyAuthenticated() || selectedAgent === "b-bot") && !threadId
-
-    if (shouldCreateThread) {
-      const initializeThread = async () => {
-        try {
-          // Default to b-bot if no agent is selected
-          const thread = await langGraphService.createThread({
-            user_id: user?.sub || "anonymous-user",
-            agent_id: selectedAgent || "bbot",
-          })
-          setThreadId(thread.thread_id)
-        } catch (error) {
-          // Silent error handling
-        }
-      }
-
-      initializeThread()
-    }
-  }, [isAuthenticated, threadId, user?.sub, selectedAgent])
-
-  // Load recent agents from localStorage
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedRecentAgents = localStorage.getItem("recentAgents")
-      if (savedRecentAgents) {
-        try {
-          setRecentAgents(JSON.parse(savedRecentAgents))
-        } catch (e) {
-          // Silent error handling
-        }
-      }
-    }
-  }, [])
-
-  // Save recent agents to localStorage when they change
-  useEffect(() => {
-    if (typeof window !== "undefined" && recentAgents.length > 0) {
-      localStorage.setItem("recentAgents", JSON.stringify(recentAgents))
-    }
-  }, [recentAgents])
-
-  // Fetch and cache the auth token when the component mounts
-  useEffect(() => {
-    const fetchToken = async () => {
+    const loadAgents = async () => {
       try {
-        // First check if we're authenticated through Auth0
-        if (isAuthenticated) {
+        const agentList = await getAgents();
+        setAgents(agentList);
+        } catch (error) {
+        console.error("Error loading agents:", error);
+      }
+    };
+    loadAgents();
+  }, [getAgents]);
+
+  // Get auth token for API calls
+  const getApiKey = async () => {
+    try {
+      // For authenticated users
+      if (isAuthenticated) {
+        const token = await getAccessTokenSilently({
+          authorizationParams: {
+            audience: LANGGRAPH_AUDIENCE,
+          },
+        });
+        return token;
+      }
+
+      // For locally authenticated users
+      if (isLocallyAuthenticated()) {
+        return getAuthToken();
+      }
+
+      // For B-Bot without authentication
+      if (selectedAgent === "bbot") {
+        return null;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Failed to get auth token:", error);
+      return null;
+    }
+  };
+
+  // Get the headers including the Admin-API-Key
+  const getHeaders = async () => {
+    const baseHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    // For authenticated users
+    if (isAuthenticated) {
+      try {
           const token = await getAccessTokenSilently({
             authorizationParams: {
               audience: LANGGRAPH_AUDIENCE,
             },
-          })
-          setCachedAuthToken(token)
-          localStorage.setItem("auth_token", token)
-          return
-        }
-
-        // If not authenticated through Auth0, check for local token
-        if (isLocallyAuthenticated()) {
-          const token = getAuthToken()
-          if (token) {
-            setCachedAuthToken(token)
-            return
-          }
-        }
+        });
+        return {
+          ...baseHeaders,
+          "Authorization": `Bearer ${token}`,
+        };
       } catch (error) {
-        // Silent error handling
+        console.error("Failed to get auth token:", error);
       }
     }
 
-    fetchToken()
-  }, [isAuthenticated, getAccessTokenSilently])
-
-  // Update the handleSelectAgent function to create a new thread when switching agents
-  const handleSelectAgent = async (agentId: string) => {
-    // Debug log
-    console.log('Selecting agent:', agentId, 'Current recents:', recentAgents, 'Current agents:', agents.map(a => a.id));
-
-    // Only allow selecting non-B-Bot agents if authenticated
-    if (agentId !== "bbot" && !(isAuthenticated || isLocallyAuthenticated())) {
-      // Show login prompt
-      if (
-        typeof window !== "undefined" &&
-        window.confirm("You need to sign in to chat with this agent. Would you like to sign in now?")
-      ) {
-        loginWithRedirect()
-      }
-      return
-    }
-
-    // Only update if the agent is actually changing
-    if (agentId !== selectedAgent) {
-      setSelectedAgent(agentId)
-
-      // Create a new thread for the new agent
-      if ((isAuthenticated || isLocallyAuthenticated() || agentId === "bbot")) {
-        const initializeNewThread = async () => {
-          try {
-            const thread = await langGraphService.createThread({
-              user_id: user?.sub || "anonymous-user",
-              agent_id: agentId,
-            })
-            setThreadId(thread.thread_id)
-
-            // Clear messages when switching agents
-            setChatMessages([])
-            setConversationHistory([])
-          } catch (error) {
-            // If this is B-Bot, create a fallback thread
-            if (agentId === "bbot") {
-              const fallbackThreadId = `bbot-anonymous-${Date.now()}`
-              setThreadId(fallbackThreadId)
-
-              // Clear messages when switching agents
-              setChatMessages([])
-              setConversationHistory([])
-            } else {
-              // For other agents, show an error message
-              alert("Failed to initialize chat with this agent. Please try again later.")
-            }
-          }
-        }
-
-        initializeNewThread()
+    // For locally authenticated users
+    if (isLocallyAuthenticated()) {
+      const token = getAuthToken();
+      if (token) {
+        return {
+          ...baseHeaders,
+          "Authorization": `Bearer ${token}`,
+        };
       }
     }
 
-    // Add to recent agents if not already there
-    if (!recentAgents.includes(agentId)) {
-      setRecentAgents((prev) => [agentId, ...prev].slice(0, 5))
-      console.log('Added to recents:', agentId, 'New recents:', [agentId, ...recentAgents].slice(0, 5))
+    // For B-Bot without authentication - use admin API key if available
+    const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
+    if (selectedAgent === "bbot" && ADMIN_API_KEY) {
+      return {
+        ...baseHeaders,
+        "Admin-API-Key": ADMIN_API_KEY,
+      };
     }
 
-    // Ensure the agent is in the loaded agents array (even if it's the current agent)
-    if (!agents.some(agent => agent.id === agentId)) {
-      try {
-        const agent = await getAgent(agentId)
-        if (agent) {
-          setAgents(prev => [...prev, agent])
-          console.log('Added to agents array:', agentId)
-        }
-      } catch (e) {
-        // Fallback: add a minimal agent object
-        setAgents(prev => [
-          ...prev,
-          {
-            id: agentId,
-            name: agentId,
-            shortDescription: '',
-            description: '',
-            profileImage: '/helpful-robot.png',
-            category: 'General',
-            publisherId: '',
-            abilities: [],
-            apps: [],
-          }
-        ])
-        console.log('Added fallback agent to agents array:', agentId)
-      }
-    }
+    return baseHeaders;
+  };
 
-    // Close discover page
-    setShowDiscover(false)
-  }
+  // Get the API URL for LangGraph - use the proxy endpoint
+  const getApiUrl = () => {
+    // Use the proxy endpoint which handles authentication internally
+    // Need to construct absolute URL for LangGraph client
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/api/proxy`;
+    }
+    // Fallback for server-side rendering
+    return '/api/proxy';
+  };
+
+  // Helper function to check if a string is a valid UUID
+  const isValidUUID = (str: string) => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+  };
+
+  // Get the assistant ID - only use it if it's a valid UUID, otherwise use a default
+  const getAssistantId = () => {
+    if (selectedAgent && isValidUUID(selectedAgent)) {
+      return selectedAgent;
+    }
+    // For non-UUID agent IDs like "bbot", return the agent name directly
+    // The API accepts specific registered graphs: indexer, retrieval_graph, bbot, open_deep_research
+    return selectedAgent || "bbot"; // Use the actual agent name or default to bbot
+  };
+
+  // State for API key (can be undefined since proxy handles auth)
+  const [apiKey, setApiKey] = useState<string | undefined>(undefined);
+
+  // Get entity ID for state management
+  const getEntityId = () => {
+    const userId = user?.sub || "anonymous-user";
+    const agentId = selectedAgent || "bbot";
+    return userId.replace(/[|\-]/g, '') + '_' + agentId;
+  };
+
+  // Initialize the useStream hook - proxy handles authentication
+  const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
+    apiUrl: getApiUrl(),
+    apiKey: undefined, // Proxy handles authentication
+    assistantId: getAssistantId(), // Only set if valid UUID, otherwise use default
+    messagesKey: "messages",
+    onError: (error: unknown) => {
+      console.error("Stream error:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Chat error:", errorMessage);
+    },
+    onFinish: () => {
+      console.log("Stream finished");
+      scrollToBottom();
+    },
+  });
+
+  // Debug logging for thread state changes
+  useEffect(() => {
+    console.log("[Chat] Thread state changed:", {
+      messagesLength: thread.messages?.length || 0,
+      isLoading: thread.isLoading,
+      values: thread.values,
+      firstMessage: thread.messages?.[0],
+      lastMessage: thread.messages?.[thread.messages.length - 1]
+    });
+  }, [thread.messages, thread.isLoading, thread.values]);
+
+  // Additional detailed message logging  
+  useEffect(() => {
+    if (thread.messages && thread.messages.length > 0) {
+      console.log("[Chat] Messages array updated:", thread.messages.map((msg, idx) => ({
+        index: idx,
+        type: msg.type,
+        content: typeof msg.content === 'string' ? msg.content.substring(0, 50) + '...' : msg.content
+      })));
+    }
+  }, [thread.messages]);
+
+  // Scroll to bottom function
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [thread.messages]);
 
   // Function to handle sending a message with streaming
   const handleSendMessage = async (messageContent: string) => {
     setToolEvents([]); // Clear previous tool events
     console.log('[Chat] handleSendMessage called with:', messageContent)
     if (!messageContent.trim()) return
-    setIsLoading(true)
-
-    // Create a temporary user message to show immediately
-    const userMessage = {
-      id: `user-temp-${Date.now()}`,
-      role: "user",
-      content: messageContent,
-      timestamp: new Date().toISOString(),
-    }
-
-    // Add the user message to the chat
-    setChatMessages((prev) => [...prev, userMessage])
-
-    // Update conversation history
-    const updatedHistory = [
-      ...conversationHistory,
-      {
-        role: "user",
-        content: messageContent,
-      },
-    ]
-    setConversationHistory(updatedHistory)
 
     try {
-      // Get the current thread ID or create a new one
-      let currentThreadId = threadId
-      if (!currentThreadId) {
-        const thread = await langGraphService.createThread({
-          user_id: user?.sub || "anonymous-user",
-          agent_id: selectedAgent || "bbot",
-        })
-        currentThreadId = thread.thread_id
-        setThreadId(currentThreadId)
-      }
-
-      // Add the message to the thread
-      if (currentThreadId) {
-        await langGraphService.addThreadMessage(currentThreadId, {
-          role: "user",
-          content: messageContent,
-        })
-      }
-
-      const userId = user?.sub || "anonymous-user"
-      const agentId = selectedAgent || "bbot"
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
+      const userId = user?.sub || "anonymous-user";
+      const agentId = selectedAgent || "bbot";
+      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
 
       // Merge assistant apps with user apps (user apps take precedence)
-      const agentObj = agents.find(a => a.id === selectedAgent);
+      const agentObj = agents.find((a: any) => a.id === selectedAgent);
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const userApps = {};
       const mergedApps = { ...assistantApps, ...userApps };
 
-      // Prepare the configuration for the stream - matching the example payload structure
-      const streamConfig = {
-        input: {
+      // Create the new message
+      const newMessage: Message = {
+        type: "human",
+        content: messageContent,
+      };
+
+      // Submit using LangGraph's useStream
+      thread.submit(
+        { 
+          messages: [newMessage],
           entity_id: entityId,
-          messages: [{ role: "user", content: messageContent }],
+          user_id: userId,
+          agent_id: agentId
         },
+        {
         config: {
-          thread_id: currentThreadId,
+            configurable: {
           agent_id: agentId,
           user_id: userId,
-          conversation_history: updatedHistory,
-          // Add any other configuration options as needed
+              entity_id: entityId,
           temperature: 0.7,
           max_tokens: 1024,
           top_p: 1.0,
           instructions: "Be helpful and concise.",
           apps: mergedApps,
-        },
-      }
+            }
+          },
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [
+              ...(prev.messages ?? []),
+              newMessage,
+            ],
+            entity_id: entityId,
+            user_id: userId,
+            agent_id: agentId,
+          }),
+        }
+      );
 
-      // Invoke the streaming graph
-      console.log('[Chat] invoking streaming graph with config:', streamConfig)
-      const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig)
-
-      console.log('[Chat] starting streamingHandler.processStream')
-      // Process the streaming response
-      await streamingHandler.processStream(response, {
-        onMessage: (msg) => {
-          setChatMessages(prev => {
-            // Try to match by id first
-            const idx = prev.findIndex(m => m.role === "assistant" && m.id === msg.id);
-            if (idx !== -1) {
-              const updated = [...prev];
-              updated[idx] = { ...updated[idx], content: msg.content };
-              return updated;
-            }
-            // Fallback: match by last assistant
-            const lastIdx = [...prev].reverse().findIndex(m => m.role === "assistant");
-            if (lastIdx !== -1) {
-              const idx = prev.length - 1 - lastIdx;
-              const updated = [...prev];
-              updated[idx] = { ...updated[idx], content: msg.content };
-              return updated;
-            }
-            // If no assistant message, append a new one
-            return [...prev, { id: msg.id || `msg-${Date.now()}`, role: "assistant", content: msg.content, timestamp: new Date().toISOString() }];
-          });
-          scrollToBottom();
-        },
-        onToolEvent: (toolEventArr: any[]) => {
-          setToolEvents((prev) => [...prev, ...toolEventArr]);
-          console.log('[UI][onToolEvent]', toolEventArr);
-        },
-        onUpdate: (messages, options) => {
-          console.log('[Chat] onUpdate raw messages:', messages, options)
-          if (messages && messages.length > 0) {
-            const mappedMessages = messages.flatMap((msg, idx) => {
-              // Only map 'ai' messages if content is non-empty
-              if (msg.type === "ai") {
-                if (msg.content && msg.content.trim() !== "") {
-                  return [{
-                    id: msg.id || `msg-${idx}-${Date.now()}`,
-                    role: "assistant",
-                    content: msg.content,
-                    timestamp: new Date().toISOString(),
-                  }];
-                } else {
-                  return [];
-                }
-              }
-              // User message
-              if (msg.type === "human" || msg.role === "user") {
-                return [{
-                  id: msg.id || `msg-${idx}-${Date.now()}`,
-                  role: "user",
-                  content: msg.content || "",
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Tool call request (function call) - only if content is empty
-              const toolCall = (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)
-                ? msg.tool_calls[0]
-                : (msg.additional_kwargs && Array.isArray(msg.additional_kwargs.tool_calls) && msg.additional_kwargs.tool_calls.length > 0)
-                  ? msg.additional_kwargs.tool_calls[0]
-                  : null;
-              if (
-                toolCall &&
-                (!msg.content || msg.content.trim() === "")
-              ) {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: 'tool_call',
-                  content: `[Tool call: ${toolCall.name || toolCall.function?.name || 'unknown'}]`,
-                  args: toolCall.args || toolCall.function?.arguments,
-                  tool_call_id: toolCall.id,
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Tool response
-              if (msg.type === 'tool' || msg.role === 'tool') {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: 'tool_response',
-                  content: msg.content || '[Tool response]',
-                  tool_name: msg.name || msg.tool_name,
-                  status: msg.status,
-                  tool_call_id: msg.tool_call_id,
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Fallback: skip unknown/empty types
-              return [];
-            });
-            console.log('[Chat] mappedMessages:', mappedMessages)
-            if (options && options.replace) {
-              setChatMessages(mappedMessages);
-            } else {
-              setChatMessages(prev => {
-                // Avoid duplicates by id
-                const existingIds = new Set(prev.map(m => m.id));
-                const newMessages = mappedMessages.filter(m => !existingIds.has(m.id));
-                return [...prev, ...newMessages];
-              });
-            }
-          }
-          setIsLoading(false)
-          scrollToBottom()
-          // Estimate token usage
-          if (messages && messages.length > 0) {
-            const lastMessage = messages[messages.length - 1]
-            const newTokens = estimateTokenUsage(lastMessage.content || "")
-            setTokensUsed((prev) => prev + newTokens)
-            // Deduct from balance
-            const cost = calculateTokenCost(newTokens)
-            setBalance((prev) => prev - cost)
-          }
-        },
-        onError: (err) => {
-          setIsLoading(false)
-          alert(`Error: ${err}`)
-        },
-        onScrollDown: scrollToBottom,
-        onSetLoading: setIsLoading,
-        onInterrupt: (interruptMessage) => {
-          // Handle interrupts if needed
-        },
-      })
+      console.log('[Chat] Message submitted to stream');
     } catch (error) {
-      setIsLoading(false)
-      alert(`Failed to send message. Please try again.`)
+      console.error("Error in handleSendMessage:", error);
     }
-  }
+  };
 
-  // Function to estimate token usage (simplified)
-  const estimateTokenUsage = (text: string): number => {
-    // Rough estimate: 1 token ≈ 4 characters
-    return Math.ceil(text.length / 4)
-  }
+  // Handle form submission for ChatInput compatibility
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>, messageContent: string) => {
+    e.preventDefault();
+    handleSendMessage(messageContent);
+  };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [chatMessages])
-
-  // Check if auto recharge should be triggered
-  const checkAutoRecharge = () => {
-    if (autoRechargeEnabled && balance < rechargeThreshold) {
-      // In a real app, this would call an API to process the payment
-      // For demo purposes, we'll just add the funds directly
-      setBalance((prev) => prev + rechargeAmount)
-      setShowAutoRechargeNotification(true)
-      return true
-    }
-    return false
-  }
-
-  // Check if user has sufficient balance before sending message
-  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>, input: string) => {
-    e.preventDefault()
-
-    // Estimate tokens for the input (simplified)
-    const estimatedTokens = estimateTokenUsage(input)
-    const estimatedCost = calculateTokenCost(estimatedTokens)
-
-    if (balance < estimatedCost) {
-      // Check if auto recharge can cover this
-      if (autoRechargeEnabled && balance + rechargeAmount >= estimatedCost) {
-        // Trigger auto recharge
-        setBalance((prev) => prev + rechargeAmount)
-        setShowAutoRechargeNotification(true)
-        // Submit after a short delay to allow state update
+  // Handle suggestion click
+  const handleSuggestionClick = (suggestion: string) => {
         setTimeout(() => {
-          handleSendMessage(input)
-        }, 100)
-        return
-      }
+      handleSendMessage(suggestion);
+    }, 100);
+  };
 
-      setShowPaymentRequired(true)
-      return
-    }
+  const authenticatedFetch = useAuthenticatedFetch()
 
-    handleSendMessage(input)
+  const handleTranscriptionComplete = (transcriptionText: string) => {
+    setTranscription(transcriptionText)
+    setIsTranscribing(false)
+    // Auto-send the transcription
+    handleSendMessage(transcriptionText)
   }
 
-  // Close sidebar on mobile when clicking outside
-  const handleOverlayClick = () => {
-    if (window.innerWidth <= 768) {
-      setSidebarOpen(false)
-    }
+  if (!selectedAgent) {
+    return (
+      <DiscoverPage
+        agents={agents}
+        loading={agentsLoading}
+        error={agentsError}
+        onAgentSelect={setSelectedAgent}
+      />
+    )
   }
 
-  // Set initial sidebar state based on screen size
-  useEffect(() => {
-    const handleResize = () => {
-      setSidebarOpen(window.innerWidth > 768)
-    }
-
-    // Set initial state
-    handleResize()
-
-    // Add event listener
-    window.addEventListener("resize", handleResize)
-
-    // Clean up
-    return () => {
-      window.removeEventListener("resize", handleResize)
-    }
-  }, [])
-
-  // Update the main content div to ensure proper layout
   return (
-    <div className="app-container">
-      {/* Sidebar overlay for mobile */}
-      {sidebarOpen && window.innerWidth <= 768 && <div className="sidebar-overlay" onClick={handleOverlayClick} />}
-
-      {/* Sidebar */}
-      <div className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
-        <AgentSelector
-          agents={agents}
-          selectedAgent={selectedAgent}
-          onSelectAgent={handleSelectAgent as (agentId: string) => void}
-          onClose={() => setSidebarOpen(false)}
-          showDiscover={showDiscover}
-          setShowDiscover={setShowDiscover}
-          recentAgents={recentAgents}
-          isAuthenticated={isAuthenticated}
-          loginWithRedirect={loginWithRedirect}
-        />
-      </div>
-
-      {/* Main content */}
-      <div className="main-content">
+    <>
+      <div className="flex flex-col h-screen bg-background">
         <ChatHeader
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          isSidebarOpen={sidebarOpen}
-          onToggleDiscover={() => setShowDiscover(true)}
+          selectedAgent={selectedAgent}
+          agents={agents}
+          onAgentChange={setSelectedAgent}
+          tokensUsed={tokensUsed}
+          remainingCredits={remainingCredits}
         />
 
-        {showDiscover ? (
-          <div className="flex-1 overflow-auto">
-            <DiscoverPage onSelectAgent={handleSelectAgent} recentAgents={recentAgents} />
-          </div>
-        ) : (
-          <div className="flex-1 overflow-auto">
-            <div className="chat-container">
-              {toolEvents.length > 0 && (
-                <div className="tool-events-container mb-4">
-                  {toolEvents.map((event, idx) => (
-                    <div key={event.id || idx} className="tool-event bg-gray-100 p-2 rounded mb-2">
-                      <pre className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(event, null, 2)}</pre>
-                    </div>
-                  ))}
-                </div>
-              )}
+        <div className="flex-1 overflow-hidden">
               <ChatMessages
-                messages={chatMessages}
+            messages={thread.messages}
                 messagesEndRef={messagesEndRef}
                 selectedAgent={selectedAgent}
                 agents={agents}
-                onSuggestionClick={(suggestion) => {
-                  handleSendMessage(suggestion)
-                }}
-              />
+            onSuggestionClick={handleSuggestionClick}
+            suggestions={
+              agents.find((a: any) => a.id === selectedAgent)?.templates?.map((t: any) =>
+                t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
+              )
+            }
+          />
+        </div>
+
+        <div className="border-t bg-background p-4">
               <ChatInput
-                onSubmit={(e, input) => handleMessageSubmit(e, input)}
-                isLoading={isLoading}
+            onSubmit={handleFormSubmit}
+            isLoading={thread.isLoading}
                 selectedAgent={selectedAgent}
+            agentName={agents.find((a: any) => a.id === selectedAgent)?.name}
               />
             </div>
-          </div>
-        )}
       </div>
 
-      {/* Payment Required Modal */}
-      {showPaymentRequired && (
         <PaymentRequiredModal
-          onClose={() => setShowPaymentRequired(false)}
-          currentBalance={balance}
-          onBalanceUpdated={(newBalance) => {
-            setBalance(newBalance)
-            setShowPaymentRequired(false)
-          }}
-          onAutoRechargeChange={(enabled) => {
-            setAutoRechargeEnabled(enabled)
-          }}
-        />
-      )}
+        isOpen={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        requiredCredits={calculateTokenCost(tokensUsed)}
+      />
 
-      {/* Auto Recharge Notification */}
-      {showAutoRechargeNotification && (
-        <AutoRechargeNotification amount={rechargeAmount} onClose={() => setShowAutoRechargeNotification(false)} />
-      )}
-    </div>
+      <AutoRechargeNotification
+        isOpen={showAutoRechargeNotification}
+        onClose={() => setShowAutoRechargeNotification(false)}
+        amount={autoRechargeAmount}
+      />
+    </>
   )
 }

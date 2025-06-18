@@ -1,16 +1,16 @@
 "use client"
 
 import type React from "react"
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect } from "react"
 import { ChatInput } from "./chat-input"
 import { ChatMessages } from "./chat-messages"
 import { useAuth0 } from "@auth0/auth0-react"
 import { getAuthToken, isLocallyAuthenticated } from "@/lib/api"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
-import { LangGraphService } from "@/lib/langgraph-service-sdk"
-import { StreamingHandlerService } from "@/lib/streaming-handler-service"
 import { useAgents } from "@/lib/agent-service"
 import { useRouter } from 'next/router'
+import { useStream } from "@langchain/langgraph-sdk/react"
+import type { Message } from "@langchain/langgraph-sdk"
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
@@ -23,12 +23,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   const [selectedAgent] = useState<string>(normalizedAgent);
   const [tokensUsed, setTokensUsed] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
-  const [cachedAuthToken, setCachedAuthToken] = useState<string | null>(null)
-  const [threadId, setThreadId] = useState<string | null>(null)
   const [input, setInput] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [messages, setMessages] = useState<any[]>([])
-  const [incomingMessage, setIncomingMessage] = useState("")
   const [agentValid, setAgentValid] = useState<boolean>(false)
   const [agentError, setAgentError] = useState<string>("")
   const { getAgent } = useAgents()
@@ -48,552 +43,309 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     }
   }
 
-  // Debug log after state is defined
-  console.log('[UI][render] messages:', messages, 'incomingMessage:', incomingMessage);
-
   const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
-
-  // Create a new instance of LangGraphService
-  const langGraphService = new LangGraphService()
-  const streamingHandler = new StreamingHandlerService()
 
   const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
 
-  // Helper to get headers for embed mode
-  const getEmbedHeaders = (isStream = false) => {
-    if (embedUserId && ADMIN_API_KEY) {
-      return {
-        "Admin-API-Key": ADMIN_API_KEY,
-        "X-User-ID": embedUserId,
-        "Content-Type": "application/json",
-        "Accept": isStream ? "text/event-stream" : "application/json",
-      };
-    }
-    return undefined;
-  };
-
-  // Initialize thread when component mounts
-  useEffect(() => {
-    // Allow B-Bot without authentication, but require auth for other agents
-    const shouldCreateThread = (isAuthenticated || isLocallyAuthenticated() || selectedAgent === "b-bot" || embedUserId) && !threadId
-
-    if (shouldCreateThread) {
-      const initializeThread = async () => {
-        try {
-          const embedHeaders = getEmbedHeaders();
-          if (embedHeaders) {
-            console.log("[EmbedChatInterface] Sending headers for createThread:", embedHeaders);
-          }
-          const thread = await langGraphService.createThread({
-            user_id: embedUserId || user?.sub || "anonymous-user",
-            agent_id: selectedAgent,
-          }, embedHeaders)
-          setThreadId(thread.thread_id)
-          console.log("Thread initialized with ID:", thread.thread_id)
-        } catch (error) {
-          console.error("Failed to initialize thread:", error)
-
-          // Create a fallback thread ID for B-Bot if needed
-          if (selectedAgent === "b-bot") {
-            const fallbackThreadId = `bbot-anonymous-${Date.now()}`
-            setThreadId(fallbackThreadId)
-          }
-        }
+  // Get auth token for API calls
+  const getApiKey = async () => {
+    try {
+      // For embed mode with admin API key
+      if (embedUserId && ADMIN_API_KEY) {
+        return ADMIN_API_KEY;
       }
 
-      initializeThread()
-    }
-  }, [isAuthenticated, threadId, user?.sub, selectedAgent, embedUserId])
+      // For authenticated users
+      if (isAuthenticated) {
+        const token = await getAccessTokenSilently({
+          authorizationParams: {
+            audience: LANGGRAPH_AUDIENCE,
+          },
+        });
+        return token;
+      }
 
-  // Fetch and cache the auth token
-  useEffect(() => {
-    const fetchToken = async () => {
+      // For locally authenticated users
+      if (isLocallyAuthenticated()) {
+        return getAuthToken();
+      }
+
+      // For B-Bot without authentication
+      if (selectedAgent === "bbot") {
+        return null;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Failed to get auth token:", error);
+      return null;
+    }
+  };
+
+  // Get the headers including the Admin-API-Key for embed mode
+  const getHeaders = async () => {
+    const baseHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    // For embed mode with admin API key
+    if (embedUserId && ADMIN_API_KEY) {
+      return {
+        ...baseHeaders,
+        "Admin-API-Key": ADMIN_API_KEY,
+        "X-User-ID": embedUserId,
+      };
+    }
+
+    // For authenticated users
+    if (isAuthenticated) {
       try {
-        // First check if we're authenticated through Auth0
-        if (isAuthenticated) {
           const token = await getAccessTokenSilently({
             authorizationParams: {
               audience: LANGGRAPH_AUDIENCE,
             },
-          })
-          setCachedAuthToken(token)
-          localStorage.setItem("auth_token", token)
-          return
-        }
+        });
+        return {
+          ...baseHeaders,
+          "Authorization": `Bearer ${token}`,
+        };
+      } catch (error) {
+        console.error("Failed to get auth token:", error);
+      }
+    }
 
-        // If not authenticated through Auth0, check for local token
-        if (isLocallyAuthenticated()) {
-          const token = getAuthToken()
-          if (token) {
-            setCachedAuthToken(token)
-            return
-          }
+    // For locally authenticated users
+    if (isLocallyAuthenticated()) {
+      const token = getAuthToken();
+      if (token) {
+        return {
+          ...baseHeaders,
+          "Authorization": `Bearer ${token}`,
+        };
+      }
+    }
+
+    // For B-Bot without authentication - use admin API key if available
+    if (selectedAgent === "bbot" && ADMIN_API_KEY) {
+      return {
+        ...baseHeaders,
+        "Admin-API-Key": ADMIN_API_KEY,
+      };
+    }
+
+    return baseHeaders;
+  };
+
+  // Get the API URL for LangGraph - use the proxy endpoint
+  const getApiUrl = () => {
+    // Use the proxy endpoint which handles authentication internally
+    // Need to construct absolute URL for LangGraph client
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/api/proxy`;
+    }
+    // Fallback for server-side rendering
+    return '/api/proxy';
+  };
+
+  // Helper function to check if a string is a valid UUID
+  const isValidUUID = (str: string) => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+  };
+
+  // Get the assistant ID - only use it if it's a valid UUID, otherwise use a default
+  const getAssistantId = () => {
+    if (selectedAgent && isValidUUID(selectedAgent)) {
+      return selectedAgent;
+    }
+    // For non-UUID agent IDs like "bbot", return the agent name directly
+    // The API accepts specific registered graphs: indexer, retrieval_graph, bbot, open_deep_research
+    return selectedAgent || "bbot"; // Use the actual agent name or default to bbot
+  };
+
+  // State for API key (can be undefined since proxy handles auth)
+  const [apiKey, setApiKey] = useState<string | undefined>(undefined);
+
+  // Get entity ID for state management
+  const getEntityId = () => {
+    const userId = embedUserId || user?.sub || "anonymous-user";
+    const agentId = selectedAgent || "bbot";
+    return userId.replace(/[|\-]/g, '') + '_' + agentId;
+  };
+
+  // Initialize the useStream hook - proxy handles authentication
+  const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
+    apiUrl: getApiUrl(),
+    apiKey: undefined, // Proxy handles authentication
+    assistantId: getAssistantId(), // Only set if valid UUID, otherwise use default
+    messagesKey: "messages",
+    onError: (error: unknown) => {
+      console.error("Stream error:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setAgentError(errorMessage || "An error occurred");
+    },
+    onFinish: () => {
+      console.log("Stream finished");
+      scrollToBottom();
+    },
+  });
+
+  // Workaround state for SDK bug - manually track streaming messages  
+  const [streamingMessages, setStreamingMessages] = useState<Message[]>([]);
+  
+  // Debug logging for thread state changes
+  useEffect(() => {
+    console.log("Thread state changed:", {
+      messagesLength: thread.messages?.length || 0,
+      streamingMessagesLength: streamingMessages.length,
+      isLoading: thread.isLoading,
+      values: thread.values,
+      firstMessage: thread.messages?.[0],
+      lastMessage: thread.messages?.[thread.messages.length - 1]
+    });
+  }, [thread.messages, thread.isLoading, thread.values, streamingMessages]);
+
+  // Additional detailed message logging  
+  useEffect(() => {
+    if (thread.messages && thread.messages.length > 0) {
+      console.log("SDK Messages array updated:", thread.messages.map((msg, idx) => ({
+        index: idx,
+        type: msg.type,
+        content: typeof msg.content === 'string' ? msg.content.substring(0, 50) + '...' : msg.content
+      })));
+    }
+  }, [thread.messages]);
+
+  // Update streaming messages when SDK finally updates
+  useEffect(() => {
+    if (thread.messages && thread.messages.length > 0) {
+      setStreamingMessages(thread.messages);
+    }
+  }, [thread.messages]);
+
+  // Scroll to bottom function
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [streamingMessages, thread.messages]);
+
+  // Load agent information
+  useEffect(() => {
+    const loadAgent = async () => {
+      try {
+        setAgentError("");
+        const agentData = await getAgent(selectedAgent);
+        if (agentData) {
+          setAgentObj(agentData);
+          setAgentValid(true);
+        } else {
+          setAgentError(`Agent '${selectedAgent}' not found`);
+          setAgentValid(false);
         }
       } catch (error) {
-        console.error("Error fetching auth token:", error)
-      }
-    }
-
-    fetchToken()
-  }, [isAuthenticated, getAccessTokenSilently])
-
-  useEffect(() => {
-    const checkAgent = async () => {
-      console.log('[EmbedChatInterface] checkAgent: initialAgent =', initialAgent, 'selectedAgent =', selectedAgent)
-      // Only skip fetch if this embed is for the built-in B-Bot (the default embed agent)
-      // If initialAgent is undefined or 'bbot', treat as B-Bot embed
-      if (!initialAgent || initialAgent === "bbot" || initialAgent === "b-bot") {
-        console.log('[EmbedChatInterface] Skipping fetch for built-in B-Bot embed')
-        setAgentValid(true)
-        setAgentError("")
-        return
-      }
-      try {
-        const agent = await getAgent(selectedAgent || '', { allowAnonymous: true })
-        if (agent && agent.metadata && agent.metadata.distributionChannel && agent.metadata.distributionChannel.type === "Embed") {
-          setAgentValid(true)
-          setAgentError("")
-        } else {
-          setAgentError("This assistant is not enabled for embed usage.")
-          setAgentValid(false)
-        }
-      } catch (e) {
-        setAgentError("Failed to load assistant or check embed permissions.")
-        setAgentValid(false)
-      }
-    }
-    checkAgent()
-  }, [selectedAgent, getAgent, initialAgent])
-
-  // Fetch agent object on mount
-  useEffect(() => {
-    const fetchAgent = async () => {
-      if (!initialAgent || initialAgent === "bbot" || initialAgent === "b-bot") {
-        setAgentObj({
-          id: "bbot",
-          name: "B-Bot",
-          shortDescription: "Your personal AI assistant",
-          description: "B-Bot is your personal AI assistant that can help with a wide range of tasks.",
-          profileImage: "/helpful-robot.png",
-          category: "General",
-          publisherId: "beyond-official",
-          abilities: [],
-          apps: [],
-          templates: [
-            { text: "Hello! How can you help me?" },
-            { text: "What can you do?" },
-            { text: "Tell me about yourself" }
-          ]
-        });
-        return;
-      }
-      try {
-        const agent = await getAgent(selectedAgent || '', { allowAnonymous: true });
-        setAgentObj(agent);
-      } catch (e) {
-        setAgentObj(null);
+        console.error("Error loading agent:", error);
+        setAgentError(`Failed to load agent: ${error}`);
+        setAgentValid(false);
       }
     };
-    fetchAgent();
-  }, [selectedAgent, getAgent, initialAgent]);
 
-  // --- Streaming message logic (like ChatInterface) ---
+    if (selectedAgent) {
+      loadAgent();
+    }
+  }, [selectedAgent, getAgent]);
+
+  // Handle sending a message
   const handleSendMessage = async (messageContent: string) => {
     setToolEvents([]); // Clear previous tool events
-    if (!messageContent.trim()) return
-    setIsLoading(true)
-
-    // Create a temporary user message to show immediately
-    const userMessage = {
-      id: `user-temp-${Date.now()}`,
-      role: "user",
-      content: messageContent,
-      timestamp: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
+    if (!messageContent.trim()) return;
 
     try {
-      // Get the current thread ID or create a new one
-      let currentThreadId = threadId
-      if (!currentThreadId) {
-        const embedHeaders = getEmbedHeaders();
-        if (embedHeaders) {
-          console.log("[EmbedChatInterface] Sending headers for createThread:", embedHeaders);
-        }
-        const thread = await langGraphService.createThread({
-          user_id: embedUserId || user?.sub || "anonymous-user",
-          agent_id: selectedAgent,
-        }, embedHeaders)
-        currentThreadId = thread.thread_id
-        setThreadId(currentThreadId)
-      }
-
-      // Add the message to the thread
-      if (currentThreadId) {
-        const embedHeaders = getEmbedHeaders();
-        if (embedHeaders) {
-          console.log("[EmbedChatInterface] Sending headers for addThreadMessage:", embedHeaders);
-        }
-        await langGraphService.addThreadMessage(currentThreadId, {
-          role: "user",
-          content: messageContent,
-        }, embedHeaders)
-      }
-
-      const userId = embedUserId || user?.sub || "anonymous-user"
-      const agentId = selectedAgent
-
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId
+      const userId = embedUserId || user?.sub || "anonymous-user";
+      const agentId = selectedAgent;
+      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
 
       // Merge assistant apps with user apps (user apps take precedence)
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
 
-      // Prepare the configuration for the stream
-      const streamConfig = {
-        input: {
+      // Create the new message
+      const newMessage: Message = {
+        type: "human",
+        content: messageContent,
+      };
+
+      // Submit using LangGraph's useStream
+      thread.submit(
+        { 
+          messages: [newMessage],
           entity_id: entityId,
-          messages: [{ role: "user", content: messageContent }],
+          user_id: userId,
+          agent_id: agentId
         },
+        {
         config: {
-          thread_id: currentThreadId,
+            configurable: {
           agent_id: agentId,
           user_id: userId,
-          conversation_history: messages,
+              entity_id: entityId,
           temperature: 0.7,
           max_tokens: 1024,
           top_p: 1.0,
           instructions: "Be helpful and concise.",
           apps: mergedApps,
-        },
-      }
+            }
+          },
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [
+              ...(prev.messages ?? []),
+              newMessage,
+            ],
+            entity_id: entityId,
+            user_id: userId,
+            agent_id: agentId,
+          }),
+        }
+      );
 
-      // Invoke the streaming graph
-      const embedHeaders = getEmbedHeaders(true);
-      if (embedHeaders) {
-        console.log("[EmbedChatInterface] Sending headers for invokeGraphStream:", embedHeaders);
-      }
-      if (!currentThreadId) {
-        throw new Error("No thread ID available for streaming");
-      }
-      const response = await langGraphService.invokeGraphStream(selectedAgent, currentThreadId, streamConfig, embedHeaders)
-
-      // Process the streaming response
-      console.log('[UI][processStream] About to call streamingHandler.processStream with callbacks:', {
-        onMessage: (msgObj: any) => {
-          if (!streaming) return; // Ignore if not streaming
-          setMessages(prev => {
-            // Try to match by id first
-            const idx = prev.findIndex(m => m.role === "assistant" && m.id === msgObj.id);
-            if (idx !== -1) {
-              const updated = [...prev];
-              updated[idx] = { ...updated[idx], content: msgObj.content };
-              return updated;
-            }
-            // Fallback: match by last assistant
-            const lastIdx = [...prev].reverse().findIndex(m => m.role === "assistant");
-            if (lastIdx !== -1) {
-              const idx = prev.length - 1 - lastIdx;
-              const updated = [...prev];
-              updated[idx] = { ...updated[idx], content: msgObj.content };
-              return updated;
-            }
-            // If no assistant message, append a new one
-            return [...prev, { id: msgObj.id || `msg-${Date.now()}`, role: "assistant", content: msgObj.content, timestamp: new Date().toISOString() }];
-          });
-          scrollToBottom();
-        },
-        onUpdate: (messagesArr: any[], options?: { replace: boolean }) => {
-          if (!streaming && !(options && options.replace)) {
-            // Ignore updates/partials if not streaming
-            return;
-          }
-          console.log('[UI][onUpdate] messagesArr:', messagesArr, options);
-          if (messagesArr && messagesArr.length > 0) {
-            const mappedMessages = messagesArr.flatMap((msg: any, idx: number) => {
-              // Only map 'ai' messages if content is non-empty
-              if (msg.type === "ai") {
-                if (msg.content && msg.content.trim() !== "") {
-                  return [{
-                    id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                    role: "assistant",
-                    content: msg.content,
-                    timestamp: new Date().toISOString(),
-                  }];
-                } else {
-                  return [];
-                }
-              }
-              // User message
-              if (msg.type === "human" || msg.role === "user") {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: "user",
-                  content: msg.content || "",
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Tool call request (function call) - only if content is empty
-              const toolCall = (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)
-                ? msg.tool_calls[0]
-                : (msg.additional_kwargs && Array.isArray(msg.additional_kwargs.tool_calls) && msg.additional_kwargs.tool_calls.length > 0)
-                  ? msg.additional_kwargs.tool_calls[0]
-                  : null;
-              if (
-                toolCall &&
-                (!msg.content || msg.content.trim() === "")
-              ) {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: 'tool_call',
-                  content: `[Tool call: ${toolCall.name || toolCall.function?.name || 'unknown'}]`,
-                  args: toolCall.args || toolCall.function?.arguments,
-                  tool_call_id: toolCall.id,
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Tool response
-              if (msg.type === 'tool' || msg.role === 'tool') {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: 'tool_response',
-                  content: msg.content || '[Tool response]',
-                  tool_name: msg.name || msg.tool_name,
-                  status: msg.status,
-                  tool_call_id: msg.tool_call_id,
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Fallback: skip unknown/empty types
-              return [];
-            });
-            console.log('[DEBUG][setMessages][onUpdate]', mappedMessages);
-            if (options && options.replace) {
-              // Sort by timestamp or id if available
-              const sortedMessages = [...mappedMessages].sort((a, b) => {
-                if (a.timestamp && b.timestamp) {
-                  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                }
-                if (a.id && b.id) {
-                  return a.id.localeCompare(b.id);
-                }
-                return 0;
-              });
-              setMessages(sortedMessages);
-            } else {
-              setMessages(prev => {
-                const existingIds = new Set(prev.map(m => m.id));
-                const newMessages = mappedMessages.filter(m => !existingIds.has(m.id));
-                return [...prev, ...newMessages];
-              });
-            }
-          }
-          console.log('[DEBUG][setIncomingMessage][onUpdate] clear incomingMessage');
-          setIncomingMessage(""); // Always clear
-          setIsLoading(false)
-          scrollToBottom()
-        },
-        onError: (err: any) => {
-          setIsLoading(false)
-          alert(`Error: ${err}`)
-        },
-        onToolEvent: (toolEventArr: any[]) => {
-          setToolEvents((prev) => [...prev, ...toolEventArr]);
-          console.log('[UI][onToolEvent]', toolEventArr);
-        },
-        onScrollDown: scrollToBottom,
-        onSetLoading: setIsLoading,
-        onInterrupt: () => {},
-      });
-      await streamingHandler.processStream(response, {
-        onMessage: (msgObj: any) => {
-          if (!streaming) return; // Ignore if not streaming
-          setMessages(prev => {
-            // Try to match by id first
-            const idx = prev.findIndex(m => m.role === "assistant" && m.id === msgObj.id);
-            if (idx !== -1) {
-              const updated = [...prev];
-              updated[idx] = { ...updated[idx], content: msgObj.content };
-              return updated;
-            }
-            // Fallback: match by last assistant
-            const lastIdx = [...prev].reverse().findIndex(m => m.role === "assistant");
-            if (lastIdx !== -1) {
-              const idx = prev.length - 1 - lastIdx;
-              const updated = [...prev];
-              updated[idx] = { ...updated[idx], content: msgObj.content };
-              return updated;
-            }
-            // If no assistant message, append a new one
-            return [...prev, { id: msgObj.id || `msg-${Date.now()}`, role: "assistant", content: msgObj.content, timestamp: new Date().toISOString() }];
-          });
-          scrollToBottom();
-        },
-        onUpdate: (messagesArr: any[], options?: { replace: boolean }) => {
-          if (!streaming && !(options && options.replace)) {
-            // Ignore updates/partials if not streaming
-            return;
-          }
-          console.log('[UI][onUpdate] messagesArr:', messagesArr, options);
-          if (messagesArr && messagesArr.length > 0) {
-            const mappedMessages = messagesArr.flatMap((msg: any, idx: number) => {
-              // Only map 'ai' messages if content is non-empty
-              if (msg.type === "ai") {
-                if (msg.content && msg.content.trim() !== "") {
-                  return [{
-                    id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                    role: "assistant",
-                    content: msg.content,
-                    timestamp: new Date().toISOString(),
-                  }];
-                } else {
-                  return [];
-                }
-              }
-              // User message
-              if (msg.type === "human" || msg.role === "user") {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: "user",
-                  content: msg.content || "",
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Tool call request (function call) - only if content is empty
-              const toolCall = (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)
-                ? msg.tool_calls[0]
-                : (msg.additional_kwargs && Array.isArray(msg.additional_kwargs.tool_calls) && msg.additional_kwargs.tool_calls.length > 0)
-                  ? msg.additional_kwargs.tool_calls[0]
-                  : null;
-              if (
-                toolCall &&
-                (!msg.content || msg.content.trim() === "")
-              ) {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: 'tool_call',
-                  content: `[Tool call: ${toolCall.name || toolCall.function?.name || 'unknown'}]`,
-                  args: toolCall.args || toolCall.function?.arguments,
-                  tool_call_id: toolCall.id,
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Tool response
-              if (msg.type === 'tool' || msg.role === 'tool') {
-                return [{
-                  id: msg.id || msg.run_id || `msg-${idx}-${Date.now()}`,
-                  role: 'tool_response',
-                  content: msg.content || '[Tool response]',
-                  tool_name: msg.name || msg.tool_name,
-                  status: msg.status,
-                  tool_call_id: msg.tool_call_id,
-                  timestamp: new Date().toISOString(),
-                }];
-              }
-              // Fallback: skip unknown/empty types
-              return [];
-            });
-            console.log('[DEBUG][setMessages][onUpdate]', mappedMessages);
-            if (options && options.replace) {
-              // Sort by timestamp or id if available
-              const sortedMessages = [...mappedMessages].sort((a, b) => {
-                if (a.timestamp && b.timestamp) {
-                  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                }
-                if (a.id && b.id) {
-                  return a.id.localeCompare(b.id);
-                }
-                return 0;
-              });
-              setMessages(sortedMessages);
-            } else {
-              setMessages(prev => {
-                const existingIds = new Set(prev.map(m => m.id));
-                const newMessages = mappedMessages.filter(m => !existingIds.has(m.id));
-                return [...prev, ...newMessages];
-              });
-            }
-          }
-          console.log('[DEBUG][setIncomingMessage][onUpdate] clear incomingMessage');
-          setIncomingMessage(""); // Always clear
-          setIsLoading(false)
-          scrollToBottom()
-        },
-        onError: (err: any) => {
-          setIsLoading(false)
-          alert(`Error: ${err}`)
-        },
-        onToolEvent: (toolEventArr: any[]) => {
-          setToolEvents((prev) => [...prev, ...toolEventArr]);
-          console.log('[UI][onToolEvent]', toolEventArr);
-        },
-        onScrollDown: scrollToBottom,
-        onSetLoading: setIsLoading,
-        onInterrupt: () => {},
-      })
+      setInput("");
     } catch (error) {
-      console.error("Error in handleSendMessage:", error)
+      console.error("Error sending message:", error);
+      setAgentError(`Failed to send message: ${error}`);
     }
-  }
+  };
 
-  // Function to estimate token usage (simplified)
-  const estimateTokenUsage = (text: string): number => {
-    // Rough estimate: 1 token ≈ 4 characters
-    return Math.ceil(text.length / 4)
-  }
+  // Handle form submission for ChatInput compatibility
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>, messageContent: string) => {
+    e.preventDefault();
+    handleSendMessage(messageContent);
+  };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
-
-  useEffect(() => {
-    scrollToBottom()
-    console.log('[DEBUG][useEffect][messages/incomingMessage]', { messages, incomingMessage });
-  }, [messages, incomingMessage])
-
-  // Simplified message submission handler
-  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>, msg: string) => {
-    e.preventDefault()
-    handleSendMessage(msg)
-    setInput("")
-  }
-
-  // Add a class to the body to indicate this is an embedded view
-  useEffect(() => {
-    document.body.classList.add("embedded-chat")
-    return () => {
-      document.body.classList.remove("embedded-chat")
-    }
-  }, [])
-
-  // Add debug log for ChatMessages props before return
-  const debugChatMessagesProps = { messages, incomingMessage };
-  console.log('[DEBUG][render][ChatMessages props]', debugChatMessagesProps);
+  // Handle suggestion click
+  const handleSuggestionClick = (suggestion: string) => {
+    setInput(suggestion);
+    setTimeout(() => {
+      handleSendMessage(suggestion);
+    }, 100);
+  };
 
   return (
-    <div className="embed-container flex flex-col h-screen">
-      {!agentValid ? (
-        <div className="flex items-center justify-center h-screen text-red-500">
-          {agentError || "Checking assistant permissions..."}
-        </div>
-      ) : (
-        <div className="flex-1 overflow-auto">
-          <div className="chat-container">
-            {toolEvents.length > 0 && (
-              <div className="tool-events-container mb-4">
-                {toolEvents.map((event, idx) => (
-                  <div key={event.id || idx} className="tool-event bg-gray-100 p-2 rounded mb-2">
-                    <pre className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(event, null, 2)}</pre>
-                  </div>
-                ))}
-              </div>
-            )}
+    <div className="flex flex-col h-screen bg-background">
+      <div className="flex-1 overflow-hidden">
             <ChatMessages
-              messages={messages}
+          messages={streamingMessages.length > 0 ? streamingMessages : thread.messages}
               messagesEndRef={messagesEndRef}
               selectedAgent={selectedAgent}
               agents={agentObj ? [agentObj] : []}
+          userColor={userColor}
+          onSuggestionClick={handleSuggestionClick}
               suggestions={
                 agentObj && agentObj.templates && agentObj.templates.length > 0
                   ? agentObj.templates.map((t: any) =>
@@ -601,24 +353,24 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
                     )
                   : undefined
               }
-              userColor={userColor}
-              onSuggestionClick={(suggestion) => {
-                setInput(suggestion)
-                setTimeout(() => {
-                  handleSendMessage(suggestion)
-                }, 100)
-              }}
-            />
+        />
+      </div>
+      
+      <div className="border-t bg-background p-4">
             <ChatInput
-              onSubmit={handleMessageSubmit}
-              isLoading={isLoading}
+          onSubmit={handleFormSubmit}
+          isLoading={thread.isLoading}
               selectedAgent={selectedAgent}
               agentName={agentObj?.name}
               userColor={userColor}
             />
           </div>
+      
+      {agentError && (
+        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-2 m-4 rounded">
+          {agentError}
         </div>
       )}
     </div>
-  )
+  );
 }

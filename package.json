@@ -12,6 +12,8 @@
     "@ai-sdk/react": "latest",
     "@auth0/auth0-react": "latest",
     "@hookform/resolvers": "^3.9.1",
+    "@langchain/core": "^0.3.59",
+    "@langchain/langgraph-sdk": "^0.0.73",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
     "@radix-ui/react-aspect-ratio": "1.1.1",

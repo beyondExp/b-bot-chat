@@ -1,5 +1,5 @@
 import type React from "react"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -12,7 +12,6 @@ export const metadata: Metadata = {
   title: "Beyond-Bot.ai - Chat with AI Agents",
   description: "Chat with personalized AI agents powered by LangGraph",
   manifest: "/manifest.json",
-  themeColor: "#731f7d",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -26,15 +25,17 @@ export const metadata: Metadata = {
     ],
     apple: [{ url: "/logo.svg", sizes: "any", type: "image/svg+xml" }],
   },
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
   other: {
     "mobile-web-app-capable": "yes",
   },
-    generator: 'v0.dev'
+  generator: 'v0.dev'
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#731f7d",
 }
 
 export default function RootLayout({

@@ -118,6 +118,56 @@ export function useAgents() {
       setError(null)
 
       try {
+        // Special case for "bbot" - inject the agent information instead of fetching
+        if (agentId === "bbot" || agentId === "b-bot") {
+          const bbotAgent: Agent = {
+            id: "bbot",
+            name: "B-Bot",
+            shortDescription: "Your helpful AI assistant powered by LangGraph",
+            description: "B-Bot is an intelligent AI assistant that can help you with various tasks, answer questions, and provide assistance across different domains. Built with LangGraph for reliable and efficient responses.",
+            profileImage: "/helpful-robot.png",
+            category: "General",
+            publisherId: "b-bot-official",
+            publisher: {
+              id: "b-bot-official",
+              name: "B-Bot Team",
+              description: "The official B-Bot development team",
+              profileImage: "/logo.svg",
+              verified: true,
+              agentCount: 1,
+              followerCount: 0,
+            },
+            abilities: [
+              { id: "chat", name: "Chat", description: "General conversation and assistance" },
+              { id: "assistance", name: "Assistance", description: "Help with various tasks" },
+              { id: "general-knowledge", name: "General Knowledge", description: "Answer questions on various topics" }
+            ],
+            apps: [],
+            templates: [
+              "Hello! How can I help you today?",
+              "What can you do?",
+              "Tell me about yourself",
+              "Help me with a task"
+            ],
+            metadata: {
+              owner: "b-bot-official",
+              expert_profession: "General Assistant",
+              profileImage: "/helpful-robot.png"
+            },
+            rawData: {
+              assistant_id: "bbot",
+              name: "B-Bot",
+              description: "Your helpful AI assistant powered by LangGraph",
+              metadata: {
+                owner: "b-bot-official",
+                expert_profession: "General Assistant",
+                profileImage: "/helpful-robot.png"
+              }
+            }
+          };
+          return bbotAgent;
+        }
+
         let responseData
         if (options?.allowAnonymous) {
           // Anonymous fetch using proxy endpoint, no Authorization header

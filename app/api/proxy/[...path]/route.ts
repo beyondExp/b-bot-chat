@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-export const maxDuration = 60 // Set max duration to 60 seconds for streaming
+export const maxDuration = 600 // Set max duration to 60 seconds for streaming
 
 export async function GET(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
@@ -125,37 +125,44 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
 
     // Handle streaming responses
     if (response.headers.get("Content-Type")?.includes("text/event-stream")) {
+      console.log("[Proxy] Detected streaming response, setting up pass-through stream");
+      
       if (!response.body) {
         return new Response("No stream", { status: 500 });
       }
-      const { readable, writable } = new TransformStream();
-      const reader = response.body.getReader();
-      const writer = writable.getWriter();
-      (async () => {
-        const encoder = new TextEncoder();
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value) {
-            // Log the incoming stream chunk for debugging
-            try {
-              const chunkStr = new TextDecoder().decode(value);
-              console.log(`[Proxy][Stream][${new Date().toISOString()}] Incoming chunk:`, chunkStr.slice(0, 200));
-            } catch (e) {
-              console.log('[Proxy][Stream] Incoming chunk (binary, not decoded)');
-            }
-            await writer.write(value);
-            await writer.write(encoder.encode("\n")); // helps flush in some environments
+      
+      // Direct pass-through streaming without buffering
+      const transformStream = new TransformStream({
+        transform(chunk, controller) {
+          // Log chunk for debugging
+          try {
+            const chunkStr = new TextDecoder().decode(chunk);
+            console.log(`[Proxy][Stream][${new Date().toISOString()}] Passing through chunk:`, chunkStr.slice(0, 100));
+          } catch (e) {
+            console.log(`[Proxy][Stream][${new Date().toISOString()}] Passing through binary chunk:`, chunk.length, 'bytes');
           }
+          
+          // Pass through immediately without any processing
+          controller.enqueue(chunk);
         }
-        await writer.close();
-      })();
-      // Use the native Response, not NextResponse
-      return new Response(readable, {
+      });
+
+      // Pipe the response body through our transform stream
+      const transformedStream = response.body.pipeThrough(transformStream);
+
+      // Return the stream with comprehensive headers for real-time streaming
+      return new Response(transformedStream, {
+        status: response.status,
         headers: {
           "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
           "Connection": "keep-alive",
+          "X-Accel-Buffering": "no", // Disable Nginx buffering
+          "Transfer-Encoding": "chunked",
+          // CORS headers
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "*",
+          "Access-Control-Allow-Methods": "*",
         },
       });
     }
