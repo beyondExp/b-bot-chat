@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-export const maxDuration = 600 // Set max duration to 60 seconds for streaming
+export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 
 export async function GET(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
