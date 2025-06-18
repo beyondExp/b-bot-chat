@@ -72,9 +72,9 @@ export function ChatMessages({
   const welcomeSuggestions = suggestions && suggestions.length > 0 ? suggestions : ["Hello! How can you help me?", "What can you do?", "Tell me about yourself"];
 
   return (
-    <div className="chat-messages flex-1 overflow-y-auto p-4 space-y-4">
+    <div className="chat-messages h-full overflow-y-auto p-4 space-y-4">
       {messages.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-full">
+        <div className="flex flex-col items-center justify-center min-h-[400px]">
           <Avatar className="h-20 w-20 mb-4">
             <AvatarImage src={getAgentAvatar() || "/placeholder.svg"} alt={getAgentName()} />
             <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
