@@ -13,10 +13,12 @@ import { PaymentRequiredModal } from "./payment-required-modal"
 import { AutoRechargeNotification } from "./auto-recharge-notification"
 import { useAgents } from "@/lib/agent-service"
 import { useAuth0 } from "@auth0/auth0-react"
-import { useAuthenticatedFetch, getAuthToken, isLocallyAuthenticated } from "@/lib/api"
+import { useAuthenticatedFetch, isLocallyAuthenticated, getAuthToken } from "@/lib/api"
+import { MainChatSidebar } from "./main-chat-sidebar"
+import { ChatSession, ChatHistoryManager } from "@/lib/chat-history"
 
 // Import the LANGGRAPH_AUDIENCE constant
-import { LANGGRAPH_AUDIENCE } from "@/lib/api"
+const LANGGRAPH_AUDIENCE = process.env.NEXT_PUBLIC_LANGGRAPH_AUDIENCE || "https://api.langgraph.bbot.solutions"
 // Add these imports at the top of the file
 import { useStream } from "@langchain/langgraph-sdk/react"
 import type { Message } from "@langchain/langgraph-sdk"
@@ -28,6 +30,8 @@ interface ChatInterfaceProps {
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(initialAgent || "bbot")
   const [tokensUsed, setTokensUsed] = useState(0)
+  // NOTE: showPaymentModal should only be set to true for authenticated users with actual balance issues
+  // For unauthenticated users, payment/balance checks should not apply
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
   const [autoRechargeAmount, setAutoRechargeAmount] = useState(0)
@@ -36,6 +40,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [transcription, setTranscription] = useState<string>("")
   const [agents, setAgents] = useState<any[]>([])
+  
+  // Sidebar state
+  const [showSidebar, setShowSidebar] = useState(false)
+  const [currentSession, setCurrentSession] = useState<ChatSession | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const [toolEvents, setToolEvents] = useState<any[]>([]);
@@ -305,6 +313,31 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     handleSendMessage(transcriptionText)
   }
 
+  // Sidebar handlers
+  const handleToggleSidebar = () => {
+    setShowSidebar(!showSidebar)
+  }
+
+  // Get current thread ID
+  const getCurrentThreadId = () => {
+    return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId() || undefined
+  }
+
+  const handleSelectChat = (session: ChatSession) => {
+    setCurrentSession(session)
+    ChatHistoryManager.setCurrentThreadId(session.threadId)
+    // Reload the chat with the selected session
+    window.location.reload()
+  }
+
+  const handleSelectAgent = (agentId: string) => {
+    setSelectedAgent(agentId)
+  }
+
+  const handleToggleDiscover = () => {
+    setSelectedAgent(null) // This will show the DiscoverPage
+  }
+
   if (!selectedAgent) {
     return (
       <DiscoverPage
@@ -320,11 +353,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     <>
       <div className="flex flex-col h-screen bg-background">
         <ChatHeader
-          selectedAgent={selectedAgent}
-          agents={agents}
-          onAgentChange={setSelectedAgent}
-          tokensUsed={tokensUsed}
-          remainingCredits={remainingCredits}
+          onToggleSidebar={handleToggleSidebar}
+          isSidebarOpen={showSidebar}
+          onToggleDiscover={handleToggleDiscover}
         />
 
         <div className="flex-1 overflow-hidden">
@@ -352,10 +383,27 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             </div>
       </div>
 
+      <MainChatSidebar
+        isOpen={showSidebar}
+        onClose={() => setShowSidebar(false)}
+        onSelectChat={handleSelectChat}
+        onSelectAgent={handleSelectAgent}
+        onDiscoverAgents={handleToggleDiscover}
+        currentThreadId={getCurrentThreadId()}
+        currentAgentId={selectedAgent || "bbot"}
+        userId={user?.sub}
+        agents={agents}
+      />
+
         <PaymentRequiredModal
-        isOpen={showPaymentModal}
+        isOpen={showPaymentModal && isAuthenticated}
         onClose={() => setShowPaymentModal(false)}
-        requiredCredits={calculateTokenCost(tokensUsed)}
+        currentBalance={remainingCredits}
+        onBalanceUpdated={(newBalance) => setRemainingCredits(newBalance)}
+          onAutoRechargeChange={(enabled) => {
+          // Handle auto recharge change if needed
+          console.log('Auto recharge enabled:', enabled)
+        }}
       />
 
       <AutoRechargeNotification

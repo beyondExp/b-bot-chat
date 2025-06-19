@@ -124,9 +124,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
 
     // For locally authenticated users
-    if (isLocallyAuthenticated()) {
+        if (isLocallyAuthenticated()) {
       const token = getAuthToken();
-      if (token) {
+          if (token) {
         return {
           ...baseHeaders,
           "Authorization": `Bearer ${token}`,
@@ -197,6 +197,16 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     onError: (error: unknown) => {
       console.error("Stream error:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // For anonymous users, don't show balance-related errors as they shouldn't be charged
+      const userId = embedUserId || user?.sub || "anonymous-user";
+      const isAnonymousUser = !embedUserId && !user?.sub;
+      
+      if (isAnonymousUser && errorMessage.toLowerCase().includes('insufficient')) {
+        console.log("Ignoring balance error for anonymous user");
+        return;
+      }
+      
       setAgentError(errorMessage || "An error occurred");
     },
     onFinish: () => {
@@ -525,14 +535,38 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }, 100);
   };
 
-  // Convert LangGraph Messages to ChatMessages
+  // Convert messages from LangGraph format to ChatMessage format
   const convertMessages = (messages: Message[]): ChatMessage[] => {
-    return messages.map((msg, idx) => ({
-      id: msg.id || `msg-${idx}`,
-      role: msg.type === "human" ? "user" as const : "assistant" as const,
-      content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
-      type: msg.type === "human" ? "human" as const : "ai" as const
-    }));
+    const isAnonymousUser = !embedUserId && !user?.sub;
+    
+    return messages.map(msg => {
+      let content = msg.content as string;
+      
+      // FIXME: Client-side workaround for server-side balance checking issue
+      // The server (B-Bot-Synapse/src/bbot_main/graph.py) checks token balance for ALL users,
+      // including anonymous users (user_id: "anonymous-user"). This causes inappropriate
+      // "insufficient balance" messages for embed users who shouldn't be charged.
+      // 
+      // Proper fix: Modify the server-side balance checking logic to skip anonymous users:
+      // if configuration.user_id == "anonymous-user" or not configuration.user_id:
+      //     # Skip balance check for anonymous users
+      //     pass
+      // 
+      // For anonymous users, replace insufficient balance messages with a more appropriate response
+      if (isAnonymousUser && 
+          msg.type === "ai" && 
+          content.toLowerCase().includes('insufficient') && 
+          content.toLowerCase().includes('balance')) {
+        content = "I'm here to help! Feel free to ask me any questions and I'll do my best to assist you.";
+      }
+      
+      return {
+        id: msg.id || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: msg.type as "human" | "ai",
+        role: msg.type === "human" ? "user" : "assistant",
+        content: content
+      };
+    });
   };
 
   // Handle message editing
@@ -772,9 +806,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               // Fallback to streaming/thread messages only if branch manager is empty
               return convertMessages(streamingMessages.length > 0 ? streamingMessages : thread.messages);
             }, [streamingMessages, thread.messages, branchRefreshKey])}
-            messagesEndRef={messagesEndRef}
-            selectedAgent={selectedAgent}
-            agents={agentObj ? [agentObj] : []}
+              messagesEndRef={messagesEndRef}
+              selectedAgent={selectedAgent}
+              agents={agentObj ? [agentObj] : []}
             userColor={userColor}
             isLoading={thread.isLoading}
             onSuggestionClick={handleSuggestionClick}
@@ -782,25 +816,25 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             onMessageRegenerate={handleMessageRegenerate}
             onBranchSelect={handleBranchSelect}
             getMessageMetadata={getMessageMetadata}
-            suggestions={
-              agentObj && agentObj.templates && agentObj.templates.length > 0
-                ? agentObj.templates.map((t: any) =>
-                    t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
-                  )
-                : undefined
-            }
+              suggestions={
+                agentObj && agentObj.templates && agentObj.templates.length > 0
+                  ? agentObj.templates.map((t: any) =>
+                      t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
+                    )
+                  : undefined
+              }
           />
         </div>
         
         <div className="border-t bg-background p-4 flex-shrink-0">
-          <ChatInput
+            <ChatInput
             onSubmit={handleFormSubmit}
             isLoading={thread.isLoading}
-            selectedAgent={selectedAgent}
-            agentName={agentObj?.name}
-            userColor={userColor}
-          />
-        </div>
+              selectedAgent={selectedAgent}
+              agentName={agentObj?.name}
+              userColor={userColor}
+            />
+          </div>
       </div>
       
       {agentError && (

@@ -6,6 +6,7 @@ import { formatPrice } from "@/lib/stripe"
 import { PaymentModal } from "./payment-modal"
 
 interface PaymentRequiredModalProps {
+  isOpen: boolean
   onClose: () => void
   currentBalance: number
   onBalanceUpdated: (newBalance: number) => void
@@ -13,6 +14,7 @@ interface PaymentRequiredModalProps {
 }
 
 export function PaymentRequiredModal({
+  isOpen,
   onClose,
   currentBalance,
   onBalanceUpdated,
@@ -21,6 +23,11 @@ export function PaymentRequiredModal({
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAutoRechargeOption, setShowAutoRechargeOption] = useState(true)
   const [autoRechargeEnabled, setAutoRechargeEnabled] = useState(false)
+
+  // Don't render if not open
+  if (!isOpen) {
+    return null
+  }
 
   const handlePaymentSuccess = () => {
     // In a real app, this would fetch the updated balance from the server
