@@ -59,23 +59,33 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     // Always set Content-Type to application/json (or preserve original if needed)
     headers.set("Content-Type", "application/json");
 
-    // Always set the API key headers (override if present)
-    headers.set("X-API-Key", apiKey);
-    headers.set("Admin-API-Key", apiKey);
+    // Check if this is an embed request (has X-User-ID header)
+    const isEmbedRequest = request.headers.get("X-User-ID");
+    const authHeader = request.headers.get("Authorization");
+
+    if (isEmbedRequest) {
+      // For embed requests: use Admin API Key
+      console.log("[Proxy] Embed request detected, using Admin API Key");
+      headers.set("X-API-Key", apiKey);
+      headers.set("Admin-API-Key", apiKey);
+    } else if (authHeader) {
+      // For authenticated main chat requests: use user's Authorization token
+      console.log("[Proxy] Authenticated request detected, forwarding Authorization header");
+      headers.set("Authorization", authHeader);
+      // Do NOT set Admin API Key for authenticated users
+    } else {
+      // For unauthenticated requests without X-User-ID: reject
+      console.log("[Proxy] Unauthenticated request without X-User-ID, rejecting");
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
 
     // Optionally, log forwarded headers for debugging
     console.log("[Proxy] Forwarding headers:", {
       "Admin-API-Key": headers.get("Admin-API-Key"),
       "X-User-ID": headers.get("X-User-ID"),
       "Authorization": headers.get("Authorization"),
+      "isEmbedRequest": !!isEmbedRequest,
     });
-
-    // Forward the Authorization header if present
-    const authHeader = request.headers.get("Authorization")
-    if (authHeader) {
-      console.log("[Proxy] Forwarding Authorization header:", authHeader);
-      headers.set("Authorization", authHeader)
-    }
 
     console.log("[Proxy] targetPath:", targetPath);
     console.log("[Proxy] headers:", Object.fromEntries(headers.entries()));

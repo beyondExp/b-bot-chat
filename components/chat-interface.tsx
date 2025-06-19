@@ -149,7 +149,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }
   };
 
-  // Get the headers including the Admin-API-Key
+  // Get the headers for authenticated requests only
   const getHeaders = async () => {
     const baseHeaders: Record<string, string> = {
       "Content-Type": "application/json",
@@ -183,15 +183,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       }
     }
 
-    // For B-Bot without authentication - use admin API key if available
-    const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
-    if (selectedAgent === "bbot" && ADMIN_API_KEY) {
-      return {
-        ...baseHeaders,
-        "Admin-API-Key": ADMIN_API_KEY,
-      };
-    }
-
+    // REMOVED: Admin API Key fallback - this should ONLY be used in embed interface
+    // The main chat interface should require proper user authentication
+    
     return baseHeaders;
   };
 
@@ -257,6 +251,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Effect to clear chat when agent changes (but not on initial load/restore)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
+  const [isSelectingChat, setIsSelectingChat] = useState(false)
   
   useEffect(() => {
     if (isInitialLoad) {
@@ -264,21 +259,25 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       return // Don't clear session on initial load
     }
     
+    // Don't clear session if we're currently selecting a chat from sidebar
+    if (isSelectingChat) {
+      console.log('[Chat] Agent changed during chat selection, skipping session clear')
+      return
+    }
+    
     if (selectedAgent) {
-      console.log('[Chat] Agent changed to:', selectedAgent, 'clearing current session')
+      console.log('[Chat] Agent changed to:', selectedAgent, 'checking if session should be cleared')
       // Only clear if this is a manual agent change, not a restoration
-      const currentThreadId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID)
-      const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
-      const currentSession = allSessions.find(s => s.threadId === currentThreadId)
-      
-      // If the selected agent doesn't match the current session's agent, then clear
+      // Use the React state currentSession instead of localStorage to avoid timing issues
       if (!currentSession || currentSession.agentId !== selectedAgent) {
+        console.log('[Chat] Clearing session due to agent change')
         setCurrentSession(null)
         ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
-        console.log('[Chat] Cleared session due to agent change')
+      } else {
+        console.log('[Chat] Agent matches current session, keeping session')
       }
     }
-  }, [selectedAgent]);
+  }, [selectedAgent, currentSession, isSelectingChat]);
 
   // Debug logging for thread state changes
   useEffect(() => {
@@ -428,12 +427,20 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const handleSelectChat = async (session: ChatSession) => {
     console.log('[Chat] Selecting chat session:', session)
     
+    // Set flag to prevent agent change useEffect from clearing session
+    setIsSelectingChat(true)
+    
     // Set the current session and thread ID first
     setCurrentSession(session)
     ChatHistoryManager.setCurrentThreadId(session.threadId, MAIN_CHAT_ID)
     
-    // Then set the agent (this might trigger the useEffect but it should now be smarter)
+    // Then set the agent
     setSelectedAgent(session.agentId)
+    
+    // Clear the flag after a short delay to allow React to process the state updates
+    setTimeout(() => {
+      setIsSelectingChat(false)
+    }, 100)
     
     console.log('[Chat] Selected chat - agent:', session.agentId, 'thread:', session.threadId)
     
