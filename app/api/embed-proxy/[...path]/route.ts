@@ -4,34 +4,32 @@ export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 
 export async function GET(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
-  return handleProxyRequest(request, params.path, "GET");
+  return handleEmbedProxyRequest(request, params.path, "GET");
 }
 
 export async function POST(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
-  return handleProxyRequest(request, params.path, "POST");
+  return handleEmbedProxyRequest(request, params.path, "POST");
 }
 
 export async function PUT(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
-  return handleProxyRequest(request, params.path, "PUT");
+  return handleEmbedProxyRequest(request, params.path, "PUT");
 }
 
 export async function DELETE(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
-  return handleProxyRequest(request, params.path, "DELETE");
+  return handleEmbedProxyRequest(request, params.path, "DELETE");
 }
 
 export async function PATCH(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
-  return handleProxyRequest(request, params.path, "PATCH");
+  return handleEmbedProxyRequest(request, params.path, "PATCH");
 }
 
-async function handleProxyRequest(request: NextRequest, pathSegments: string[], method: string) {
+async function handleEmbedProxyRequest(request: NextRequest, pathSegments: string[], method: string) {
   try {
-    // Log the Authorization header for debugging
-    const incomingAuthHeader = request.headers.get("Authorization");
-    console.log("[Proxy] Incoming Authorization header:", incomingAuthHeader);
+    console.log("[EmbedProxy] Processing embed request");
 
     // Get the LangGraph API URL from environment variables
     const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api/v2"
@@ -46,7 +44,8 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     // Construct the target URL
     const targetPath = pathSegments.join("/")
     const url = new URL(`${langGraphApiUrl}/${targetPath}`)
-    console.log("[Proxy] URL :", url);
+    console.log("[EmbedProxy] URL :", url);
+    
     // Copy query parameters
     const searchParams = new URLSearchParams(request.nextUrl.search)
     for (const [key, value] of searchParams.entries()) {
@@ -59,28 +58,26 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     // Always set Content-Type to application/json (or preserve original if needed)
     headers.set("Content-Type", "application/json");
 
-    // This proxy is for authenticated main chat requests only
-    const authHeader = request.headers.get("Authorization");
+    // For embed requests: always use Admin API Key (this proxy is dedicated to embeds)
+    console.log("[EmbedProxy] Using Admin API Key for embed request");
+    headers.set("X-API-Key", apiKey);
+    headers.set("Admin-API-Key", apiKey);
 
+    // Forward any Authorization header if present (for authenticated embed users)
+    const authHeader = request.headers.get("Authorization")
     if (authHeader) {
-      // For authenticated main chat requests: use user's Authorization token
-      console.log("[Proxy] Authenticated main chat request detected, forwarding Authorization header");
+      console.log("[EmbedProxy] Forwarding Authorization header for authenticated embed user");
       headers.set("Authorization", authHeader);
-      // Do NOT set Admin API Key for authenticated users - this ensures user isolation
-    } else {
-      // For unauthenticated main chat requests: reject (embed should use /api/embed-proxy)
-      console.log("[Proxy] Unauthenticated main chat request, rejecting. Use /api/embed-proxy for embed requests.");
-      return NextResponse.json({ error: "Authentication required. Use embed-proxy for anonymous requests." }, { status: 401 });
     }
 
     // Optionally, log forwarded headers for debugging
-    console.log("[Proxy] Forwarding headers:", {
-      "Authorization": authHeader ? "***PRESENT***" : "none",
+    console.log("[EmbedProxy] Forwarding headers:", {
+      "Admin-API-Key": "***HIDDEN***",
       "X-User-ID": headers.get("X-User-ID"),
+      "Authorization": authHeader ? "***PRESENT***" : "none",
     });
 
-    console.log("[Proxy] targetPath:", targetPath);
-    console.log("[Proxy] headers:", Object.fromEntries(headers.entries()));
+    console.log("[EmbedProxy] targetPath:", targetPath);
 
     // Get the request body if it's not a GET request
     let body = null
@@ -95,7 +92,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
           const { input, config } = body
           headers.set("Content-Type", "text/event-stream");
           headers.set("Accept", "text/event-stream");
-          console.log("[Proxy] Streaming request detected");
+          console.log("[EmbedProxy] Streaming request detected");
           // Create the properly formatted payload
           const formattedBody = {
             input,
@@ -110,7 +107,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
           body = formattedBody
         }
       } catch (error) {
-        console.log("[Proxy] Error parsing request body:", error);
+        console.log("[EmbedProxy] Error parsing request body:", error);
         // Silent error handling for body parsing
       }
     }
@@ -127,7 +124,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
 
     // Handle streaming responses
     if (response.headers.get("Content-Type")?.includes("text/event-stream")) {
-      console.log("[Proxy] Detected streaming response, setting up pass-through stream");
+      console.log("[EmbedProxy] Detected streaming response, setting up pass-through stream");
       
       if (!response.body) {
         return new Response("No stream", { status: 500 });
@@ -139,9 +136,9 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
           // Log chunk for debugging
           try {
             const chunkStr = new TextDecoder().decode(chunk);
-            console.log(`[Proxy][Stream][${new Date().toISOString()}] Passing through chunk:`, chunkStr.slice(0, 100));
+            console.log(`[EmbedProxy][Stream][${new Date().toISOString()}] Passing through chunk:`, chunkStr.slice(0, 100));
           } catch (e) {
-            console.log(`[Proxy][Stream][${new Date().toISOString()}] Passing through binary chunk:`, chunk.length, 'bytes');
+            console.log(`[EmbedProxy][Stream][${new Date().toISOString()}] Passing through binary chunk:`, chunk.length, 'bytes');
           }
           
           // Pass through immediately without any processing
@@ -173,7 +170,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     const data = await response.json();
     return Response.json(data, { status: response.status });
   } catch (error) {
-    console.log("[Proxy] Error:", error);
-    return NextResponse.json({ error: "Proxy error" }, { status: 500 })
+    console.log("[EmbedProxy] Error:", error);
+    return NextResponse.json({ error: "Embed proxy error" }, { status: 500 })
   }
-}
+} 

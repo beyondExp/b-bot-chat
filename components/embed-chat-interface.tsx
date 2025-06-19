@@ -91,17 +91,16 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
   };
 
-  // Get the headers including the Admin-API-Key for embed mode
+  // Get the headers for embed requests - embed-proxy handles Admin API Key automatically
   const getHeaders = async () => {
     const baseHeaders: Record<string, string> = {
       "Content-Type": "application/json",
     };
 
-    // For embed mode with admin API key
-    if (embedUserId && ADMIN_API_KEY) {
+    // For embed mode with specific user ID
+    if (embedUserId) {
       return {
         ...baseHeaders,
-        "Admin-API-Key": ADMIN_API_KEY,
         "X-User-ID": embedUserId,
       };
     }
@@ -124,9 +123,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
 
     // For locally authenticated users
-        if (isLocallyAuthenticated()) {
+    if (isLocallyAuthenticated()) {
       const token = getAuthToken();
-          if (token) {
+      if (token) {
         return {
           ...baseHeaders,
           "Authorization": `Bearer ${token}`,
@@ -134,26 +133,19 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       }
     }
 
-    // For B-Bot without authentication - use admin API key if available
-    if (selectedAgent === "bbot" && ADMIN_API_KEY) {
-      return {
-        ...baseHeaders,
-        "Admin-API-Key": ADMIN_API_KEY,
-      };
-    }
-
+    // For anonymous embed users - embed-proxy will add Admin API Key automatically
     return baseHeaders;
   };
 
-  // Get the API URL for LangGraph - use the proxy endpoint
+  // Get the API URL for LangGraph - use the embed-proxy endpoint
   const getApiUrl = () => {
-    // Use the proxy endpoint which handles authentication internally
+    // Use the embed-proxy endpoint which handles Admin API Key for embeds
     // Need to construct absolute URL for LangGraph client
     if (typeof window !== 'undefined') {
-      return `${window.location.origin}/api/proxy`;
+      return `${window.location.origin}/api/embed-proxy`;
     }
     // Fallback for server-side rendering
-    return '/api/proxy';
+    return '/api/embed-proxy';
   };
 
   // Helper function to check if a string is a valid UUID
