@@ -378,7 +378,22 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   // Scroll to bottom function
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      // Find the scrollable chat container
+      const chatContainer = messagesEndRef.current.closest('.chat-messages');
+      if (chatContainer) {
+        // Scroll the chat container to the bottom instead of using scrollIntoView
+        chatContainer.scrollTo({
+          top: chatContainer.scrollHeight,
+          behavior: 'smooth'
+        });
+      } else {
+        // Fallback to the element's scrollIntoView but with block: 'nearest' to prevent page scrolling
+        messagesEndRef.current.scrollIntoView({ 
+          behavior: "smooth", 
+          block: "nearest",
+          inline: "nearest" 
+        });
+      }
     }
   };
 
@@ -386,6 +401,27 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   useEffect(() => {
     scrollToBottom();
   }, [streamingMessages, thread.messages]);
+
+  // Prevent page-level scrolling by setting body/html overflow
+  useEffect(() => {
+    // Set body and html styles to prevent page scrolling
+    const body = document.body;
+    const html = document.documentElement;
+    
+    const originalBodyOverflow = body.style.overflow;
+    const originalHtmlOverflow = html.style.overflow;
+    
+    body.style.overflow = 'hidden';
+    html.style.overflow = 'hidden';
+    
+    // Cleanup function to restore original styles
+    return () => {
+      body.style.overflow = originalBodyOverflow;
+      html.style.overflow = originalHtmlOverflow;
+    };
+  }, []);
+
+
 
   // Load agent information
   useEffect(() => {
@@ -712,7 +748,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex flex-col h-screen bg-background" style={{ maxHeight: '100vh', overflow: 'hidden' }}>
       <EmbedChatHeader
         agentName={agentObj?.name}
         onNewChat={handleNewChat}

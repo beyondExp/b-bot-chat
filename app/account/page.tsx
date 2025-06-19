@@ -20,8 +20,14 @@ import { useAuth0 } from "@auth0/auth0-react"
 import { PaymentModal } from "@/components/payment-modal"
 import { useRouter } from "next/navigation"
 import { PWAInstallGuide } from "@/components/pwa-install-guide"
+import { getFullAuth0User } from "@/lib/api"
+import { BbotTokenIcon } from "@/components/ui/bbot-token-icon"
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
+
+console.log("AccountPage file loaded");
 
 export default function AccountPage() {
+  console.log("AccountPage component rendered");
   const router = useRouter()
   const { user } = useAuth0()
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
@@ -31,28 +37,10 @@ export default function AccountPage() {
   const [rechargeAmount, setRechargeAmount] = useState(2000) // $20.00
   const [showPWAGuide, setShowPWAGuide] = useState(false)
   const [isInstalled, setIsInstalled] = useState(false)
-
-  // For demo purposes - in a real app, these would come from an API
-  const tokensUsed = 8000
-  const balance = 1000 // $10.00
-
-  // Mock usage history - in a real app, this would come from an API
-  const usageHistory = [
-    { date: "2023-04-05", tokens: 1250, agent: "Beyond Assistant", cost: 250 },
-    { date: "2023-04-04", tokens: 3200, agent: "Professor Einstein", cost: 640 },
-    { date: "2023-04-03", tokens: 850, agent: "Chef Gordon", cost: 170 },
-    { date: "2023-04-02", tokens: 1600, agent: "Dev Patel", cost: 320 },
-    { date: "2023-04-01", tokens: 2100, agent: "Beyond Assistant", cost: 420 },
-  ]
-
-  // Mock billing history
-  const billingHistory = [
-    { date: "2023-04-01", description: "Added funds", amount: 5000, type: "credit" },
-    { date: "2023-04-02", description: "Token usage", amount: 320, type: "debit" },
-    { date: "2023-04-03", description: "Token usage", amount: 170, type: "debit" },
-    { date: "2023-04-04", description: "Token usage", amount: 640, type: "debit" },
-    { date: "2023-04-05", description: "Token usage", amount: 250, type: "debit" },
-  ]
+  const [tokensUsed, setTokensUsed] = useState(0)
+  const [balance, setBalance] = useState(0)
+  const [usageHistory, setUsageHistory] = useState<any[]>([])
+  const [billingHistory, setBillingHistory] = useState<any[]>([])
 
   // Check if app is installed
   useEffect(() => {
@@ -67,6 +55,38 @@ export default function AccountPage() {
       setIsInstalled(true)
     }
   }, [])
+
+  useEffect(() => {
+    const fullUserObj = getFullAuth0User();
+    console.log('Full Auth0 user:', fullUserObj);
+
+    // The real user data is in fullUserObj.decodedToken.user
+    const user = fullUserObj?.decodedToken?.user;
+    if (user) {
+      const meta = user.hub_user_metadata || {};
+      console.log('hub_user_metadata:', meta);
+      console.log('meta.total_used_tokens:', meta.total_used_tokens);
+      console.log('meta.token_budget:', meta.token_budget);
+      console.log('meta.chat_used_tokens:', meta.chat_used_tokens);
+
+      setTokensUsed(
+        meta.total_used_tokens ??
+        meta.chat_used_tokens ??
+        user.total_used_tokens ??
+        user.chat_used_tokens ??
+        0
+      );
+      setBalance(
+        meta.token_budget ??
+        user.token_budget ??
+        0
+      );
+      setUsageHistory(meta.usage_history ?? user.usage_history ?? []);
+      setBillingHistory(meta.billing_history ?? user.billing_history ?? []);
+    } else {
+      console.warn('No user found in decodedToken');
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -113,9 +133,18 @@ export default function AccountPage() {
               <div className="flex items-center justify-between p-3 bg-muted rounded-lg mb-3">
                 <div className="flex items-center gap-2">
                   <Coins size={18} className="text-primary" />
-                  <span className="font-medium">Balance</span>
                 </div>
-                <span className="font-semibold">{formatPrice(balance)}</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center gap-1 cursor-pointer">
+                        {formatTokenCount(balance)}
+                        <BbotTokenIcon size={18} />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>B-Bot Tokens</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
 
               <button
@@ -177,7 +206,17 @@ export default function AccountPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                   <div className="p-4 bg-muted rounded-lg">
                     <div className="text-sm text-muted-foreground mb-1">Current Balance</div>
-                    <div className="text-2xl font-bold">{formatPrice(balance)}</div>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex items-center gap-1 cursor-pointer">
+                            {formatTokenCount(balance)}
+                            <BbotTokenIcon size={20} />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>B-Bot Tokens</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
 
                   <div className="p-4 bg-muted rounded-lg">
@@ -192,7 +231,7 @@ export default function AccountPage() {
                     <div>
                       <h3 className="font-medium mb-1">Pay-Per-Use Pricing</h3>
                       <p className="text-sm text-muted-foreground">
-                        You are charged based on token usage at a rate of $0.002 per token. 30% of all revenue is
+                        You are charged based on token usage at a rate of $0.0000001 per B-Bot Token. 30% of all revenue is
                         distributed to AI Agent creators, supporting a fair and decentralized AI ecosystem.
                       </p>
                     </div>
@@ -253,7 +292,7 @@ export default function AccountPage() {
 
                   <div className="p-4 bg-muted rounded-lg">
                     <div className="text-sm text-muted-foreground mb-1">Estimated Cost</div>
-                    <div className="text-2xl font-bold">{formatPrice(calculateTokenCost(tokensUsed))}</div>
+                    <div className="text-2xl font-bold">${calculateTokenCost(tokensUsed).toFixed(6)}</div>
                   </div>
                 </div>
 
@@ -295,7 +334,17 @@ export default function AccountPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                   <div className="p-4 bg-muted rounded-lg">
                     <div className="text-sm text-muted-foreground mb-1">Current Balance</div>
-                    <div className="text-2xl font-bold">{formatPrice(balance)}</div>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex items-center gap-1 cursor-pointer">
+                            {formatTokenCount(balance)}
+                            <BbotTokenIcon size={20} />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>B-Bot Tokens</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
 
                   <div className="p-4 bg-muted rounded-lg flex flex-col justify-between">
@@ -457,7 +506,7 @@ export default function AccountPage() {
                     <div>
                       <h3 className="font-medium mb-1">Fair & Transparent Pricing</h3>
                       <p className="text-sm text-muted-foreground">
-                        You only pay for what you use. Charges are based on token usage at a rate of $0.002 per token.
+                        You only pay for what you use. Charges are based on token usage at a rate of $0.0000001 per B-Bot Token.
                         There are no subscription fees or hidden costs.
                       </p>
                     </div>
@@ -491,23 +540,23 @@ export default function AccountPage() {
                       <div className="flex justify-between items-center py-2 border-b border-border">
                         <div className="flex items-center gap-2">
                           <BarChart3 size={16} className="text-muted-foreground" />
-                          <span>Short conversation (1,000 tokens)</span>
+                          <span>Short conversation (1,000 B-Bot Tokens)</span>
                         </div>
-                        <span className="font-medium">{formatPrice(200)}</span>
+                        <span className="font-medium">${calculateTokenCost(1000).toFixed(6)}</span>
                       </div>
                       <div className="flex justify-between items-center py-2 border-b border-border">
                         <div className="flex items-center gap-2">
                           <BarChart3 size={16} className="text-muted-foreground" />
-                          <span>Medium conversation (5,000 tokens)</span>
+                          <span>Medium conversation (5,000 B-Bot Tokens)</span>
                         </div>
-                        <span className="font-medium">{formatPrice(1000)}</span>
+                        <span className="font-medium">${calculateTokenCost(5000).toFixed(6)}</span>
                       </div>
                       <div className="flex justify-between items-center py-2 border-b border-border">
                         <div className="flex items-center gap-2">
                           <BarChart3 size={16} className="text-muted-foreground" />
-                          <span>Long conversation (10,000 tokens)</span>
+                          <span>Long conversation (10,000 B-Bot Tokens)</span>
                         </div>
-                        <span className="font-medium">{formatPrice(2000)}</span>
+                        <span className="font-medium">${calculateTokenCost(10000).toFixed(6)}</span>
                       </div>
                     </div>
                   </div>

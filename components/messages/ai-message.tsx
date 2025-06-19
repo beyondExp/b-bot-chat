@@ -45,9 +45,9 @@ export function AIMessage({
 
   return (
     <div className="group mr-auto flex items-start gap-2">
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1">
         {contentString.length > 0 && (
-          <div className="py-1">
+          <div>
             <div className="prose prose-sm max-w-none dark:prose-invert">
               <ReactMarkdown>{contentString}</ReactMarkdown>
             </div>
