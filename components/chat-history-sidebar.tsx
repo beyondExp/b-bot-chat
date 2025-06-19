@@ -15,6 +15,7 @@ interface ChatHistorySidebarProps {
   currentThreadId?: string
   agentId: string
   userId?: string
+  embedId?: string
 }
 
 export function ChatHistorySidebar({
@@ -23,7 +24,8 @@ export function ChatHistorySidebar({
   onSelectChat,
   currentThreadId,
   agentId,
-  userId
+  userId,
+  embedId
 }: ChatHistorySidebarProps) {
   const [sessions, setSessions] = React.useState<ChatSession[]>([])
 
@@ -32,10 +34,10 @@ export function ChatHistorySidebar({
     if (isOpen) {
       loadSessions()
     }
-  }, [isOpen, agentId, userId])
+  }, [isOpen, agentId, userId, embedId])
 
   const loadSessions = () => {
-    const allSessions = ChatHistoryManager.getChatSessions()
+    const allSessions = ChatHistoryManager.getChatSessions(embedId)
     // Filter sessions for current agent and user
     const filteredSessions = allSessions.filter(session => {
       const matchesAgent = session.agentId === agentId
@@ -47,7 +49,7 @@ export function ChatHistorySidebar({
 
   const handleDeleteChat = (sessionId: string, event: React.MouseEvent) => {
     event.stopPropagation()
-    ChatHistoryManager.deleteChatSession(sessionId)
+    ChatHistoryManager.deleteChatSession(sessionId, embedId)
     loadSessions()
   }
 

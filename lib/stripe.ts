@@ -9,9 +9,10 @@ export const formatPrice = (price: number): string => {
 }
 
 // Function to calculate token cost
-export const calculateTokenCost = (tokenCount: number): number => {
-  // Base rate: $0.002 per token (0.2 cents per token)
-  return Math.ceil(tokenCount * 0.2)
+export const BBOT_TOKEN_RATE = 0.0000001; // 1 B-Bot Token = $0.0000001
+
+export function calculateTokenCost(tokens: number): number {
+  return tokens * BBOT_TOKEN_RATE;
 }
 
 // Function to format token count

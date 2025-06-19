@@ -1,5 +1,6 @@
 "use client"
 import { Info, X } from "lucide-react"
+import { BBOT_TOKEN_RATE } from "@/lib/stripe"
 
 interface WelcomePricingBannerProps {
   onDismiss: () => void
@@ -15,8 +16,8 @@ export function WelcomePricingBanner({ onDismiss }: WelcomePricingBannerProps) {
         <div className="flex-1">
           <h3 className="font-medium text-sm mb-1">Pay-Per-Use Pricing Model</h3>
           <p className="text-sm text-muted-foreground mb-2">
-            Beyond-Bot.ai now uses a token-based pricing model. You only pay for what you use at a rate of $0.002 per
-            token, with 30% of revenue going to AI Agent creators.
+            Beyond-Bot.ai now uses a token-based pricing model. You only pay for what you use at a rate of ${BBOT_TOKEN_RATE} per
+            B-Bot Token, with 30% of revenue going to AI Agent creators.
           </p>
           <div className="flex justify-end">
             <button onClick={onDismiss} className="text-xs text-primary hover:text-primary/80 flex items-center gap-1">

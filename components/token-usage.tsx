@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Coins, Info } from "lucide-react"
-import { formatPrice, calculateTokenCost, formatTokenCount } from "@/lib/stripe"
+import { formatPrice, calculateTokenCost, formatTokenCount, BBOT_TOKEN_RATE } from "@/lib/stripe"
 
 interface TokenUsageProps {
   tokensUsed: number
@@ -35,7 +35,7 @@ export function TokenUsage({ tokensUsed, isActive }: TokenUsageProps) {
               <p className="font-medium mb-1">Token Usage Information</p>
               <p className="mb-1">Current session: {formatTokenCount(tokensUsed)} tokens</p>
               <p className="mb-1">Estimated cost: {formatPrice(cost)}</p>
-              <p className="text-muted-foreground">Charged at $0.002 per token</p>
+              <p className="text-muted-foreground">Charged at ${BBOT_TOKEN_RATE} per B-Bot Token</p>
             </div>
           </div>
         </div>

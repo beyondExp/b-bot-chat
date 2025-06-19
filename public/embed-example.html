@@ -36,6 +36,13 @@
       border-radius: 4px;
       font-family: monospace;
     }
+    .multi-embed-note {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #e7f3ff;
+      border-left: 4px solid #0066cc;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -46,7 +53,7 @@
     </div>
     
     <iframe 
-      src="https://your-domain.com/embed?agent=b-bot" 
+      src="https://your-domain.com/embed?agent=bbot&embedId=example-embed&user_id=demo-user" 
       class="chat-embed" 
       title="B-Bot Chat"
       allow="microphone"
@@ -56,15 +63,36 @@
       <h2>How to Embed</h2>
       <p>To embed this chat interface in your own website, add the following HTML code:</p>
       <pre><code>&lt;iframe 
-  src="https://your-domain.com/embed?agent=b-bot" 
+  src="https://your-domain.com/embed?agent=bbot&embedId=unique-id" 
   style="width: 100%; height: 600px; border: none;"
   title="B-Bot Chat"
   allow="microphone"
 &gt;&lt;/iframe&gt;</code></pre>
-      <p>You can specify different agents by changing the <code>agent</code> parameter in the URL:</p>
+      
+      <h3>URL Parameters</h3>
       <ul>
-        <li><code>?agent=b-bot</code> - Default B-Bot</li>
-        <li><code>?agent=agent-id</code> - Replace with any agent ID from your platform</li>
+        <li><code>agent</code> - The AI agent to use (e.g., bbot, open_deep_research, retrieval_graph)</li>
+        <li><code>embedId</code> - Unique identifier for this embed instance (required for multiple embeds)</li>
+        <li><code>user_id</code> - Optional user identifier for personalized chat history</li>
+      </ul>
+      
+      <div class="multi-embed-note">
+        <h4>Multiple Embeds on Same Page</h4>
+        <p>If you need multiple chat embeds on the same page, each must have a unique <code>embedId</code> parameter to ensure independent chat histories:</p>
+        <pre><code>&lt;!-- First embed --&gt;
+&lt;iframe src="https://your-domain.com/embed?agent=bbot&embedId=embed-1"&gt;&lt;/iframe&gt;
+
+&lt;!-- Second embed --&gt;
+&lt;iframe src="https://your-domain.com/embed?agent=bbot&embedId=embed-2"&gt;&lt;/iframe&gt;</code></pre>
+        <p>Without unique embedIds, all embeds would share the same conversation history.</p>
+        <p><a href="/multi-embed-test.html" target="_blank">View Multi-Embed Demo</a></p>
+      </div>
+      
+      <h3>Example URLs</h3>
+      <ul>
+        <li><code>?agent=bbot&embedId=support-chat</code> - Default B-Bot for customer support</li>
+        <li><code>?agent=open_deep_research&embedId=research-assistant</code> - Research agent</li>
+        <li><code>?agent=retrieval_graph&embedId=doc-search&user_id=user123</code> - Document search with user ID</li>
       </ul>
     </div>
   </div>

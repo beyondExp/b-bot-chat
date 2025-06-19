@@ -8,6 +8,16 @@ export function EmbedClientPage() {
   const searchParams = useSearchParams()
   const agentFromUrl = searchParams?.get("agent")
   const userIdFromUrl = searchParams?.get("user_id")
+  const embedIdFromUrl = searchParams?.get("embedId")
+  
+  // Generate a unique embed ID if not provided
+  const embedId = embedIdFromUrl || `embed-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`
 
-  return <EmbedChatInterface initialAgent={agentFromUrl ?? 'bbot'} embedUserId={userIdFromUrl} />
+  return (
+    <EmbedChatInterface 
+      initialAgent={agentFromUrl ?? 'bbot'} 
+      embedUserId={userIdFromUrl}
+      embedId={embedId}
+    />
+  )
 }

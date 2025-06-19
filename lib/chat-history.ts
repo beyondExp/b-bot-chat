@@ -12,11 +12,20 @@ export class ChatHistoryManager {
   private static STORAGE_KEY = 'embed-chat-history';
   private static CURRENT_THREAD_KEY = 'embed-current-thread';
 
-  static saveChatSession(session: ChatSession): void {
+  // Get instance-specific storage keys
+  private static getStorageKey(embedId?: string): string {
+    return embedId ? `${this.STORAGE_KEY}-${embedId}` : this.STORAGE_KEY;
+  }
+
+  private static getCurrentThreadKey(embedId?: string): string {
+    return embedId ? `${this.CURRENT_THREAD_KEY}-${embedId}` : this.CURRENT_THREAD_KEY;
+  }
+
+  static saveChatSession(session: ChatSession, embedId?: string): void {
     if (typeof window === 'undefined') return;
     
     try {
-      const existingSessions = this.getChatSessions();
+      const existingSessions = this.getChatSessions(embedId);
       const existingIndex = existingSessions.findIndex(s => s.id === session.id);
       
       if (existingIndex >= 0) {
@@ -30,62 +39,62 @@ export class ChatHistoryManager {
       // Keep only the latest 50 conversations
       const limitedSessions = existingSessions.slice(0, 50);
       
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(limitedSessions));
+      localStorage.setItem(this.getStorageKey(embedId), JSON.stringify(limitedSessions));
     } catch (error) {
       console.error('Failed to save chat session:', error);
     }
   }
 
-  static getChatSessions(): ChatSession[] {
+  static getChatSessions(embedId?: string): ChatSession[] {
     if (typeof window === 'undefined') return [];
     
     try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
+      const data = localStorage.getItem(this.getStorageKey(embedId));
+      return data ? JSON.parse(data) : [];
     } catch (error) {
       console.error('Failed to get chat sessions:', error);
       return [];
     }
   }
 
-  static deleteChatSession(sessionId: string): void {
+  static deleteChatSession(sessionId: string, embedId?: string): void {
     if (typeof window === 'undefined') return;
     
     try {
-      const sessions = this.getChatSessions();
-      const filteredSessions = sessions.filter(s => s.id !== sessionId);
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(filteredSessions));
+      const sessions = this.getChatSessions(embedId);
+      const updatedSessions = sessions.filter(session => session.id !== sessionId);
+      localStorage.setItem(this.getStorageKey(embedId), JSON.stringify(updatedSessions));
     } catch (error) {
       console.error('Failed to delete chat session:', error);
     }
   }
 
-  static getCurrentThreadId(): string | null {
+  static getCurrentThreadId(embedId?: string): string | null {
     if (typeof window === 'undefined') return null;
     
     try {
-      return localStorage.getItem(this.CURRENT_THREAD_KEY);
+      return localStorage.getItem(this.getCurrentThreadKey(embedId));
     } catch (error) {
       console.error('Failed to get current thread ID:', error);
       return null;
     }
   }
 
-  static setCurrentThreadId(threadId: string): void {
+  static setCurrentThreadId(threadId: string, embedId?: string): void {
     if (typeof window === 'undefined') return;
     
     try {
-      localStorage.setItem(this.CURRENT_THREAD_KEY, threadId);
+      localStorage.setItem(this.getCurrentThreadKey(embedId), threadId);
     } catch (error) {
       console.error('Failed to set current thread ID:', error);
     }
   }
 
-  static clearCurrentThreadId(): void {
+  static clearCurrentThreadId(embedId?: string): void {
     if (typeof window === 'undefined') return;
     
     try {
-      localStorage.removeItem(this.CURRENT_THREAD_KEY);
+      localStorage.removeItem(this.getCurrentThreadKey(embedId));
     } catch (error) {
       console.error('Failed to clear current thread ID:', error);
     }

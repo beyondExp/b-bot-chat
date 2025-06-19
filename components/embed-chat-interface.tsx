@@ -19,9 +19,10 @@ import { messageMetadataManager, type ChatMessage, type MessageMetadata } from "
 interface EmbedChatInterfaceProps {
   initialAgent?: string
   embedUserId?: string | null
+  embedId?: string
 }
 
-export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInterfaceProps) {
+export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: EmbedChatInterfaceProps) {
   // Normalize agent id: treat 'b-bot' and 'bbot' as the same
   const normalizedAgent = (!initialAgent || initialAgent === "b-bot" || initialAgent === "bbot") ? "bbot" : initialAgent;
   const [selectedAgent] = useState<string>(normalizedAgent);
@@ -183,7 +184,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
 
   // Get stored thread ID or use current session thread ID
   const getThreadId = () => {
-    return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId();
+    return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId(embedId);
   };
 
   // Initialize the useStream hook - proxy handles authentication
@@ -205,7 +206,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     },
     onThreadId: (threadId: string) => {
       console.log("Thread ID received:", threadId);
-      ChatHistoryManager.setCurrentThreadId(threadId);
+      ChatHistoryManager.setCurrentThreadId(threadId, embedId);
     },
   });
 
@@ -247,12 +248,12 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
     if (!userMessage || !aiMessage) return;
 
     const userId = embedUserId || user?.sub;
-    const threadId = ChatHistoryManager.getCurrentThreadId();
+    const threadId = ChatHistoryManager.getCurrentThreadId(embedId);
     
     if (!threadId) return;
 
     // Check if this thread already exists in chat history
-    const existingSessions = ChatHistoryManager.getChatSessions();
+    const existingSessions = ChatHistoryManager.getChatSessions(embedId);
     const existingSession = existingSessions.find(session => 
       session.threadId === threadId && 
       session.agentId === selectedAgent &&
@@ -273,9 +274,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
       userId: userId
     };
 
-    ChatHistoryManager.saveChatSession(session);
+    ChatHistoryManager.saveChatSession(session, embedId);
     setCurrentSession(session);
-  }, [streamingMessages, thread.messages, currentSession, selectedAgent, embedUserId, user?.sub]);
+  }, [streamingMessages, thread.messages, currentSession, selectedAgent, embedUserId, user?.sub, embedId]);
 
   // Update streaming messages when SDK finally updates and handle branch management
   useEffect(() => {
@@ -359,7 +360,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
 
   // Start a new chat
   const handleNewChat = () => {
-    ChatHistoryManager.clearCurrentThreadId();
+    ChatHistoryManager.clearCurrentThreadId(embedId);
     setCurrentSession(null);
     setStreamingMessages([]);
     messageMetadataManager.clear(); // Clear all branch data
@@ -370,7 +371,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
   // Select a chat from history
   const handleSelectChat = (session: ChatSession) => {
     setCurrentSession(session);
-    ChatHistoryManager.setCurrentThreadId(session.threadId);
+    ChatHistoryManager.setCurrentThreadId(session.threadId, embedId);
     // Reload to load the selected thread
     window.location.reload();
   };
@@ -815,6 +816,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId }: EmbedChatInter
         currentThreadId={getThreadId() || undefined}
         agentId={selectedAgent}
         userId={embedUserId || user?.sub}
+        embedId={embedId}
       />
     </div>
   );

@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useState } from "react"
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js"
-import { stripePromise, formatPrice, formatTokenCount } from "@/lib/stripe"
+import { stripePromise, formatPrice, formatTokenCount, BBOT_TOKEN_RATE } from "@/lib/stripe"
 import { X, CreditCard, Coins, Info, Check, AlertCircle } from "lucide-react"
 
 interface PaymentFormProps {
@@ -158,7 +158,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
   }
 
   // Calculate token estimates
-  const estimatedTokens = Math.floor(selectedAmount / 0.2) // At $0.002 per token
+  const estimatedTokens = Math.floor(selectedAmount / (BBOT_TOKEN_RATE * 100)); // selectedAmount is in cents
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -243,7 +243,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                     <span className="text-sm">Estimated tokens</span>
                     <span className="font-medium">{formatTokenCount(estimatedTokens)}</span>
                   </div>
-                  <div className="text-xs text-muted-foreground">At a rate of $0.002 per token</div>
+                  <div className="text-xs text-muted-foreground">At a rate of ${BBOT_TOKEN_RATE} per B-Bot Token</div>
                 </div>
 
                 <button
@@ -266,7 +266,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                 <p className="flex items-start gap-2">
                   <Info size={16} className="flex-shrink-0 mt-0.5" />
                   <span>
-                    Pay only for what you use. Charges are based on token usage at a rate of $0.002 per token.
+                    Pay only for what you use. Charges are based on token usage at a rate of ${BBOT_TOKEN_RATE} per B-Bot Token.
                   </span>
                 </p>
                 <p className="flex items-start gap-2">

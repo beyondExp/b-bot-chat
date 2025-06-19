@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Info, X, DollarSign, Users, Sparkles } from "lucide-react"
+import { BBOT_TOKEN_RATE, calculateTokenCost } from "@/lib/stripe"
 
 export function PricingInfo() {
   const [isOpen, setIsOpen] = useState(false)
@@ -32,7 +33,7 @@ export function PricingInfo() {
                 <div>
                   <h3 className="font-medium mb-1">Fair & Transparent Pricing</h3>
                   <p className="text-sm text-muted-foreground">
-                    You only pay for what you use. Charges are based on token usage at a rate of $0.002 per token.
+                    You only pay for what you use. Charges are based on token usage at a rate of ${BBOT_TOKEN_RATE} per B-Bot Token.
                   </p>
                 </div>
               </div>
@@ -62,16 +63,16 @@ export function PricingInfo() {
                 <h3 className="font-medium mb-2">Example Costs</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span>Short conversation (1,000 tokens)</span>
-                    <span className="font-medium">$2.00</span>
+                    <span>Short conversation (1,000 B-Bot Tokens)</span>
+                    <span className="font-medium">${calculateTokenCost(1000).toFixed(6)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Medium conversation (5,000 tokens)</span>
-                    <span className="font-medium">$10.00</span>
+                    <span>Medium conversation (5,000 B-Bot Tokens)</span>
+                    <span className="font-medium">${calculateTokenCost(5000).toFixed(6)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Long conversation (10,000 tokens)</span>
-                    <span className="font-medium">$20.00</span>
+                    <span>Long conversation (10,000 B-Bot Tokens)</span>
+                    <span className="font-medium">${calculateTokenCost(10000).toFixed(6)}</span>
                   </div>
                 </div>
               </div>
