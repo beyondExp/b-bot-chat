@@ -86,7 +86,7 @@ const fallbackAgents: Agent[] = [
   },
 ]
 
-export function DiscoverPage({ onSelectAgent, recentAgents }: DiscoverPageProps) {
+export function DiscoverPage({ onSelectAgent, recentAgents = [] }: DiscoverPageProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [filteredAgents, setFilteredAgents] = useState<Agent[]>([])
@@ -460,7 +460,7 @@ export function DiscoverPage({ onSelectAgent, recentAgents }: DiscoverPageProps)
       )}
 
       {/* Recently chatted agents section */}
-      {!searchQuery && !selectedCategory && !showMyAgents && recentAgents.length > 0 && (
+      {!searchQuery && !selectedCategory && !showMyAgents && recentAgents && recentAgents.length > 0 && (
         <div className="discover-section">
           <h2 className="discover-section-title">Recently Chatted</h2>
           <div className="discover-grid">

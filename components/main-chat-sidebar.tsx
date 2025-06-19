@@ -3,10 +3,14 @@
 import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Trash2, MessageSquare, Bot, Sparkles, ChevronDown, ChevronRight } from 'lucide-react'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import { Trash2, MessageSquare, Bot, Sparkles, ChevronDown, ChevronRight, Users } from 'lucide-react'
 import { ChatSession, ChatHistoryManager } from '@/lib/chat-history'
 import { cn } from '@/lib/utils'
+import { ThreadService, type Thread } from "@/lib/thread-service"
+import { useAuth0 } from "@auth0/auth0-react"
+import { isLocallyAuthenticated, getAuthToken, LANGGRAPH_AUDIENCE } from "@/lib/api"
+import Image from "next/image"
 
 interface AgentWithChats {
   agentId: string
@@ -26,6 +30,58 @@ interface MainChatSidebarProps {
   currentAgentId: string
   userId?: string
   agents: any[]
+  embedId?: string
+}
+
+// Helper function to extract content from message
+const getMessageContent = (content: any): string => {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    const textBlocks = content
+      .filter((block: any) => block.type === 'text')
+      .map((block: any) => block.text)
+    return textBlocks.join(' ')
+  }
+  return ''
+}
+
+// Helper function to extract first user message for better chat titles
+const getFirstUserMessage = (thread: any): string => {
+  if (!thread.values?.messages || !Array.isArray(thread.values.messages)) {
+    return ''
+  }
+  
+  const firstHumanMessage = thread.values.messages.find(
+    (msg: any) => msg.type === 'human'
+  )
+  
+  if (firstHumanMessage) {
+    const content = getMessageContent(firstHumanMessage.content)
+    // Return first 50 characters for title
+    return content.length > 50 ? content.substring(0, 50) + '...' : content
+  }
+  
+  return ''
+}
+
+// Helper function to get agent profile image
+const getAgentProfileImage = (agentId: string, agents: any[]): string => {
+  if (agentId === 'bbot' || agentId === 'b-bot') {
+    return '/helpful-robot.png'
+  }
+  
+  const agent = agents.find(a => a.id === agentId)
+  return agent?.profileImage || '/helpful-robot.png'
+}
+
+// Helper function to get agent name
+const getAgentName = (agentId: string, agents: any[]): string => {
+  if (agentId === 'bbot' || agentId === 'b-bot') {
+    return 'B-Bot'
+  }
+  
+  const agent = agents.find(a => a.id === agentId)
+  return agent?.name || agentId
 }
 
 export function MainChatSidebar({
@@ -37,19 +93,141 @@ export function MainChatSidebar({
   currentThreadId,
   currentAgentId,
   userId,
-  agents
+  agents,
+  embedId
 }: MainChatSidebarProps) {
   const [agentsWithChats, setAgentsWithChats] = useState<AgentWithChats[]>([])
+  const { isAuthenticated, getAccessTokenSilently } = useAuth0()
 
-  // Load all chat sessions and group by agent
+  // Initialize thread service with auth token getter
+  const getAuthTokenForService = async (): Promise<string | null> => {
+    try {
+      if (isAuthenticated) {
+        return await getAccessTokenSilently({
+          authorizationParams: {
+            audience: LANGGRAPH_AUDIENCE,
+          },
+        })
+      }
+      if (isLocallyAuthenticated()) {
+        return getAuthToken()
+      }
+      return null
+    } catch (error) {
+      console.error('Failed to get auth token:', error)
+      return null
+    }
+  }
+
+  const threadService = new ThreadService(getAuthTokenForService)
+
+  // Convert Thread to ChatSession format
+  const convertThreadToChatSession = (thread: Thread): ChatSession => {
+    // Extract agent ID from metadata.assistant_id (primary) or config.configurable.agent_id (fallback)
+    const agentId = thread.metadata?.assistant_id || thread.config?.configurable?.agent_id || 'bbot'
+    
+    // Extract user ID from metadata.owner (primary) or config.configurable.user_id (fallback)
+    const threadUserId = thread.metadata?.owner || thread.config?.configurable?.user_id || userId
+    
+    // Get better title from first user message
+    const firstUserMessage = getFirstUserMessage(thread)
+    const title = firstUserMessage || thread.metadata?.title || `Chat ${thread.thread_id.slice(-8)}`
+    
+    console.log('[MainChatSidebar] Converting thread:', {
+      threadId: thread.thread_id,
+      agentId,
+      threadUserId,
+      title,
+      metadata: thread.metadata
+    })
+    
+    return {
+      id: thread.thread_id,
+      threadId: thread.thread_id,
+      agentId,
+      userId: threadUserId,
+      title,
+      lastMessage: thread.metadata?.lastMessage || 'New conversation',
+      timestamp: new Date(thread.updated_at).getTime()
+    }
+  }
+
+  // Load data when sidebar opens or user changes
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && userId) {
       loadAgentsWithChats()
     }
-  }, [isOpen, userId, agents])
+  }, [isOpen, userId, embedId])
 
-  const loadAgentsWithChats = () => {
-    const allSessions = ChatHistoryManager.getChatSessions()
+  const loadAgentsWithChats = async () => {
+    try {
+      console.log('[MainChatSidebar] Loading threads from server...')
+      console.log('[MainChatSidebar] Using userId:', userId)
+      console.log('[MainChatSidebar] Available agents:', agents)
+      
+      // Fetch threads from LangGraph via ThreadService
+      const threads = await threadService.getThreads(userId)
+      console.log('[MainChatSidebar] Received threads:', threads)
+      
+      // Check if we got valid threads
+      if (!threads || threads.length === 0) {
+        console.log('[MainChatSidebar] No threads from server, falling back to local storage')
+        loadAgentsWithChatsFromLocal()
+        return
+      }
+      
+      // Convert threads to ChatSession format
+      const sessions = threads.map(convertThreadToChatSession)
+      console.log('[MainChatSidebar] Converted to sessions:', sessions)
+      
+      // Group sessions by agent
+      const agentGroups = new Map<string, ChatSession[]>()
+      
+      sessions.forEach(session => {
+        const agentId = session.agentId
+        if (!agentGroups.has(agentId)) {
+          agentGroups.set(agentId, [])
+        }
+        agentGroups.get(agentId)!.push(session)
+      })
+
+      // Sort sessions within each agent by timestamp (newest first)
+      agentGroups.forEach((sessions, agentId) => {
+        sessions.sort((a, b) => b.timestamp - a.timestamp)
+      })
+
+      // Convert to AgentWithChats array and sort by most recent activity
+      const result: AgentWithChats[] = Array.from(agentGroups.entries()).map(([agentId, sessions]) => {        
+        const agentName = getAgentName(agentId, agents)
+        const agentIcon = getAgentProfileImage(agentId, agents)
+        console.log('[MainChatSidebar] Processing agent:', { agentId, agentName, agentIcon, sessionsCount: sessions.length })
+        
+        return {
+          agentId,
+          agentName,
+          agentIcon,
+          sessions,
+          showAll: false
+        }
+      }).sort((a, b) => {
+        const aLatest = a.sessions[0]?.timestamp || 0
+        const bLatest = b.sessions[0]?.timestamp || 0
+        return bLatest - aLatest
+      })
+
+      console.log('[MainChatSidebar] Final result:', result)
+      setAgentsWithChats(result)
+    } catch (error) {
+      console.error('[MainChatSidebar] Error loading threads:', error)
+      console.log('[MainChatSidebar] API failed, falling back to local storage')
+      // Fallback to local storage if server fails
+      loadAgentsWithChatsFromLocal()
+    }
+  }
+
+  // Fallback method using local storage
+  const loadAgentsWithChatsFromLocal = () => {
+    const allSessions = ChatHistoryManager.getChatSessions(embedId)
     
     // Filter sessions for current user
     const userSessions = allSessions.filter(session => {
@@ -68,44 +246,53 @@ export function MainChatSidebar({
       agentGroups.get(agentId)!.push(session)
     })
 
-    // Sort sessions by timestamp (newest first) for each agent
-    agentGroups.forEach(sessions => {
+    // Sort sessions within each agent by timestamp (newest first)
+    agentGroups.forEach((sessions, agentId) => {
       sessions.sort((a, b) => b.timestamp - a.timestamp)
     })
 
-    // Create AgentWithChats objects
-    const agentsWithChatsData: AgentWithChats[] = []
-    
-    agentGroups.forEach((sessions, agentId) => {
+    // Convert to AgentWithChats array and sort by most recent activity
+    const result: AgentWithChats[] = Array.from(agentGroups.entries()).map(([agentId, sessions]) => {
       const agent = agents.find(a => a.id === agentId)
-      const agentName = agent?.name || agentId
       
-      agentsWithChatsData.push({
+      return {
         agentId,
-        agentName,
-        agentIcon: agent?.icon,
+        agentName: getAgentName(agentId, agents),
+        agentIcon: getAgentProfileImage(agentId, agents),
         sessions,
         showAll: false
-      })
-    })
-
-    // Sort agents by most recent conversation
-    agentsWithChatsData.sort((a, b) => {
+      }
+    }).sort((a, b) => {
       const aLatest = a.sessions[0]?.timestamp || 0
       const bLatest = b.sessions[0]?.timestamp || 0
       return bLatest - aLatest
     })
 
-    setAgentsWithChats(agentsWithChatsData)
+    setAgentsWithChats(result)
   }
 
-  const handleDeleteChat = (sessionId: string, event: React.MouseEvent) => {
-    event.stopPropagation()
-    ChatHistoryManager.deleteChatSession(sessionId)
+  const handleDeleteChat = async (sessionId: string) => {
+    try {
+      // Try to delete from server first
+      const success = await threadService.deleteThread(sessionId)
+      if (success) {
+        console.log('[MainChatSidebar] Deleted thread from server:', sessionId)
+      } else {
+        console.warn('[MainChatSidebar] Failed to delete thread from server, deleting locally')
+      }
+    } catch (error) {
+      console.error('[MainChatSidebar] Error deleting thread:', error)
+    }
+    
+    // Always delete from local storage as well
+    ChatHistoryManager.deleteChatSession(sessionId, embedId)
+    
+    // Refresh the list
     loadAgentsWithChats()
   }
 
   const handleSelectChat = (session: ChatSession) => {
+    console.log('[MainChatSidebar] Chat selected:', session)
     onSelectChat(session)
     onClose()
   }
@@ -138,6 +325,9 @@ export function MainChatSidebar({
             <MessageSquare className="h-5 w-5" />
             Your Conversations
           </SheetTitle>
+          <SheetDescription>
+            Browse your chat history organized by agent
+          </SheetDescription>
         </SheetHeader>
         
         <ScrollArea className="flex-1">
@@ -162,15 +352,29 @@ export function MainChatSidebar({
                         <button
                           onClick={() => handleSelectAgent(agentData.agentId)}
                           className={cn(
-                            "flex items-center gap-2 p-2 rounded-lg hover:bg-muted transition-colors flex-1 text-left",
+                            "flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors flex-1 text-left",
                             agentData.agentId === currentAgentId && "bg-primary/10 text-primary"
                           )}
                         >
-                          <Bot className="h-4 w-4" />
-                          <span className="font-medium truncate">{agentData.agentName}</span>
-                          <span className="text-xs text-muted-foreground ml-auto">
-                            {agentData.sessions.length}
-                          </span>
+                          <div className="relative w-8 h-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
+                            <Image
+                              src={agentData.agentIcon || '/helpful-robot.png'}
+                              alt={agentData.agentName}
+                              fill
+                              className="object-cover"
+                              onError={(e) => {
+                                // Fallback to default image on error
+                                const target = e.target as HTMLImageElement
+                                target.src = '/helpful-robot.png'
+                              }}
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium truncate block">{agentData.agentName}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {agentData.sessions.length} conversation{agentData.sessions.length !== 1 ? 's' : ''}
+                            </span>
+                          </div>
                         </button>
                       </div>
 
@@ -180,54 +384,50 @@ export function MainChatSidebar({
                           <div
                             key={session.id}
                             className={cn(
-                              "group relative p-2 rounded-md bg-muted/50 hover:bg-muted cursor-pointer transition-colors",
+                              "group relative p-3 rounded-md bg-muted/50 hover:bg-muted cursor-pointer transition-colors",
                               session.threadId === currentThreadId && "bg-primary/20 border border-primary/30"
                             )}
                             onClick={() => handleSelectChat(session)}
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1 min-w-0">
-                                <h4 className="font-medium text-sm truncate mb-1">
+                                <h4 className="text-sm font-medium line-clamp-2 leading-tight mb-1">
                                   {session.title}
                                 </h4>
-                                <p className="text-xs text-muted-foreground truncate mb-1">
+                                <p className="text-xs text-muted-foreground truncate">
                                   {session.lastMessage}
                                 </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {ChatHistoryManager.formatTimestamp(session.timestamp)}
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {new Date(session.timestamp).toLocaleDateString()}
                                 </p>
                               </div>
-                              
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                onClick={(e) => handleDeleteChat(session.id, e)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteChat(session.id)
+                                }}
                               >
                                 <Trash2 className="h-3 w-3" />
                               </Button>
                             </div>
                           </div>
                         ))}
-
-                        {/* Show More Button */}
+                        
+                        {/* Show More/Less Button */}
                         {agentData.sessions.length > 5 && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full text-xs text-muted-foreground hover:text-foreground"
                             onClick={() => toggleShowAll(agentData.agentId)}
-                            className="flex items-center gap-1 p-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
                           >
-                            {agentData.showAll ? (
-                              <>
-                                <ChevronDown className="h-3 w-3" />
-                                Show less
-                              </>
-                            ) : (
-                              <>
-                                <ChevronRight className="h-3 w-3" />
-                                Show {agentData.sessions.length - 5} more
-                              </>
-                            )}
-                          </button>
+                            {agentData.showAll 
+                              ? 'Show less' 
+                              : `Show ${agentData.sessions.length - 5} more`}
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -245,7 +445,7 @@ export function MainChatSidebar({
             className="w-full flex items-center gap-2"
             variant="default"
           >
-            <Sparkles className="h-4 w-4" />
+            <Users className="h-4 w-4" />
             Discover Agents
           </Button>
         </div>

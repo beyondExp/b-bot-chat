@@ -1,64 +1,119 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useRef, useEffect } from "react"
-import { ChatHeader } from "./chat-header"
-import { ChatInput } from "./chat-input"
-import { ChatMessages } from "./chat-messages"
-import { AgentSelector } from "./agent-selector"
-import { DiscoverPage } from "./discover-page"
+import React, { useState, useEffect, useRef } from "react"
+import type { Message } from "@/types/chat"
+import { useStream } from "@langchain/langgraph-sdk/react"
 import { calculateTokenCost } from "@/lib/stripe"
+import { ChatHistoryManager, type ChatSession } from "@/lib/chat-history"
+import { ChatInput } from "./chat-input"
+import { ChatHeader } from "./chat-header"
+import { ChatMessages } from "./chat-messages"
+import { MainChatSidebar } from "./main-chat-sidebar"
 import { PaymentRequiredModal } from "./payment-required-modal"
 import { AutoRechargeNotification } from "./auto-recharge-notification"
+import { DiscoverPage } from "./discover-page"
+import { AgentSelector } from "./agent-selector"
 import { useAgents } from "@/lib/agent-service"
 import { useAuth0 } from "@auth0/auth0-react"
 import { useAuthenticatedFetch, isLocallyAuthenticated, getAuthToken } from "@/lib/api"
-import { MainChatSidebar } from "./main-chat-sidebar"
-import { ChatSession, ChatHistoryManager } from "@/lib/chat-history"
+import { ThreadService, type Thread } from "@/lib/thread-service"
 
 // Import the LANGGRAPH_AUDIENCE constant
-const LANGGRAPH_AUDIENCE = process.env.NEXT_PUBLIC_LANGGRAPH_AUDIENCE || "https://api.langgraph.bbot.solutions"
-// Add these imports at the top of the file
-import { useStream } from "@langchain/langgraph-sdk/react"
-import type { Message } from "@langchain/langgraph-sdk"
+import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 
 interface ChatInterfaceProps {
   initialAgent?: string | null
 }
 
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(initialAgent || "bbot")
-  const [tokensUsed, setTokensUsed] = useState(0)
-  // NOTE: showPaymentModal should only be set to true for authenticated users with actual balance issues
-  // For unauthenticated users, payment/balance checks should not apply
+  const { user, isAuthenticated, getAccessTokenSilently } = useAuth0()
+  const [agents, setAgents] = useState<any[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(true)
+  const [agentsError, setAgentsError] = useState<string | null>(null)
+  // Initialize selectedAgent from initialAgent, currentSession, or saved thread data
+  const getInitialAgent = (): string | null => {
+    // First priority: initialAgent prop
+    if (initialAgent) return initialAgent
+    
+    // Second priority: check if we have a current session with agent info
+    const savedThreadId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID)
+    if (savedThreadId) {
+      const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
+      const session = allSessions.find(s => s.threadId === savedThreadId)
+      if (session?.agentId) {
+        console.log('[Chat] Restoring agent from saved session:', session.agentId)
+        return session.agentId
+      }
+    }
+    
+    return null
+  }
+  
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(getInitialAgent())
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const [remainingCredits, setRemainingCredits] = useState(0)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
   const [autoRechargeAmount, setAutoRechargeAmount] = useState(0)
-  const [remainingCredits, setRemainingCredits] = useState(0)
-  const [conversationHistory, setConversationHistory] = useState<any[]>([])
+  const [toolEvents, setToolEvents] = useState<any[]>([])
+  const [transcription, setTranscription] = useState("")
   const [isTranscribing, setIsTranscribing] = useState(false)
-  const [transcription, setTranscription] = useState<string>("")
-  const [agents, setAgents] = useState<any[]>([])
-  
-  // Sidebar state
   const [showSidebar, setShowSidebar] = useState(false)
-  const [currentSession, setCurrentSession] = useState<ChatSession | null>(null)
+  
+  // Main chat identifier to separate from embed storage
+  const MAIN_CHAT_ID = "main-chat"
+  
+  // Initialize currentSession from saved thread data
+  const getInitialSession = (): ChatSession | null => {
+    const savedThreadId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID)
+    if (savedThreadId) {
+      const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
+      const session = allSessions.find(s => s.threadId === savedThreadId)
+      if (session) {
+        console.log('[Chat] Restoring session from saved data:', session)
+        return session
+      }
+    }
+    return null
+  }
+  
+  const [currentSession, setCurrentSession] = useState<ChatSession | null>(getInitialSession())
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null)
-  const [toolEvents, setToolEvents] = useState<any[]>([]);
+  // Initialize thread service with auth token getter
+  const getAuthTokenForService = async (): Promise<string | null> => {
+    try {
+      if (isAuthenticated) {
+        return await getAccessTokenSilently({
+          authorizationParams: {
+            audience: LANGGRAPH_AUDIENCE,
+          },
+        })
+      }
+      if (isLocallyAuthenticated()) {
+        return getAuthToken()
+      }
+      return null
+    } catch (error) {
+      console.error('Failed to get auth token:', error)
+      return null
+    }
+  }
 
-  const { user, isAuthenticated, getAccessTokenSilently } = useAuth0()
-  const { getAgents, getAgent, isLoading: agentsLoading, error: agentsError } = useAgents()
+  const threadService = new ThreadService(getAuthTokenForService)
 
-  // Load agents on mount
+  // Load agents
+  const { getAgents } = useAgents()
   useEffect(() => {
     const loadAgents = async () => {
       try {
-        const agentList = await getAgents();
-        setAgents(agentList);
-        } catch (error) {
+        setAgentsLoading(true)
+        const agentsData = await getAgents()
+        setAgents(agentsData)
+        setAgentsError(null)
+      } catch (error) {
         console.error("Error loading agents:", error);
+      } finally {
+        setAgentsLoading(false)
       }
     };
     loadAgents();
@@ -177,11 +232,17 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return userId.replace(/[|\-]/g, '') + '_' + agentId;
   };
 
+  // Get current thread ID
+  const getCurrentThreadId = () => {
+    return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID) || undefined
+  }
+
   // Initialize the useStream hook - proxy handles authentication
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
     apiUrl: getApiUrl(),
     apiKey: undefined, // Proxy handles authentication
     assistantId: getAssistantId(), // Only set if valid UUID, otherwise use default
+    threadId: getCurrentThreadId(), // Load existing thread if available
     messagesKey: "messages",
     onError: (error: unknown) => {
       console.error("Stream error:", error);
@@ -194,6 +255,31 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     },
   });
 
+  // Effect to clear chat when agent changes (but not on initial load/restore)
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
+  
+  useEffect(() => {
+    if (isInitialLoad) {
+      setIsInitialLoad(false)
+      return // Don't clear session on initial load
+    }
+    
+    if (selectedAgent) {
+      console.log('[Chat] Agent changed to:', selectedAgent, 'clearing current session')
+      // Only clear if this is a manual agent change, not a restoration
+      const currentThreadId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID)
+      const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
+      const currentSession = allSessions.find(s => s.threadId === currentThreadId)
+      
+      // If the selected agent doesn't match the current session's agent, then clear
+      if (!currentSession || currentSession.agentId !== selectedAgent) {
+        setCurrentSession(null)
+        ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+        console.log('[Chat] Cleared session due to agent change')
+      }
+    }
+  }, [selectedAgent]);
+
   // Debug logging for thread state changes
   useEffect(() => {
     console.log("[Chat] Thread state changed:", {
@@ -201,9 +287,29 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       isLoading: thread.isLoading,
       values: thread.values,
       firstMessage: thread.messages?.[0],
-      lastMessage: thread.messages?.[thread.messages.length - 1]
+      lastMessage: thread.messages?.[thread.messages.length - 1],
+      currentThreadId: getCurrentThreadId(),
+      selectedAgent: selectedAgent
     });
-  }, [thread.messages, thread.isLoading, thread.values]);
+  }, [thread.messages, thread.isLoading, thread.values, selectedAgent]);
+
+  // Monitor thread ID changes and force reload if needed
+  const [lastThreadId, setLastThreadId] = useState<string | undefined>(undefined)
+  
+  useEffect(() => {
+    const threadId = getCurrentThreadId()
+    console.log("[Chat] Thread ID changed:", threadId, "Current session:", currentSession)
+    
+    // If we have a threadId and it's different from the last one, and we're not on initial load
+    if (threadId && lastThreadId && threadId !== lastThreadId && !isInitialLoad) {
+      console.log('[Chat] Thread changed from', lastThreadId, 'to', threadId, '- reloading to update useStream')
+      window.location.reload()
+    }
+    
+    if (threadId) {
+      setLastThreadId(threadId)
+    }
+  }, [currentSession, lastThreadId, isInitialLoad])
 
   // Additional detailed message logging  
   useEffect(() => {
@@ -247,7 +353,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
       // Create the new message
       const newMessage: Message = {
-        type: "human",
+        id: `msg-${Date.now()}`,
+        role: "user",
         content: messageContent,
       };
 
@@ -318,33 +425,82 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     setShowSidebar(!showSidebar)
   }
 
-  // Get current thread ID
-  const getCurrentThreadId = () => {
-    return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId() || undefined
-  }
-
-  const handleSelectChat = (session: ChatSession) => {
+  const handleSelectChat = async (session: ChatSession) => {
+    console.log('[Chat] Selecting chat session:', session)
+    
+    // Set the current session and thread ID first
     setCurrentSession(session)
-    ChatHistoryManager.setCurrentThreadId(session.threadId)
-    // Reload the chat with the selected session
-    window.location.reload()
+    ChatHistoryManager.setCurrentThreadId(session.threadId, MAIN_CHAT_ID)
+    
+    // Then set the agent (this might trigger the useEffect but it should now be smarter)
+    setSelectedAgent(session.agentId)
+    
+    console.log('[Chat] Selected chat - agent:', session.agentId, 'thread:', session.threadId)
+    
+    // Try to load thread from server to get messages
+    try {
+      const threadWithMessages = await threadService.getThread(session.threadId)
+      if (threadWithMessages && threadWithMessages.values?.messages) {
+        console.log('[Chat] Loaded thread messages from server:', threadWithMessages.values.messages.length, 'messages')
+      } else {
+        console.log('[Chat] No messages found in thread on server')
+      }
+    } catch (error) {
+      console.error('[Chat] Error loading thread from server:', error)
+    }
   }
 
   const handleSelectAgent = (agentId: string) => {
+    console.log('[Chat] Selecting agent:', agentId)
     setSelectedAgent(agentId)
+    // The useEffect will handle clearing the current session
+  }
+
+  const handleNewChat = () => {
+    console.log('[Chat] Starting new chat')
+    setCurrentSession(null)
+    ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+    // No need to reload the page - useStream will start a new thread on next message
   }
 
   const handleToggleDiscover = () => {
     setSelectedAgent(null) // This will show the DiscoverPage
   }
 
+  // Get recent agents from chat history
+  const getRecentAgents = (): string[] => {
+    const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
+    const userId = user?.sub
+    
+    // Filter sessions for current user
+    const userSessions = allSessions.filter((session: ChatSession) => {
+      const matchesUser = userId ? session.userId === userId : !session.userId
+      return matchesUser
+    })
+
+    // Get unique agent IDs sorted by most recent activity
+    const agentActivity = new Map<string, number>()
+    
+    userSessions.forEach((session: ChatSession) => {
+      const agentId = session.agentId
+      const currentLatest = agentActivity.get(agentId) || 0
+      if (session.timestamp > currentLatest) {
+        agentActivity.set(agentId, session.timestamp)
+      }
+    })
+
+    // Sort by timestamp and return agent IDs
+    return Array.from(agentActivity.entries())
+      .sort(([,a], [,b]) => b - a)
+      .map(([agentId]) => agentId)
+      .slice(0, 5) // Return top 5 recent agents
+  }
+
   if (!selectedAgent) {
     return (
       <DiscoverPage
-        agents={agents}
-        loading={agentsLoading}
-        error={agentsError}
-        onAgentSelect={setSelectedAgent}
+        onSelectAgent={setSelectedAgent}
+        recentAgents={getRecentAgents()}
       />
     )
   }
@@ -356,6 +512,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={showSidebar}
           onToggleDiscover={handleToggleDiscover}
+          onNewChat={handleNewChat}
         />
 
         <div className="flex-1 overflow-hidden">
@@ -393,6 +550,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         currentAgentId={selectedAgent || "bbot"}
         userId={user?.sub}
         agents={agents}
+        embedId={MAIN_CHAT_ID}
       />
 
         <PaymentRequiredModal
@@ -403,14 +561,15 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onAutoRechargeChange={(enabled) => {
           // Handle auto recharge change if needed
           console.log('Auto recharge enabled:', enabled)
-        }}
-      />
+          }}
+        />
 
-      <AutoRechargeNotification
-        isOpen={showAutoRechargeNotification}
-        onClose={() => setShowAutoRechargeNotification(false)}
-        amount={autoRechargeAmount}
-      />
+      {showAutoRechargeNotification && (
+        <AutoRechargeNotification
+          onClose={() => setShowAutoRechargeNotification(false)}
+          amount={autoRechargeAmount}
+        />
+      )}
     </>
   )
 }

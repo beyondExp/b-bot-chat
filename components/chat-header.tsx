@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Menu, X, Sparkles } from "lucide-react"
+import { Menu, X, Sparkles, Plus } from "lucide-react"
 import { UserProfile } from "@/components/user-profile"
 import { useAuth0 } from "@auth0/auth0-react"
 import Image from "next/image"
@@ -10,9 +10,10 @@ interface ChatHeaderProps {
   onToggleSidebar: () => void
   isSidebarOpen: boolean
   onToggleDiscover: () => void
+  onNewChat?: () => void
 }
 
-export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover }: ChatHeaderProps) {
+export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover, onNewChat }: ChatHeaderProps) {
   const { isAuthenticated, isLoading } = useAuth0()
   const [showDebugInfo, setShowDebugInfo] = useState(false)
 
@@ -35,6 +36,16 @@ export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover }:
       </div>
 
       <div className="flex items-center gap-3">
+        {onNewChat && (
+          <button
+            onClick={onNewChat}
+            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+          >
+            <Plus size={16} />
+            <span>New Chat</span>
+          </button>
+        )}
+        
         <button
           onClick={onToggleDiscover}
           className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
