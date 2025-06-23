@@ -9,17 +9,19 @@ export class LangGraphService {
   }
 
   // Helper method to get headers with proper authentication
-  private getHeaders() {
+  private async getHeaders(authToken?: string) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     }
 
-    // Just set the Authorization header if we have a token
-    if (isLocallyAuthenticated()) {
-      const token = getAuthToken()
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`
-      }
+    // Use provided token first, then fallback to localStorage
+    const token = authToken || getAuthToken()
+    
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`
+      console.log("[LangGraphService] Using auth token for request")
+    } else {
+      console.warn("[LangGraphService] No auth token available")
     }
 
     return headers
@@ -28,9 +30,10 @@ export class LangGraphService {
   // Create a new thread
   async createThread(config: any = {}, headersOverride?: Record<string, string>) {
     try {
+      const headers = headersOverride || await this.getHeaders()
       const response = await fetch(`${this.baseURL}/threads`, {
         method: "POST",
-        headers: headersOverride || this.getHeaders(),
+        headers,
         body: JSON.stringify({
           assistant_id: config.agent_id || "bbot",
           user_id: config.user_id,
@@ -51,9 +54,10 @@ export class LangGraphService {
   // Get thread details
   async getThread(threadId: string) {
     try {
+      const headers = await this.getHeaders()
       const response = await fetch(`${this.baseURL}/threads/${threadId}`, {
         method: "GET",
-        headers: this.getHeaders(),
+        headers,
       })
 
       if (!response.ok) {
@@ -77,9 +81,10 @@ export class LangGraphService {
 
       const url = `${this.baseURL}/threads/${threadId}/history?${queryParams.toString()}`
 
+      const headers = await this.getHeaders()
       const response = await fetch(url, {
         method: "GET",
-        headers: this.getHeaders(),
+        headers,
       })
 
       if (!response.ok) {
@@ -95,9 +100,10 @@ export class LangGraphService {
   // Add a message to a thread
   async addThreadMessage(threadId: string, message: { role: string; content: string }, headersOverride?: Record<string, string>) {
     try {
+      const headers = headersOverride || await this.getHeaders()
       const response = await fetch(`${this.baseURL}/threads/${threadId}/messages`, {
         method: "POST",
-        headers: headersOverride || this.getHeaders(),
+        headers,
         body: JSON.stringify({
           role: message.role,
           content: message.content,
@@ -159,7 +165,7 @@ export class LangGraphService {
           user_id: userId,
           ability_id: options.config?.ability_id,
           model_id: options.config?.query_model || options.config?.response_model,
-          //apps: options.config?.apps || options.input?.apps || {},
+          apps: options.config?.apps || options.input?.apps || {},
           tool_activation: options.config?.tool_activation || {},
           document_urls: options.config?.document_urls || [],
           conversation_history: options.config?.conversation_history || [],
@@ -175,9 +181,10 @@ export class LangGraphService {
         subgraphs: true,
       }
 
+      const headers = headersOverride || await this.getHeaders()
       const response = await fetch(url, {
         method: "POST",
-        headers: headersOverride || this.getHeaders(),
+        headers,
         body: JSON.stringify(requestBody),
       })
 

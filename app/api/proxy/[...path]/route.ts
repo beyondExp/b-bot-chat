@@ -29,9 +29,18 @@ export async function PATCH(request: NextRequest, contextPromise: Promise<{ para
 
 async function handleProxyRequest(request: NextRequest, pathSegments: string[], method: string) {
   try {
-    // Log the Authorization header for debugging
+    // Log the incoming headers for debugging
     const incomingAuthHeader = request.headers.get("Authorization");
+    const incomingApiKeyHeader = request.headers.get("X-API-Key");
     console.log("[Proxy] Incoming Authorization header:", incomingAuthHeader);
+    console.log("[Proxy] Incoming X-API-Key header:", incomingApiKeyHeader ? "***PRESENT***" : "none");
+    
+    // Special debugging for history requests
+    if (pathSegments.some(segment => segment === 'history')) {
+      console.log("[Proxy] HISTORY REQUEST - Method:", method);
+      console.log("[Proxy] HISTORY REQUEST - Path:", pathSegments.join('/'));
+      console.log("[Proxy] HISTORY REQUEST - All headers:", Object.fromEntries(request.headers.entries()));
+    }
 
     // Get the LangGraph API URL from environment variables
     const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api/v2"
@@ -61,12 +70,24 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
 
     // This proxy is for authenticated main chat requests only
     const authHeader = request.headers.get("Authorization");
+    const apiKeyHeader = request.headers.get("X-API-Key");
 
     if (authHeader) {
       // For authenticated main chat requests: use user's Authorization token
       console.log("[Proxy] Authenticated main chat request detected, forwarding Authorization header");
       headers.set("Authorization", authHeader);
       // Do NOT set Admin API Key for authenticated users - this ensures user isolation
+    } else if (apiKeyHeader) {
+      // LangGraph SDK sends Bearer token as X-API-Key, convert to Authorization header
+      console.log("[Proxy] Detected X-API-Key header, converting to Authorization Bearer token");
+      
+      // Clean up the API key - handle potential duplicates and whitespace
+      const cleanApiKey = apiKeyHeader.split(',')[0].trim();
+      console.log("[Proxy] Original X-API-Key length:", apiKeyHeader.length, "Clean length:", cleanApiKey.length);
+      
+      headers.set("Authorization", `Bearer ${cleanApiKey}`);
+      // Remove the X-API-Key header to avoid confusion
+      headers.delete("X-API-Key");
     } else {
       // For unauthenticated main chat requests: reject (embed should use /api/embed-proxy)
       console.log("[Proxy] Unauthenticated main chat request, rejecting. Use /api/embed-proxy for embed requests.");
@@ -75,7 +96,8 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
 
     // Optionally, log forwarded headers for debugging
     console.log("[Proxy] Forwarding headers:", {
-      "Authorization": authHeader ? "***PRESENT***" : "none",
+      "Authorization": headers.get("Authorization") ? "***PRESENT***" : "none",
+      "X-API-Key": headers.get("X-API-Key") ? "***PRESENT***" : "none",
       "X-User-ID": headers.get("X-User-ID"),
     });
 

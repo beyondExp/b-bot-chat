@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Menu, X, Sparkles, Plus } from "lucide-react"
+import { Menu, X, Sparkles } from "lucide-react"
 import { UserProfile } from "@/components/user-profile"
 import { useAuth0 } from "@auth0/auth0-react"
 import Image from "next/image"
@@ -10,10 +10,9 @@ interface ChatHeaderProps {
   onToggleSidebar: () => void
   isSidebarOpen: boolean
   onToggleDiscover: () => void
-  onNewChat?: () => void
 }
 
-export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover, onNewChat }: ChatHeaderProps) {
+export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover }: ChatHeaderProps) {
   const { isAuthenticated, isLoading } = useAuth0()
   const [showDebugInfo, setShowDebugInfo] = useState(false)
 
@@ -27,25 +26,14 @@ export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover, o
         >
           {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 relative flex items-center justify-center">
-            <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={24} height={24} className="dark:invert" />
+        <div className="flex items-center">
+          <div className="w-8 h-8 relative flex items-center justify-center">
+            <Image src="/logo-black.svg" alt="Beyond-Bot.ai Logo" width={32} height={32} className="dark:invert" />
           </div>
-          <span className="font-semibold">Beyond-Bot.ai</span>
         </div>
       </div>
 
       <div className="flex items-center gap-3">
-        {onNewChat && (
-          <button
-            onClick={onNewChat}
-            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
-          >
-            <Plus size={16} />
-            <span>New Chat</span>
-          </button>
-        )}
-        
         <button
           onClick={onToggleDiscover}
           className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors"

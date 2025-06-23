@@ -60,7 +60,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const getApiKey = async () => {
     try {
       // For embed mode with admin API key
-      if (embedUserId && ADMIN_API_KEY) {
+    if (embedUserId && ADMIN_API_KEY) {
         return ADMIN_API_KEY;
       }
 
@@ -123,9 +123,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
 
     // For locally authenticated users
-    if (isLocallyAuthenticated()) {
+        if (isLocallyAuthenticated()) {
       const token = getAuthToken();
-      if (token) {
+          if (token) {
         return {
           ...baseHeaders,
           "Authorization": `Bearer ${token}`,

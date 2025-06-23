@@ -1,13 +1,14 @@
 "use client"
 
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useMemo } from "react"
 import type { Message } from "@/types/chat"
 import { useStream } from "@langchain/langgraph-sdk/react"
+import { Client } from "@langchain/langgraph-sdk"
 import { calculateTokenCost } from "@/lib/stripe"
 import { ChatHistoryManager, type ChatSession } from "@/lib/chat-history"
 import { ChatInput } from "./chat-input"
 import { ChatHeader } from "./chat-header"
-import { ChatMessages } from "./chat-messages"
+import { EnhancedChatMessages } from "./enhanced-chat-messages"
 import { MainChatSidebar } from "./main-chat-sidebar"
 import { PaymentRequiredModal } from "./payment-required-modal"
 import { AutoRechargeNotification } from "./auto-recharge-notification"
@@ -216,8 +217,25 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return selectedAgent || "bbot"; // Use the actual agent name or default to bbot
   };
 
-  // State for API key (can be undefined since proxy handles auth)
+  // State for API key - get auth token for proxy forwarding
   const [apiKey, setApiKey] = useState<string | undefined>(undefined);
+
+  // Initialize API key on mount and auth changes
+  useEffect(() => {
+    const initializeApiKey = async () => {
+      console.log('[Chat] Initializing API key...');
+      const token = await getApiKey();
+      console.log('[Chat] Got API key:', token ? 'present' : 'null');
+      setApiKey(token || undefined);
+    };
+    
+    initializeApiKey();
+  }, [isAuthenticated, user]); // Re-run when auth state changes
+
+  // Debug logging for apiKey changes
+  useEffect(() => {
+    console.log('[Chat] API Key state changed:', apiKey ? 'present' : 'undefined');
+  }, [apiKey]);
 
   // Get entity ID for state management
   const getEntityId = () => {
@@ -231,12 +249,60 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID) || undefined
   }
 
-  // Initialize the useStream hook - proxy handles authentication
+  // Initialize the useStream hook with Bearer token authentication via apiKey
+  console.log('[Chat] Initializing useStream with apiKey:', apiKey ? 'present' : 'undefined');
+  console.log('[Chat] Current thread ID for useStream:', getCurrentThreadId());
+  console.log('[Chat] isAuthenticated:', isAuthenticated);
+  
+  // For authenticated users, we must have apiKey before initializing useStream
+  // For unauthenticated users or B-Bot, we can proceed without apiKey
+  const canInitializeStream = !isAuthenticated || selectedAgent === "bbot" || (isAuthenticated && apiKey)
+  
+  console.log('[Chat] Can initialize stream:', canInitializeStream);
+  console.log('[Chat] Authentication state - isAuthenticated:', isAuthenticated, 'apiKey present:', !!apiKey, 'selectedAgent:', selectedAgent);
+  
+  // Set up global fetch interceptor for LangGraph SDK internal requests
+  useEffect(() => {
+    if (!apiKey) return;
+    
+    const originalFetch = window.fetch;
+    window.fetch = async (url: string | URL | Request, options?: RequestInit) => {
+      // Check if this is a request to our proxy
+      const urlString = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      
+      if (urlString.includes('/api/proxy/')) {
+        console.log('[Chat] Intercepting fetch to proxy:', urlString);
+        
+        // Create headers object, being careful not to duplicate X-API-Key
+        const existingHeaders = new Headers(options?.headers);
+        
+        // Remove any existing X-API-Key to prevent duplication
+        existingHeaders.delete('X-API-Key');
+        
+        // Set our API key
+        existingHeaders.set('X-API-Key', apiKey);
+        
+        const newOptions: RequestInit = {
+          ...options,
+          headers: existingHeaders,
+        };
+        return originalFetch(url, newOptions);
+      }
+      
+      return originalFetch(url, options);
+    };
+    
+    // Cleanup function
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [apiKey]);
+  
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
     apiUrl: getApiUrl(),
-    apiKey: undefined, // Proxy handles authentication
-    assistantId: getAssistantId(), // Only set if valid UUID, otherwise use default
-    threadId: getCurrentThreadId(), // Load existing thread if available
+    apiKey: canInitializeStream ? apiKey : undefined, // Only pass API key if we can initialize
+    assistantId: canInitializeStream ? getAssistantId() : "bbot", // Use default if not initializing
+    threadId: canInitializeStream ? getCurrentThreadId() : undefined, // Only load thread if initializing
     messagesKey: "messages",
     onError: (error: unknown) => {
       console.error("Stream error:", error);
@@ -292,17 +358,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     });
   }, [thread.messages, thread.isLoading, thread.values, selectedAgent]);
 
-  // Monitor thread ID changes and force reload if needed
+  // Monitor thread ID changes for debugging
   const [lastThreadId, setLastThreadId] = useState<string | undefined>(undefined)
   
   useEffect(() => {
     const threadId = getCurrentThreadId()
     console.log("[Chat] Thread ID changed:", threadId, "Current session:", currentSession)
     
-    // If we have a threadId and it's different from the last one, and we're not on initial load
+    // Just track the thread ID change for debugging, don't reload the page
     if (threadId && lastThreadId && threadId !== lastThreadId && !isInitialLoad) {
-      console.log('[Chat] Thread changed from', lastThreadId, 'to', threadId, '- reloading to update useStream')
-      window.location.reload()
+      console.log('[Chat] Thread changed from', lastThreadId, 'to', threadId, '- useStream should handle this automatically')
     }
     
     if (threadId) {
@@ -357,10 +422,26 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         content: messageContent,
       };
 
-      // Submit using LangGraph's useStream
+      // Get current conversation history and normalize message format
+      const currentMessages = thread.messages || []
+      
+      // Normalize existing messages to our Message format
+      const normalizedCurrentMessages: Message[] = currentMessages.map((msg: any) => ({
+        id: msg.id || `msg-${Date.now()}-${Math.random()}`,
+        role: msg.role || (msg.type === 'human' ? 'user' : 'assistant'),
+        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+      }))
+      
+      const allMessages = [...normalizedCurrentMessages, newMessage]
+
+      console.log('[Chat] Submitting with message history:', allMessages.length, 'messages')
+      console.log('[Chat] Current apiKey for submission:', apiKey ? 'present' : 'undefined')
+              console.log('[Chat] Can initialize stream:', canInitializeStream)
+
+      // Submit using LangGraph's useStream with full conversation history
       thread.submit(
         { 
-          messages: [newMessage],
+          messages: allMessages, // Send full conversation history
           entity_id: entityId,
           user_id: userId,
           agent_id: agentId
@@ -380,10 +461,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           },
           optimisticValues: (prev) => ({
             ...prev,
-            messages: [
-              ...(prev.messages ?? []),
-              newMessage,
-            ],
+            messages: allMessages, // Use the complete message array
             entity_id: entityId,
             user_id: userId,
             agent_id: agentId,
@@ -410,7 +488,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }, 100);
   };
 
-  const authenticatedFetch = useAuthenticatedFetch()
+
 
   const handleTranscriptionComplete = (transcriptionText: string) => {
     setTranscription(transcriptionText)
@@ -449,7 +527,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const threadWithMessages = await threadService.getThread(session.threadId)
       if (threadWithMessages && threadWithMessages.values?.messages) {
         console.log('[Chat] Loaded thread messages from server:', threadWithMessages.values.messages.length, 'messages')
-      } else {
+            } else {
         console.log('[Chat] No messages found in thread on server')
       }
     } catch (error) {
@@ -512,6 +590,32 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     )
   }
 
+  // Don't render chat interface until we have authentication
+  // For authenticated users, wait for apiKey to be available
+  // For anonymous users (B-Bot), allow immediate access
+  if (isAuthenticated && !apiKey) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="loading loading-spinner loading-lg"></div>
+          <p className="mt-2">Authenticating...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // For authenticated users, ensure we have apiKey before proceeding
+  if (isAuthenticated && selectedAgent !== "bbot" && !apiKey) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="loading loading-spinner loading-lg"></div>
+          <p className="mt-2">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
       <div className="flex flex-col h-screen bg-background">
@@ -519,21 +623,27 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={showSidebar}
           onToggleDiscover={handleToggleDiscover}
-          onNewChat={handleNewChat}
         />
 
         <div className="flex-1 overflow-hidden">
-              <ChatMessages
-            messages={thread.messages}
-                messagesEndRef={messagesEndRef}
-                selectedAgent={selectedAgent}
-                agents={agents}
+          <EnhancedChatMessages
+            messages={thread.messages?.map((msg: any) => ({
+              id: msg.id || `msg-${Date.now()}-${Math.random()}`,
+              role: msg.role || (msg.type === 'human' ? 'user' : 'assistant'),
+              content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+              type: msg.type
+            })) || []}
+            messagesEndRef={messagesEndRef}
+            selectedAgent={selectedAgent}
+            agents={agents}
             onSuggestionClick={handleSuggestionClick}
             suggestions={
               agents.find((a: any) => a.id === selectedAgent)?.templates?.map((t: any) =>
                 t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
               )
             }
+            userColor="#2563eb"
+            isLoading={thread.isLoading}
           />
         </div>
 
@@ -553,6 +663,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         onSelectChat={handleSelectChat}
         onSelectAgent={handleSelectAgent}
         onDiscoverAgents={handleToggleDiscover}
+        onNewChat={handleNewChat}
         currentThreadId={getCurrentThreadId()}
         currentAgentId={selectedAgent || "bbot"}
         userId={user?.sub}

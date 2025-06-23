@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { Trash2, MessageSquare, Bot, Sparkles, ChevronDown, ChevronRight, Users } from 'lucide-react'
+import { Trash2, MessageSquare, Bot, Sparkles, ChevronDown, ChevronRight, Users, Plus } from 'lucide-react'
 import { ChatSession, ChatHistoryManager } from '@/lib/chat-history'
 import { cn } from '@/lib/utils'
 import { ThreadService, type Thread } from "@/lib/thread-service"
@@ -26,6 +26,7 @@ interface MainChatSidebarProps {
   onSelectChat: (session: ChatSession) => void
   onSelectAgent: (agentId: string) => void
   onDiscoverAgents: () => void
+  onNewChat: () => void
   currentThreadId?: string
   currentAgentId: string
   userId?: string
@@ -90,6 +91,7 @@ export function MainChatSidebar({
   onSelectChat,
   onSelectAgent,
   onDiscoverAgents,
+  onNewChat,
   currentThreadId,
   currentAgentId,
   userId,
@@ -438,8 +440,19 @@ export function MainChatSidebar({
           </div>
         </ScrollArea>
 
-        {/* Discover Agents Button */}
-        <div className="p-4 border-t bg-background">
+        {/* Action Buttons */}
+        <div className="p-4 border-t bg-background space-y-2">
+          <Button
+            onClick={() => {
+              onNewChat()
+              onClose()
+            }}
+            className="w-full flex items-center gap-2"
+            variant="outline"
+          >
+            <Plus className="h-4 w-4" />
+            New Chat
+          </Button>
           <Button
             onClick={handleDiscoverAgents}
             className="w-full flex items-center gap-2"
