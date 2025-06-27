@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useRef, useMemo } from "react"
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import type { Message } from "@/types/chat"
 import { useStream } from "@langchain/langgraph-sdk/react"
 import { Client } from "@langchain/langgraph-sdk"
@@ -190,15 +190,18 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return baseHeaders;
   };
 
-  // Get the API URL for LangGraph - use the proxy endpoint
+  // Get the API URL for LangGraph - use embed proxy for anonymous users, main proxy for authenticated
   const getApiUrl = () => {
-    // Use the proxy endpoint which handles authentication internally
+    // For unauthenticated users, use embed proxy (which uses admin API key)
+    // For authenticated users, use main proxy (which forwards user tokens)
+    const proxyEndpoint = (!isAuthenticated || selectedAgent === "bbot") ? '/api/embed-proxy' : '/api/proxy';
+    
     // Need to construct absolute URL for LangGraph client
     if (typeof window !== 'undefined') {
-      return `${window.location.origin}/api/proxy`;
+      return `${window.location.origin}${proxyEndpoint}`;
     }
     // Fallback for server-side rendering
-    return '/api/proxy';
+    return proxyEndpoint;
   };
 
   // Helper function to check if a string is a valid UUID
@@ -255,22 +258,23 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   console.log('[Chat] isAuthenticated:', isAuthenticated);
   
   // For authenticated users, we must have apiKey before initializing useStream
-  // For unauthenticated users or B-Bot, we can proceed without apiKey
-  const canInitializeStream = !isAuthenticated || selectedAgent === "bbot" || (isAuthenticated && apiKey)
+  // For unauthenticated users, they can use embed proxy without apiKey
+  const canInitializeStream = !isAuthenticated || (isAuthenticated && apiKey)
   
   console.log('[Chat] Can initialize stream:', canInitializeStream);
   console.log('[Chat] Authentication state - isAuthenticated:', isAuthenticated, 'apiKey present:', !!apiKey, 'selectedAgent:', selectedAgent);
   
   // Set up global fetch interceptor for LangGraph SDK internal requests
   useEffect(() => {
+    // Only set up interceptor if we have an API key (authenticated users)
     if (!apiKey) return;
     
     const originalFetch = window.fetch;
     window.fetch = async (url: string | URL | Request, options?: RequestInit) => {
-      // Check if this is a request to our proxy
+      // Check if this is a request to our proxy endpoints
       const urlString = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
       
-      if (urlString.includes('/api/proxy/')) {
+      if (urlString.includes('/api/proxy/') || urlString.includes('/api/embed-proxy/')) {
         console.log('[Chat] Intercepting fetch to proxy:', urlString);
         
         // Create headers object, being careful not to duplicate X-API-Key
@@ -300,7 +304,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
     apiUrl: getApiUrl(),
-    apiKey: canInitializeStream ? apiKey : undefined, // Only pass API key if we can initialize
+    apiKey: canInitializeStream && isAuthenticated ? apiKey : undefined, // Only pass API key for authenticated users
     assistantId: canInitializeStream ? getAssistantId() : "bbot", // Use default if not initializing
     threadId: canInitializeStream ? getCurrentThreadId() : undefined, // Only load thread if initializing
     messagesKey: "messages",
@@ -312,6 +316,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     onFinish: () => {
       console.log("Stream finished");
       scrollToBottom();
+      saveCurrentSession();
+    },
+    onThreadId: (threadId: string) => {
+      console.log("Thread ID received:", threadId);
+      ChatHistoryManager.setCurrentThreadId(threadId, MAIN_CHAT_ID);
     },
   });
 
@@ -397,6 +406,49 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   useEffect(() => {
     scrollToBottom();
   }, [thread.messages]);
+
+  // Save current session to chat history (only once per thread)
+  const saveCurrentSession = useCallback(() => {
+    const messages = thread.messages;
+    if (!messages || messages.length === 0) return;
+
+    const userMessage = messages.find(msg => msg.type === 'human');
+    const aiMessage = messages.find(msg => msg.type === 'ai');
+    
+    // Only save if we have both a user message and an AI response (complete exchange)
+    if (!userMessage || !aiMessage) return;
+
+    const userId = user?.sub || "anonymous-user";
+    const threadId = getCurrentThreadId();
+    
+    if (!threadId) return;
+
+    // Check if this thread already exists in chat history
+    const existingSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID);
+    const existingSession = existingSessions.find(session => 
+      session.threadId === threadId && 
+      session.agentId === selectedAgent &&
+      (userId !== "anonymous-user" ? session.userId === userId : !session.userId || session.userId === "anonymous-user")
+    );
+
+    const session: ChatSession = {
+      id: existingSession?.id || currentSession?.id || `${threadId}-${Date.now()}`,
+      threadId: threadId,
+      agentId: selectedAgent || "bbot",
+      title: existingSession?.title || currentSession?.title || ChatHistoryManager.generateChatTitle(
+        typeof userMessage.content === 'string' ? userMessage.content : 'New Chat'
+      ),
+      lastMessage: aiMessage && typeof aiMessage.content === 'string' 
+        ? aiMessage.content.substring(0, 100) + (aiMessage.content.length > 100 ? '...' : '')
+        : 'No response yet',
+      timestamp: Date.now(), // Always update timestamp to show latest activity
+      userId: userId !== "anonymous-user" ? userId : undefined // Don't store "anonymous-user" as userId
+    };
+
+    console.log('[Chat] Saving session to local storage:', session);
+    ChatHistoryManager.saveChatSession(session, MAIN_CHAT_ID);
+    setCurrentSession(session);
+  }, [thread.messages, currentSession, selectedAgent, user?.sub]);
 
   // Function to handle sending a message with streaming
   const handleSendMessage = async (messageContent: string) => {
@@ -557,9 +609,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
     const userId = user?.sub
     
-    // Filter sessions for current user
+    // Filter sessions for current user (including anonymous users)
     const userSessions = allSessions.filter((session: ChatSession) => {
-      const matchesUser = userId ? session.userId === userId : !session.userId
+      const matchesUser = userId ? session.userId === userId : (!session.userId || session.userId === "anonymous-user")
       return matchesUser
     })
 
@@ -590,27 +642,14 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     )
   }
 
-  // Don't render chat interface until we have authentication
-  // For authenticated users, wait for apiKey to be available
-  // For anonymous users (B-Bot), allow immediate access
+  // For authenticated users, wait for apiKey to be available before proceeding
+  // Anonymous users can proceed immediately using embed proxy
   if (isAuthenticated && !apiKey) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <div className="loading loading-spinner loading-lg"></div>
           <p className="mt-2">Authenticating...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // For authenticated users, ensure we have apiKey before proceeding
-  if (isAuthenticated && selectedAgent !== "bbot" && !apiKey) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="loading loading-spinner loading-lg"></div>
-          <p className="mt-2">Loading...</p>
         </div>
       </div>
     )

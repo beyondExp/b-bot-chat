@@ -154,9 +154,9 @@ export function MainChatSidebar({
     }
   }
 
-  // Load data when sidebar opens or user changes
+  // Load data when sidebar opens
   useEffect(() => {
-    if (isOpen && userId) {
+    if (isOpen) {
       loadAgentsWithChats()
     }
   }, [isOpen, userId, embedId])
@@ -166,6 +166,13 @@ export function MainChatSidebar({
       console.log('[MainChatSidebar] Loading threads from server...')
       console.log('[MainChatSidebar] Using userId:', userId)
       console.log('[MainChatSidebar] Available agents:', agents)
+      
+      // For anonymous users, directly use local storage
+      if (!userId) {
+        console.log('[MainChatSidebar] No userId (anonymous user), using local storage')
+        loadAgentsWithChatsFromLocal()
+        return
+      }
       
       // Fetch threads from LangGraph via ThreadService
       const threads = await threadService.getThreads(userId)
@@ -229,13 +236,17 @@ export function MainChatSidebar({
 
   // Fallback method using local storage
   const loadAgentsWithChatsFromLocal = () => {
+    console.log('[MainChatSidebar] Loading from local storage for userId:', userId)
     const allSessions = ChatHistoryManager.getChatSessions(embedId)
+    console.log('[MainChatSidebar] All local sessions:', allSessions)
     
-    // Filter sessions for current user
+    // Filter sessions for current user (including anonymous users)
     const userSessions = allSessions.filter(session => {
-      const matchesUser = userId ? session.userId === userId : !session.userId
+      const matchesUser = userId ? session.userId === userId : (!session.userId || session.userId === "anonymous-user")
+      console.log('[MainChatSidebar] Session:', session.id, 'userId:', session.userId, 'matches:', matchesUser)
       return matchesUser
     })
+    console.log('[MainChatSidebar] Filtered user sessions:', userSessions)
 
     // Group sessions by agent
     const agentGroups = new Map<string, ChatSession[]>()
