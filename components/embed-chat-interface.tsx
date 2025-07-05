@@ -148,6 +148,51 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     return '/api/embed-proxy';
   };
 
+  // Function to set thread metadata
+  const setThreadMetadata = async (threadId: string) => {
+    try {
+      console.log(`Setting metadata for thread ${threadId}`);
+      
+      const userId = embedUserId || user?.sub || "anonymous-user";
+      const agentId = selectedAgent;
+      const expertId = agentObj?.rawData?.metadata?.expert_id;
+      
+      if (!expertId) {
+        console.log("No expert_id found, skipping thread metadata update");
+        return;
+      }
+
+      const metadata = {
+        expert_id: expertId,
+        user_id: userId,
+        agent_id: agentId,
+        entity_id: userId.replace(/[|\-]/g, '') + '_' + agentId,
+        distributionChannel: {
+          type: "Embed"
+        }
+      };
+
+      const headers = await getHeaders();
+      const apiUrl = getApiUrl();
+      
+      const response = await fetch(`${apiUrl}/threads/${threadId}`, {
+        method: 'PATCH',
+        headers: headers,
+        body: JSON.stringify({
+          metadata: metadata
+        })
+      });
+
+      if (response.ok) {
+        console.log(`Successfully set thread metadata for ${threadId}:`, metadata);
+      } else {
+        console.error(`Failed to set thread metadata: ${response.status}`);
+      }
+    } catch (error) {
+      console.error("Error setting thread metadata:", error);
+    }
+  };
+
   // Helper function to check if a string is a valid UUID
   const isValidUUID = (str: string) => {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -179,6 +224,9 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId(embedId);
   };
 
+  // State to track if we've set thread metadata
+  const [threadMetadataSet, setThreadMetadataSet] = useState<string | null>(null);
+
   // Initialize the useStream hook - proxy handles authentication
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
     apiUrl: getApiUrl(),
@@ -206,9 +254,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       scrollToBottom();
       saveCurrentSession();
     },
-    onThreadId: (threadId: string) => {
+    onThreadId: async (threadId: string) => {
       console.log("Thread ID received:", threadId);
       ChatHistoryManager.setCurrentThreadId(threadId, embedId);
+      
+      // Set thread metadata if we haven't already and we have the agent data
+      if (threadId && threadId !== threadMetadataSet && agentObj?.rawData?.metadata?.expert_id) {
+        await setThreadMetadata(threadId);
+        setThreadMetadataSet(threadId);
+      }
     },
   });
 
@@ -450,6 +504,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       loadAgent();
     }
   }, [selectedAgent, getAgent]);
+
+  // Set thread metadata when agent data becomes available
+  useEffect(() => {
+    const currentThreadId = ChatHistoryManager.getCurrentThreadId(embedId);
+    if (agentObj?.rawData?.metadata?.expert_id && currentThreadId && currentThreadId !== threadMetadataSet) {
+      setThreadMetadata(currentThreadId);
+      setThreadMetadataSet(currentThreadId);
+    }
+  }, [agentObj, embedId, threadMetadataSet]);
 
   // Handle sending a message
   const handleSendMessage = async (messageContent: string) => {
