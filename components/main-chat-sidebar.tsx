@@ -99,6 +99,7 @@ export function MainChatSidebar({
   embedId
 }: MainChatSidebarProps) {
   const [agentsWithChats, setAgentsWithChats] = useState<AgentWithChats[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   const { isAuthenticated, getAccessTokenSilently } = useAuth0()
 
   // Initialize thread service with auth token getter
@@ -163,6 +164,7 @@ export function MainChatSidebar({
 
   const loadAgentsWithChats = async () => {
     try {
+      setIsLoading(true)
       console.log('[MainChatSidebar] Loading threads from server...')
       console.log('[MainChatSidebar] Using userId:', userId)
       console.log('[MainChatSidebar] Available agents:', agents)
@@ -171,6 +173,7 @@ export function MainChatSidebar({
       if (!userId) {
         console.log('[MainChatSidebar] No userId (anonymous user), using local storage')
         loadAgentsWithChatsFromLocal()
+        setIsLoading(false)
         return
       }
       
@@ -231,6 +234,8 @@ export function MainChatSidebar({
       console.log('[MainChatSidebar] API failed, falling back to local storage')
       // Fallback to local storage if server fails
       loadAgentsWithChatsFromLocal()
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -345,7 +350,15 @@ export function MainChatSidebar({
         
         <ScrollArea className="flex-1">
           <div className="p-4">
-            {agentsWithChats.length === 0 ? (
+            {isLoading ? (
+              <div className="text-center text-muted-foreground py-8">
+                <div className="flex items-center justify-center mb-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+                <p>Loading conversations...</p>
+                <p className="text-sm">Please wait while we fetch your chat history</p>
+              </div>
+            ) : agentsWithChats.length === 0 ? (
               <div className="text-center text-muted-foreground py-8">
                 <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
                 <p>No conversations yet</p>

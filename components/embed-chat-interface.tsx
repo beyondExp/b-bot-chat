@@ -472,13 +472,22 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         content: messageContent,
       };
 
+      // Get expert_id from assistant metadata if available
+      const expertId = agentObj?.rawData?.metadata?.expert_id;
+      
+      // Prepare thread metadata
+      const threadMetadata = {
+        entity_id: entityId,
+        user_id: userId,
+        agent_id: agentId,
+        ...(expertId && { expert_id: expertId }) // Add expert_id if available
+      };
+
       // Submit using LangGraph's useStream
       thread.submit(
         { 
           messages: [newMessage],
-          entity_id: entityId,
-          user_id: userId,
-          agent_id: agentId
+          ...threadMetadata
         },
         {
         config: {
@@ -499,9 +508,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               ...(prev.messages ?? []),
               newMessage,
             ],
-            entity_id: entityId,
-            user_id: userId,
-            agent_id: agentId,
+            ...threadMetadata,
           }),
         }
       );
@@ -624,6 +631,17 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const agentId = selectedAgent;
       const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
 
+      // Get expert_id from assistant metadata if available
+      const expertId = agentObj?.rawData?.metadata?.expert_id;
+      
+      // Prepare thread metadata
+      const threadMetadata = {
+        entity_id: entityId,
+        user_id: userId,
+        agent_id: agentId,
+        ...(expertId && { expert_id: expertId }) // Add expert_id if available
+      };
+
       // Merge assistant apps with user apps
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
@@ -633,9 +651,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       thread.submit(
         { 
           messages: langGraphMessages,
-          entity_id: entityId,
-          user_id: userId,
-          agent_id: agentId
+          ...threadMetadata
         },
         {
           config: {
@@ -653,9 +669,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           optimisticValues: (prev) => ({
             ...prev,
             messages: langGraphMessages,
-            entity_id: entityId,
-            user_id: userId,
-            agent_id: agentId,
+            ...threadMetadata,
           }),
         }
       );
@@ -710,6 +724,17 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const agentId = selectedAgent;
       const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
 
+      // Get expert_id from assistant metadata if available
+      const expertId = agentObj?.rawData?.metadata?.expert_id;
+      
+      // Prepare thread metadata
+      const threadMetadata = {
+        entity_id: entityId,
+        user_id: userId,
+        agent_id: agentId,
+        ...(expertId && { expert_id: expertId }) // Add expert_id if available
+      };
+
       // Merge assistant apps with user apps
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
@@ -719,9 +744,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       thread.submit(
         { 
           messages: langGraphMessages,
-          entity_id: entityId,
-          user_id: userId,
-          agent_id: agentId
+          ...threadMetadata
         },
         {
           config: {
@@ -739,9 +762,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           optimisticValues: (prev) => ({
             ...prev,
             messages: langGraphMessages,
-            entity_id: entityId,
-            user_id: userId,
-            agent_id: agentId,
+            ...threadMetadata,
           }),
         }
       );

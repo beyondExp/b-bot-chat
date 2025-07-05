@@ -665,25 +665,37 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         />
 
         <div className="flex-1 overflow-hidden">
-          <EnhancedChatMessages
-            messages={thread.messages?.map((msg: any) => ({
-              id: msg.id || `msg-${Date.now()}-${Math.random()}`,
-              role: msg.role || (msg.type === 'human' ? 'user' : 'assistant'),
-              content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-              type: msg.type
-            })) || []}
-            messagesEndRef={messagesEndRef}
-            selectedAgent={selectedAgent}
-            agents={agents}
-            onSuggestionClick={handleSuggestionClick}
-            suggestions={
-              agents.find((a: any) => a.id === selectedAgent)?.templates?.map((t: any) =>
-                t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
-              )
-            }
-            userColor="#2563eb"
-            isLoading={thread.isLoading}
-          />
+          {isSelectingChat ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-muted-foreground">
+                <div className="flex items-center justify-center mb-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+                <p>Loading conversation...</p>
+                <p className="text-sm">Please wait while we load your chat</p>
+              </div>
+            </div>
+          ) : (
+            <EnhancedChatMessages
+              messages={thread.messages?.map((msg: any) => ({
+                id: msg.id || `msg-${Date.now()}-${Math.random()}`,
+                role: msg.role || (msg.type === 'human' ? 'user' : 'assistant'),
+                content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+                type: msg.type
+              })) || []}
+              messagesEndRef={messagesEndRef}
+              selectedAgent={selectedAgent}
+              agents={agents}
+              onSuggestionClick={handleSuggestionClick}
+              suggestions={
+                agents.find((a: any) => a.id === selectedAgent)?.templates?.map((t: any) =>
+                  t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
+                )
+              }
+              userColor="#2563eb"
+              isLoading={thread.isLoading}
+            />
+          )}
         </div>
 
         <div className="border-t bg-background p-4">
