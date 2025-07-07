@@ -557,7 +557,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Submit using LangGraph's useStream
       thread.submit(
         { 
-          messages: [newMessage]
+          messages: [newMessage],
+          entity_id: entityId,  // Required in main payload for LangGraph
+          user_id: userId,      // Also add these for compatibility
+          agent_id: agentId
         },
         {
         config: {
@@ -588,10 +591,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               ...(prev.messages ?? []),
               newMessage,
             ],
-            expert_id: expertId,
+            entity_id: entityId,
             user_id: userId,
             agent_id: agentId,
-            entity_id: entityId,
+            expert_id: expertId,
           }),
         }
       );
@@ -725,7 +728,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Submit the conversation from edit point to regenerate AI response
       thread.submit(
         { 
-          messages: langGraphMessages
+          messages: langGraphMessages,
+          entity_id: entityId,  // Required in main payload for LangGraph
+          user_id: userId,      // Also add these for compatibility
+          agent_id: agentId
         },
         {
           config: {
@@ -753,10 +759,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           optimisticValues: (prev) => ({
             ...prev,
             messages: langGraphMessages,
-            expert_id: expertId,
+            entity_id: entityId,
             user_id: userId,
             agent_id: agentId,
-            entity_id: entityId,
+            expert_id: expertId,
           }),
         }
       );
@@ -822,7 +828,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Submit the conversation up to the regeneration point
       thread.submit(
         { 
-          messages: langGraphMessages
+          messages: langGraphMessages,
+          entity_id: entityId,  // Required in main payload for LangGraph
+          user_id: userId,      // Also add these for compatibility
+          agent_id: agentId
         },
         {
           config: {
@@ -850,10 +859,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           optimisticValues: (prev) => ({
             ...prev,
             messages: langGraphMessages,
-            expert_id: expertId,
+            entity_id: entityId,
             user_id: userId,
             agent_id: agentId,
-            entity_id: entityId,
+            expert_id: expertId,
           }),
         }
       );
