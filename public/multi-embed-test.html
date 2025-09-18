@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiple B-Bot Embeds Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .embed-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .embed-container {
+            flex: 1;
+            min-width: 300px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .embed-header {
+            background: #007bff;
+            color: white;
+            padding: 10px 15px;
+            font-weight: bold;
+            text-align: center;
+        }
+        
+        .embed-frame {
+            width: 100%;
+            height: 500px;
+            border: none;
+        }
+        
+        .description {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .test-instructions {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .test-instructions h3 {
+            margin: 0 0 10px 0;
+            color: #0066cc;
+        }
+        
+        .test-instructions ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .embed-row {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Multiple B-Bot Embeds Test</h1>
+        
+        <div class="description">
+            <h2>Independent Chat Sessions</h2>
+            <p>This page demonstrates multiple B-Bot embeds running independently on the same page. Each embed has its own chat history and session state.</p>
+            
+            <div class="test-instructions">
+                <h3>Test Instructions:</h3>
+                <ul>
+                    <li>Send different messages in each chat window</li>
+                    <li>Verify each embed maintains its own conversation history</li>
+                    <li>Refresh the page and check that each embed's history is preserved independently</li>
+                    <li>Test message editing and branching in different embeds</li>
+                    <li>Open browser developer tools to verify each embed uses different localStorage keys</li>
+                    <li><strong>Note:</strong> Anonymous users won't see balance-related errors (client-side fix applied)</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="embed-row">
+            <div class="embed-container">
+                <div class="embed-header">B-Bot Embed #1 (Default Agent)</div>
+                <iframe 
+                    class="embed-frame"
+                    src="/embed?embedId=embed-1&agent=bbot&user_id=test-user-1"
+                    title="B-Bot Chat Embed 1">
+                </iframe>
+            </div>
+            
+            <div class="embed-container">
+                <div class="embed-header">B-Bot Embed #2 (Default Agent)</div>
+                <iframe 
+                    class="embed-frame"
+                    src="/embed?embedId=embed-2&agent=bbot&user_id=test-user-2"
+                    title="B-Bot Chat Embed 2">
+                </iframe>
+            </div>
+        </div>
+        
+        <div class="embed-row">
+            <div class="embed-container">
+                <div class="embed-header">B-Bot Embed #3 (Research Agent)</div>
+                <iframe 
+                    class="embed-frame"
+                    src="/embed?embedId=embed-3&agent=open_deep_research&user_id=test-user-3"
+                    title="B-Bot Chat Embed 3">
+                </iframe>
+            </div>
+            
+            <div class="embed-container">
+                <div class="embed-header">B-Bot Embed #4 (Retrieval Agent)</div>
+                <iframe 
+                    class="embed-frame"
+                    src="/embed?embedId=embed-4&agent=retrieval_graph&user_id=test-user-4"
+                    title="B-Bot Chat Embed 4">
+                </iframe>
+            </div>
+        </div>
+        
+        <div class="description">
+            <h3>Technical Details:</h3>
+            <p>Each embed has a unique <code>embedId</code> parameter which ensures:</p>
+            <ul>
+                <li><strong>Isolated localStorage:</strong> Each embed uses keys like <code>embed-chat-history-embed-1</code></li>
+                <li><strong>Independent sessions:</strong> Thread IDs and chat history are stored separately</li>
+                <li><strong>Separate branching:</strong> Message editing and branching work independently per embed</li>
+                <li><strong>Different agents:</strong> Each embed can use different AI agents or configurations</li>
+            </ul>
+            
+            <h4>localStorage Keys Used:</h4>
+            <ul>
+                <li><code>embed-chat-history-embed-1</code> - Chat history for Embed #1</li>
+                <li><code>embed-current-thread-embed-1</code> - Current thread ID for Embed #1</li>
+                <li><code>embed-chat-history-embed-2</code> - Chat history for Embed #2</li>
+                <li><code>embed-current-thread-embed-2</code> - Current thread ID for Embed #2</li>
+                <li>...and so on for each embed</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html> 
