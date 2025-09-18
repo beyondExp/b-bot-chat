@@ -4,6 +4,8 @@ import type React from "react"
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { ChatInput } from "./chat-input"
 import { EnhancedChatMessages } from "./enhanced-chat-messages"
+// Temporarily remove tool response handling to avoid type conflicts  
+// import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
 import { EmbedChatHeader } from "./embed-chat-header"
 import { ChatHistorySidebar } from "./chat-history-sidebar"
 import { useAuth0 } from "@auth0/auth0-react"
@@ -33,7 +35,17 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const [agentError, setAgentError] = useState<string>("")
   const { getAgent } = useAgents()
   const [agentObj, setAgentObj] = useState<any>(null);
-  const [toolEvents, setToolEvents] = useState<any[]>([]);
+  const [toolEvents, setToolEvents] = useState<any[]>([])
+
+  // Add tool event handling like B-Bot Hub
+  const handleToolEvent = (event: any) => {
+    console.log("Tool event received:", event);
+    if (Array.isArray(event)) {
+      setToolEvents(prev => [...prev, ...event]);
+    } else {
+      setToolEvents(prev => [...prev, event]);
+    }
+  };
   const [showHistory, setShowHistory] = useState(false);
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [waitingForEditResponse, setWaitingForEditResponse] = useState<{messageIndex: number, originalContent: string} | null>(null);
@@ -280,10 +292,33 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         setThreadMetadataSet(threadId);
       }
     },
+    // TODO: LangGraph SDK useStream doesn't support onToolEvent directly  
+    // Tool events need to be extracted from the message stream based on metadata/namespace
+    // onToolEvent: handleToolEvent,
   });
 
   // Workaround state for SDK bug - manually track streaming messages  
   const [streamingMessages, setStreamingMessages] = useState<Message[]>([]);
+
+  // Extract tool events from message stream (since LangGraph SDK doesn't support onToolEvent directly)
+  useEffect(() => {
+    if (thread.messages && thread.messages.length > 0) {
+      // Find tool messages and convert them to tool events
+      const toolMessages = thread.messages.filter(msg => msg.type === "tool");
+      const newToolEvents = toolMessages.map(msg => ({
+        id: msg.id,
+        tool_name: (msg as any).name || "reason_about",
+        content: msg.content,
+        status: "success",
+        type: "tool_response"
+      }));
+      
+      if (newToolEvents.length !== toolEvents.length) {
+        console.log("Extracted tool events from message stream:", newToolEvents);
+        setToolEvents(newToolEvents);
+      }
+    }
+  }, [thread.messages, toolEvents.length]);
   
   // Debug logging for thread state changes
   useEffect(() => {
@@ -501,7 +536,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     const loadAgent = async () => {
       try {
         setAgentError("");
-        const agentData = await getAgent(selectedAgent);
+        // Use allowAnonymous option for embed mode to avoid authentication requirements
+        const agentData = await getAgent(selectedAgent, { allowAnonymous: true });
         if (agentData) {
           setAgentObj(agentData);
           setAgentValid(true);
@@ -575,6 +611,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           apps: mergedApps,
             }
           },
+          streamMode: ["messages", "updates"], // Use messages/updates for proper event streaming like B-Bot Hub
           metadata: {
             expert_id: expertId,
             user_id: userId,
@@ -624,34 +661,37 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const convertMessages = (messages: Message[]): ChatMessage[] => {
     const isAnonymousUser = !embedUserId && !user?.sub;
     
-    return messages.map(msg => {
-      let content = msg.content as string;
-      
-      // FIXME: Client-side workaround for server-side balance checking issue
-      // The server (B-Bot-Synapse/src/bbot_main/graph.py) checks token balance for ALL users,
-      // including anonymous users (user_id: "anonymous-user"). This causes inappropriate
-      // "insufficient balance" messages for embed users who shouldn't be charged.
-      // 
-      // Proper fix: Modify the server-side balance checking logic to skip anonymous users:
-      // if configuration.user_id == "anonymous-user" or not configuration.user_id:
-      //     # Skip balance check for anonymous users
-      //     pass
-      // 
-      // For anonymous users, replace insufficient balance messages with a more appropriate response
-      if (isAnonymousUser && 
-          msg.type === "ai" && 
-          content.toLowerCase().includes('insufficient') && 
-          content.toLowerCase().includes('balance')) {
-        content = "I'm here to help! Feel free to ask me any questions and I'll do my best to assist you.";
-      }
-      
-      return {
-        id: msg.id || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: msg.type as "human" | "ai",
-        role: msg.type === "human" ? "user" : "assistant",
-        content: content
-      };
-    });
+    return messages
+      .filter(msg => {
+        // Filter out empty AI messages that only contain tool_calls (trigger messages)
+        if (msg.type === "ai" && (!msg.content || (msg.content as string).trim() === "") && (msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
+          console.log("🚫 [convertMessages] Filtering out empty AI message with tool_calls:", msg.id);
+          return false;
+        }
+        return true;
+      })
+      .map(msg => {
+        let content = msg.content as string;
+        
+        // FIXME: Client-side workaround for server-side balance checking issue
+        if (isAnonymousUser && 
+            msg.type === "ai" && 
+            content.toLowerCase().includes('insufficient') && 
+            content.toLowerCase().includes('balance')) {
+          content = "I'm here to help! Feel free to ask me any questions and I'll do my best to assist you.";
+        }
+        
+        return {
+          id: msg.id || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          type: msg.type as "human" | "ai" | "tool", // Support tool messages!
+          role: msg.type === "human" ? "user" : msg.type === "tool" ? "tool_response" : "assistant",
+          content: content,
+          // Pass through tool call properties for proper inline display
+          tool_calls: (msg as any).tool_calls,
+          tool_call_id: (msg as any).tool_call_id,
+          name: (msg as any).name
+        };
+      });
   };
 
   // Handle message editing
@@ -710,7 +750,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       setStreamingMessages(langGraphMessages);
       
       // Clear any tool events from after the edit point
-      setToolEvents([]);
+      setToolEvents([]); // Clear previous tool events
 
       // Get the entity info for the request
       const userId = embedUserId || user?.sub || "anonymous-user";
@@ -810,7 +850,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       setStreamingMessages(langGraphMessages);
       
       // Clear any tool events from after the regeneration point
-      setToolEvents([]);
+      setToolEvents([]); // Clear previous tool events
 
       // Get the entity info for the request
       const userId = embedUserId || user?.sub || "anonymous-user";
@@ -908,16 +948,29 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           <EnhancedChatMessages
             messages={useMemo(() => {
               // Always use the branch manager as the source of truth when it has data
-              // It will return the base conversation if no branches exist
               const currentConversation = messageMetadataManager.getCurrentConversation();
               
-              // If branch manager has content, use it (this includes both branched and non-branched conversations)
+              // If branch manager has content, use it
               if (currentConversation.length > 0) {
+                console.log("📋 Using branch manager conversation:", currentConversation.length, "messages");
                 return currentConversation;
               }
               
-              // Fallback to streaming/thread messages only if branch manager is empty
-              return convertMessages(streamingMessages.length > 0 ? streamingMessages : thread.messages);
+              // Fallback to streaming/thread messages
+              const rawMessages = streamingMessages.length > 0 ? streamingMessages : thread.messages;
+              const convertedMessages = convertMessages(rawMessages);
+              
+              console.log("📋 Converting messages for display:");
+              console.log("- Raw messages:", rawMessages?.length || 0);
+              console.log("- Converted messages:", convertedMessages.length);
+              rawMessages?.forEach((msg, idx) => {
+                const contentStr = typeof msg.content === 'string' ? msg.content : 
+                  Array.isArray(msg.content) ? JSON.stringify(msg.content) : String(msg.content || '');
+                const toolCallsCount = (msg as any).tool_calls?.length || 0;
+                console.log(`  ${idx}: ${msg.type} - "${contentStr.substring(0, 50)}..." - tool_calls: ${toolCallsCount}`);
+              });
+              
+              return convertedMessages;
             }, [streamingMessages, thread.messages, branchRefreshKey])}
               messagesEndRef={messagesEndRef}
               selectedAgent={selectedAgent}
@@ -929,6 +982,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             onMessageRegenerate={handleMessageRegenerate}
             onBranchSelect={handleBranchSelect}
             getMessageMetadata={getMessageMetadata}
+            toolEvents={toolEvents}
               suggestions={
                 agentObj && agentObj.templates && agentObj.templates.length > 0
                   ? agentObj.templates.map((t: any) =>
@@ -939,7 +993,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           />
         </div>
         
-        <div className="border-t bg-background p-4 flex-shrink-0">
+        <div className="bg-background flex-shrink-0">
             <ChatInput
             onSubmit={handleFormSubmit}
             isLoading={thread.isLoading}

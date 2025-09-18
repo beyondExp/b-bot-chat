@@ -176,9 +176,9 @@ export class LangGraphService {
           // Include any other fields from the config
           ...options.config,
         },
-        stream_mode: ["values", "messages", "updates"],
-        stream_subgraphs: true,
-        subgraphs: true,
+        stream_mode: ["messages", "updates"], // Use messages/updates for proper event streaming like B-Bot Hub
+        stream_subgraphs: true, // Enable to get namespace detection like B-Bot Hub
+        subgraphs: true, // Enable to get namespace detection like B-Bot Hub
       }
 
       const headers = headersOverride || await this.getHeaders()

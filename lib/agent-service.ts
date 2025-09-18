@@ -170,8 +170,9 @@ export function useAgents() {
 
         let responseData
         if (options?.allowAnonymous) {
-          // Anonymous fetch using proxy endpoint, no Authorization header
-          const response = await fetch(`/api/proxy/assistants/${agentId}`, {
+          // Anonymous fetch using embed-proxy endpoint, no Authorization header
+          // The embed-proxy will automatically add the Admin API Key for anonymous requests
+          const response = await fetch(`/api/embed-proxy/assistants/${agentId}`, {
             method: "GET",
             headers: {
               "Content-Type": "application/json",

@@ -46,11 +46,10 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api/v2"
 
     // Get the API key from environment variables (server-side only)
-    const apiKey = process.env.ADMIN_API_KEY
+    // Use the same default as MainAPI if not configured
+    const apiKey = process.env.ADMIN_API_KEY || "your-super-secret-admin-key"
 
-    if (!apiKey) {
-      return NextResponse.json({ error: "API key not configured" }, { status: 500 })
-    }
+    console.log("[Proxy] Using API key:", apiKey === "your-super-secret-admin-key" ? "default key" : "custom key");
 
     // Construct the target URL
     const targetPath = pathSegments.join("/")
@@ -122,9 +121,10 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
           const formattedBody = {
             input,
             config,
-            stream_mode: body.stream_mode || ["values", "messages", "updates"],
-            stream_subgraphs: body.stream_subgraphs !== false,
-            subgraphs: body.subgraphs !== false,
+            stream_mode: body.stream_mode || ["messages", "updates"], // Use messages/updates for proper event streaming
+            // Enable subgraph streaming to get namespace detection like B-Bot Hub
+            stream_subgraphs: true,
+            subgraphs: true,
             on_disconnect: body.on_disconnect || "cancel",
             assistant_id: config?.agent_id || body.assistant_id
           }

@@ -9,6 +9,8 @@ import { ChatHistoryManager, type ChatSession } from "@/lib/chat-history"
 import { ChatInput } from "./chat-input"
 import { ChatHeader } from "./chat-header"
 import { EnhancedChatMessages } from "./enhanced-chat-messages"
+// Temporarily remove tool response handling to avoid type conflicts
+// import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
 import { MainChatSidebar } from "./main-chat-sidebar"
 import { PaymentRequiredModal } from "./payment-required-modal"
 import { AutoRechargeNotification } from "./auto-recharge-notification"
@@ -57,6 +59,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
   const [autoRechargeAmount, setAutoRechargeAmount] = useState(0)
   const [toolEvents, setToolEvents] = useState<any[]>([])
+
+  // Add tool event handling like B-Bot Hub
+  const handleToolEvent = (event: any) => {
+    console.log("Tool event received:", event);
+    if (Array.isArray(event)) {
+      setToolEvents(prev => [...prev, ...event]);
+    } else {
+      setToolEvents(prev => [...prev, event]);
+    }
+  };
   const [transcription, setTranscription] = useState("")
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [showSidebar, setShowSidebar] = useState(false)
@@ -99,6 +111,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       return null
     }
   }
+
+  // Tool events now handled directly through message stream as type: "tool"
 
   const threadService = new ThreadService(getAuthTokenForService)
 
@@ -322,7 +336,30 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       console.log("Thread ID received:", threadId);
       ChatHistoryManager.setCurrentThreadId(threadId, MAIN_CHAT_ID);
     },
+    // TODO: LangGraph SDK useStream doesn't support onToolEvent directly
+    // Tool events need to be extracted from the message stream based on metadata/namespace
+    // onToolEvent: handleToolEvent,
   });
+
+  // Extract tool events from message stream (since LangGraph SDK doesn't support onToolEvent directly)
+  useEffect(() => {
+    if (thread.messages && thread.messages.length > 0) {
+      // Find tool messages and convert them to tool events
+      const toolMessages = thread.messages.filter(msg => msg.type === "tool");
+      const newToolEvents = toolMessages.map(msg => ({
+        id: msg.id,
+        tool_name: (msg as any).name || "reason_about", 
+        content: msg.content,
+        status: "success",
+        type: "tool_response"
+      }));
+      
+      if (newToolEvents.length !== toolEvents.length) {
+        console.log("Extracted tool events from message stream:", newToolEvents);
+        setToolEvents(newToolEvents);
+      }
+    }
+  }, [thread.messages, toolEvents.length]);
 
   // Effect to clear chat when agent changes (but not on initial load/restore)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
@@ -468,32 +505,27 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const mergedApps = { ...assistantApps, ...userApps };
 
       // Create the new message
-      const newMessage: Message = {
+      const newMessage = {
         id: `msg-${Date.now()}`,
-        role: "user",
+        role: "user" as const,
         content: messageContent,
       };
 
-      // Get current conversation history and normalize message format
+      // Get current conversation history and ensure tool calls have responses (like agent-chat-ui)
       const currentMessages = thread.messages || []
       
-      // Normalize existing messages to our Message format
-      const normalizedCurrentMessages: Message[] = currentMessages.map((msg: any) => ({
-        id: msg.id || `msg-${Date.now()}-${Math.random()}`,
-        role: msg.role || (msg.type === 'human' ? 'user' : 'assistant'),
-        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-      }))
-      
-      const allMessages = [...normalizedCurrentMessages, newMessage]
+      // Ensure tool calls have responses before adding new message (like agent-chat-ui)
+      const toolMessages: any[] = [] // ensureToolCallsHaveResponses(currentMessages)
+      const allMessages = [...toolMessages, newMessage]
 
       console.log('[Chat] Submitting with message history:', allMessages.length, 'messages')
       console.log('[Chat] Current apiKey for submission:', apiKey ? 'present' : 'undefined')
-              console.log('[Chat] Can initialize stream:', canInitializeStream)
+      console.log('[Chat] Can initialize stream:', canInitializeStream)
 
-      // Submit using LangGraph's useStream with full conversation history
+      // Submit using LangGraph's useStream (like agent-chat-ui)
       thread.submit(
         { 
-          messages: allMessages, // Send full conversation history
+          messages: allMessages,
           entity_id: entityId,
           user_id: userId,
           agent_id: agentId
@@ -511,9 +543,14 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           apps: mergedApps,
             }
           },
+          streamMode: ["messages", "updates"], // Use messages/updates for proper event streaming like B-Bot Hub
           optimisticValues: (prev) => ({
             ...prev,
-            messages: allMessages, // Use the complete message array
+            messages: [
+              ...(prev.messages ?? []),
+              ...toolMessages,
+              newMessage,
+            ] as any,
             entity_id: entityId,
             user_id: userId,
             agent_id: agentId,
@@ -677,11 +714,22 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             </div>
           ) : (
             <EnhancedChatMessages
-              messages={thread.messages?.map((msg: any) => ({
+              messages={thread.messages?.filter((msg: any) => {
+                // Filter out empty AI messages that only contain tool_calls (trigger messages)
+                if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {
+                  console.log("🚫 [ChatInterface] Filtering out empty AI message with tool_calls:", msg.id);
+                  return false;
+                }
+                return true;
+              }).map((msg: any) => ({
                 id: msg.id || `msg-${Date.now()}-${Math.random()}`,
-                role: msg.role || (msg.type === 'human' ? 'user' : 'assistant'),
+                role: msg.role || (msg.type === 'human' ? 'user' : msg.type === 'tool' ? 'tool_response' : 'assistant'),
                 content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-                type: msg.type
+                type: msg.type,
+                // Pass through tool call properties for proper inline display
+                tool_calls: msg.tool_calls,
+                tool_call_id: msg.tool_call_id,
+                name: msg.name
               })) || []}
               messagesEndRef={messagesEndRef}
               selectedAgent={selectedAgent}
@@ -694,11 +742,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               }
               userColor="#2563eb"
               isLoading={thread.isLoading}
+              toolEvents={toolEvents}
             />
           )}
         </div>
 
-        <div className="border-t bg-background p-4">
+        <div className="bg-background">
               <ChatInput
             onSubmit={handleFormSubmit}
             isLoading={thread.isLoading}

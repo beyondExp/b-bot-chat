@@ -233,27 +233,56 @@ export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName, userC
   const placeholderName = agentName || selectedAgent || "Assistant"
 
   return (
-    <div className="chat-input-container p-4 border-t">
-      <form onSubmit={handleSubmit} className="flex items-end gap-2">
-        <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={`Message ${placeholderName}`}
-          className="min-h-[40px] max-h-[200px] resize-none"
-          disabled={isLoading}
-        />
-        <Button
-          type="submit"
-          disabled={isLoading || !input.trim()}
-          className="ml-2"
-          style={{ backgroundColor: userColor, color: '#fff' }}
-        >
-          {isLoading ? <Loader2 className="animate-spin w-4 h-4" /> : <Send className="w-4 h-4" />}
-        </Button>
+    <div className="chat-input-container p-4">
+      <form onSubmit={handleSubmit} className="w-full max-w-4xl mx-auto">
+        {/* ChatGPT-style rounded input container */}
+        <div className="relative flex items-end bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 focus-within:ring-2 focus-within:ring-offset-0 focus-within:ring-primary">
+          {/* Main input area */}
+          <div className="flex-1 min-w-0">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={`Message ${placeholderName}`}
+              className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent px-4 py-3 text-base placeholder:text-gray-500 focus:outline-none focus:ring-0"
+              disabled={isLoading}
+              style={{ 
+                lineHeight: '1.5',
+                paddingRight: '60px' // Space for send button
+              }}
+            />
+          </div>
+          
+          {/* Send button integrated inside the input */}
+          <div className="absolute right-2 bottom-2">
+            <Button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              size="sm"
+              className={`w-10 h-10 rounded-full p-0 transition-all duration-200 ${
+                input.trim() && !isLoading
+                  ? 'bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-gray-900'
+                  : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
+        </div>
+        
+        {/* Loading indicator below input */}
+        {isLoading && (
+          <div className="flex items-center justify-center mt-3 text-sm text-gray-500">
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            Generating response...
+          </div>
+        )}
       </form>
-      {isLoading && <div className="text-sm text-gray-500 mt-2">Generating response...</div>}
     </div>
   )
 }

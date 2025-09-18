@@ -11,7 +11,14 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "tool_call" | "tool_response";
   content: string;
-  type?: "human" | "ai";
+  type?: "human" | "ai" | "tool";
+  tool_calls?: Array<{
+    id?: string;
+    name: string;
+    args: Record<string, any>;
+  }>;
+  tool_call_id?: string;
+  name?: string;
 }
 
 interface MessageBranch {

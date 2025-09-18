@@ -16,11 +16,10 @@ export async function POST(req: Request) {
 async function handleRequest(req: Request) {
   try {
     // Get the API key from environment variables (server-side only)
-    const apiKey = process.env.ADMIN_API_KEY
+    // Use the same default as MainAPI if not configured
+    const apiKey = process.env.ADMIN_API_KEY || "your-super-secret-admin-key"
 
-    if (!apiKey) {
-      return NextResponse.json({ error: "API key not configured" }, { status: 500 })
-    }
+    console.log("[Agents] Using API key:", apiKey === "your-super-secret-admin-key" ? "default key" : "custom key");
 
     // Forward the request to the actual API with the admin key
     const response = await fetch(`${API_V3_BASE_URL}/public/assistants`, {
