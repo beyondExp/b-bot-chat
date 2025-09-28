@@ -115,7 +115,7 @@ export async function PATCH(request: NextRequest, contextPromise: Promise<{ para
   return handleEmbedProxyRequest(request, params.path, "PATCH");
 }
 
-const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || 'http://localhost:8080';
+const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app";
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 
 // Helper to check for valid UUID
