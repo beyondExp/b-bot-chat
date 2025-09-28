@@ -331,11 +331,15 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     
     // For other requests, set up the target URL
     let url: URL
-    const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
-    url = new URL(`${mainApiUrl}/v2/${targetPath}`)
     if (isAssistantByIdRequest) {
-      console.log("[EmbedProxy] Routing assistant by ID request to single assistant endpoint:", url);
+      // For individual assistant requests, use the new specific assistant endpoint
+      const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
+      url = new URL(`${mainApiUrl}/v3/public/assistants/${pathSegments[1]}`)
+      console.log("[EmbedProxy] Routing assistant by ID request to specific assistant endpoint:", url);
     } else {
+      // Handle other requests through MainAPI proxy to LangGraph  
+      const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
+      url = new URL(`${mainApiUrl}/v2/${targetPath}`)
       console.log("[EmbedProxy] Routing through MainAPI to LangGraph:", url);
     }
     
