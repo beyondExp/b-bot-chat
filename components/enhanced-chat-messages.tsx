@@ -432,7 +432,7 @@ export function EnhancedChatMessages({
                       {message.content && (
                         <div className="py-1">
                           <div className="p-3 bg-muted rounded-lg">
-                            <div className="prose prose-sm dark:prose-invert max-w-none">
+                            <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
                               <ReactMarkdown>{message.content}</ReactMarkdown>
                             </div>
                           </div>
@@ -454,7 +454,7 @@ export function EnhancedChatMessages({
                   <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
                 </Avatar>
                 <div className="p-3 bg-muted rounded-lg">
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
                     <ReactMarkdown>{incomingMessage}</ReactMarkdown>
                   </div>
                 </div>

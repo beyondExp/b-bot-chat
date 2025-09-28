@@ -233,7 +233,7 @@ export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName, userC
   const placeholderName = agentName || selectedAgent || "Assistant"
 
   return (
-    <div className="chat-input-container p-4">
+    <div className="chat-input-container p-4 pb-safe sticky bottom-0 bg-background z-10">
       <form onSubmit={handleSubmit} className="w-full max-w-4xl mx-auto">
         {/* ChatGPT-style rounded input container */}
         <div className="relative flex items-end bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 focus-within:ring-2 focus-within:ring-offset-0 focus-within:ring-primary">

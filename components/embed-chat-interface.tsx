@@ -993,15 +993,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           />
         </div>
         
-        <div className="bg-background flex-shrink-0">
-            <ChatInput
+        <div className="bg-background border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <ChatInput
             onSubmit={handleFormSubmit}
             isLoading={thread.isLoading}
-              selectedAgent={selectedAgent}
-              agentName={agentObj?.name}
-              userColor={userColor}
-            />
-          </div>
+            selectedAgent={selectedAgent}
+            agentName={agentObj?.name}
+            userColor={userColor}
+          />
+        </div>
       </div>
       
       {agentError && (

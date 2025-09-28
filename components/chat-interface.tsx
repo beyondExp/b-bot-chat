@@ -701,7 +701,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onToggleDiscover={handleToggleDiscover}
         />
 
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden flex flex-col">
           {isSelectingChat ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center text-muted-foreground">
@@ -747,14 +747,14 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           )}
         </div>
 
-        <div className="bg-background">
-              <ChatInput
+        <div className="bg-background border-t border-gray-200 dark:border-gray-700">
+          <ChatInput
             onSubmit={handleFormSubmit}
             isLoading={thread.isLoading}
-                selectedAgent={selectedAgent}
+            selectedAgent={selectedAgent}
             agentName={agents.find((a: any) => a.id === selectedAgent)?.name}
-              />
-            </div>
+          />
+        </div>
       </div>
 
       <MainChatSidebar

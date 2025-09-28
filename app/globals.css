@@ -1693,3 +1693,47 @@
     padding: 0.5rem;
   }
 }
+
+/* Mobile-specific improvements for chat input */
+@media (max-width: 640px) {
+  .chat-input-container {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    position: sticky;
+    bottom: 0;
+    background-color: hsl(var(--background));
+    border-top: 1px solid hsl(var(--border));
+    z-index: 10;
+  }
+  
+  /* Ensure proper mobile viewport handling */
+  .chat-input-container.sticky {
+    position: sticky;
+    bottom: 0;
+    background-color: hsl(var(--background));
+    backdrop-filter: blur(8px);
+  }
+  
+  /* Better mobile input sizing */
+  .chat-input {
+    min-height: 44px; /* iOS minimum touch target */
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+  
+  /* Mobile-specific prose link styling */
+  .prose a {
+    color: #2563eb !important;
+    text-decoration: underline !important;
+  }
+  
+  .prose a:hover {
+    color: #1d4ed8 !important;
+  }
+  
+  .dark .prose a {
+    color: #60a5fa !important;
+  }
+  
+  .dark .prose a:hover {
+    color: #93c5fd !important;
+  }
+}
