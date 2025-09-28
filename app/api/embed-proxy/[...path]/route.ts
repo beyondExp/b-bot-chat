@@ -347,10 +347,10 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     headers.set("Content-Type", "application/json");
 
     // Configure headers for all proxied requests
-    console.log("[EmbedProxy] Using Admin API Key as bbot-api-key for embed request");
-    headers.set("bbot-api-key", apiKey);
+    console.log("[EmbedProxy] Using Admin API Key as Bearer token for embed request");
+    headers.set("Authorization", `Bearer ${apiKey}`);
 
-    // Forward any Authorization header if present (for authenticated embed users)
+    // Forward any existing Authorization header if present (for authenticated embed users)
     const authHeader = request.headers.get("Authorization")
     if (authHeader) {
       console.log("[EmbedProxy] Forwarding Authorization header for authenticated embed user");
@@ -359,10 +359,8 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
 
     // Optionally, log forwarded headers for debugging
     console.log("[EmbedProxy] Forwarding headers:", {
-      "bbot-api-key": "***HIDDEN***",
-      "X-API-Key": "none", // No longer using public assistants endpoint
+      "Authorization": authHeader ? "***PRESENT***" : "***HIDDEN***",
       "X-User-ID": headers.get("X-User-ID"),
-      "Authorization": authHeader ? "***PRESENT***" : "none",
     });
 
     // Log the final target URL
