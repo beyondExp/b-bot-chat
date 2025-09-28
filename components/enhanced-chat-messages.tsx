@@ -5,63 +5,95 @@ import type React from "react"
 import { useState } from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Wrench, CheckCircle } from 'lucide-react'
+import { Wrench, CheckCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import { HumanMessage } from "./messages/human-message"
 import { AIMessage } from "./messages/ai-message"
 import { ensureToolCallsHaveResponses, DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses"
+import ReactMarkdown from "react-markdown"
 
-// Tool Calls Component (like agent-chat-ui)
+// Tool Calls Component (like agent-chat-ui) - Now collapsible
 function ToolCalls({ toolCalls }: { toolCalls: Array<{ id?: string; name: string; args: Record<string, any> }> }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
   if (!toolCalls || toolCalls.length === 0) return null;
+
+  const totalCalls = toolCalls.length;
+  const callNames = toolCalls.map(tc => tc.name).join(", ");
 
   return (
     <div className="mx-auto grid max-w-3xl gap-2 my-2">
-      {toolCalls.map((tc, idx) => {
-        const args = tc.args as Record<string, any>;
-        const hasArgs = Object.keys(args).length > 0;
-        return (
-          <div
-            key={idx}
-            className="overflow-hidden rounded-lg border border-amber-200 bg-amber-50"
-          >
-            <div className="border-b border-amber-200 bg-amber-100 px-4 py-2">
-              <h3 className="font-medium text-amber-900 flex items-center gap-2">
-                <Wrench className="w-4 h-4" />
-                {tc.name}
-                {tc.id && (
-                  <code className="ml-2 rounded bg-amber-200 px-2 py-1 text-sm">
-                    {tc.id}
-                  </code>
-                )}
-              </h3>
-            </div>
-            {hasArgs ? (
-              <table className="min-w-full divide-y divide-amber-200">
-                <tbody className="divide-y divide-amber-200">
-                  {Object.entries(args).map(([key, value], argIdx) => (
-                    <tr key={argIdx}>
-                      <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-amber-900">
-                        {key}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-amber-700">
-                        {typeof value === 'object' ? (
-                          <code className="rounded bg-amber-100 px-2 py-1 font-mono text-sm break-all">
-                            {JSON.stringify(value, null, 2)}
-                          </code>
-                        ) : (
-                          String(value)
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <div className="overflow-hidden rounded-lg border border-amber-200 bg-amber-50">
+        <div 
+          className="border-b border-amber-200 bg-amber-100 px-4 py-2 cursor-pointer hover:bg-amber-200 transition-colors"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <h3 className="font-medium text-amber-900 flex items-center gap-2">
+            <Wrench className="w-4 h-4" />
+            <span>Tool Calls ({totalCalls})</span>
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4 ml-auto" />
             ) : (
-              <code className="block p-3 text-sm text-amber-700">{"{}"}</code>
+              <ChevronRight className="w-4 h-4 ml-auto" />
             )}
+          </h3>
+          {!isExpanded && (
+            <p className="text-sm text-amber-700 mt-1 truncate">
+              {callNames}
+            </p>
+          )}
+        </div>
+        
+        {isExpanded && (
+          <div className="p-2">
+            {toolCalls.map((tc, idx) => {
+              const args = tc.args as Record<string, any>;
+              const hasArgs = Object.keys(args).length > 0;
+              return (
+                <div
+                  key={idx}
+                  className="mb-2 last:mb-0 overflow-hidden rounded border border-amber-300 bg-amber-25"
+                >
+                  <div className="border-b border-amber-300 bg-amber-100 px-3 py-2">
+                    <h4 className="font-medium text-amber-900 flex items-center gap-2 text-sm">
+                      <Wrench className="w-3 h-3" />
+                      {tc.name}
+                      {tc.id && (
+                        <code className="ml-2 rounded bg-amber-200 px-1 py-0.5 text-xs">
+                          {tc.id}
+                        </code>
+                      )}
+                    </h4>
+                  </div>
+                  {hasArgs ? (
+                    <table className="min-w-full divide-y divide-amber-300">
+                      <tbody className="divide-y divide-amber-300">
+                        {Object.entries(args).map(([key, value], argIdx) => (
+                          <tr key={argIdx}>
+                            <td className="px-3 py-1 text-xs font-medium whitespace-nowrap text-amber-900">
+                              {key}
+                            </td>
+                            <td className="px-3 py-1 text-xs text-amber-700">
+                              {typeof value === 'object' ? (
+                                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs break-all">
+                                  {JSON.stringify(value, null, 2)}
+                                </code>
+                              ) : (
+                                String(value)
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <code className="block p-2 text-xs text-amber-700">{"{}"}</code>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        )}
+      </div>
     </div>
   );
 }
@@ -85,6 +117,77 @@ function ToolResult({ message }: { message: ChatMessage }) {
           <div className="text-sm text-green-800 whitespace-pre-wrap">
             {typeof message.content === 'string' ? message.content : JSON.stringify(message.content, null, 2)}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tool Events Collapsible Component
+function ToolEventsCollapsible({ toolEvents }: { toolEvents: any[] }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  if (!toolEvents || toolEvents.length === 0) return null;
+
+  const totalEvents = toolEvents.length;
+  const eventNames = toolEvents.map(event => event.tool_name || event.name || "Tool").join(", ");
+
+  return (
+    <div className="my-2">
+      <div className="mx-4">
+        <div className="overflow-hidden rounded-lg border border-amber-200 bg-amber-50">
+          <div 
+            className="border-b border-amber-200 bg-amber-100 px-4 py-2 cursor-pointer hover:bg-amber-200 transition-colors"
+            onClick={() => setIsExpanded(!isExpanded)}
+          >
+            <h3 className="font-medium text-amber-900 flex items-center gap-2">
+              <Wrench className="w-4 h-4" />
+              <span>Tool Events ({totalEvents})</span>
+              {isExpanded ? (
+                <ChevronDown className="w-4 h-4 ml-auto" />
+              ) : (
+                <ChevronRight className="w-4 h-4 ml-auto" />
+              )}
+            </h3>
+            {!isExpanded && (
+              <p className="text-sm text-amber-700 mt-1 truncate">
+                {eventNames}
+              </p>
+            )}
+          </div>
+          
+          {isExpanded && (
+            <div className="p-2">
+              {toolEvents.map((event, index) => (
+                <div key={index} className="mb-2 last:mb-0">
+                  <div className="flex items-start gap-3 bg-amber-25 text-amber-800 rounded-lg px-3 py-2 border-l-4 border-amber-400">
+                    <Wrench className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="font-medium text-amber-900 mb-1 text-sm">
+                        {event.tool_name || event.name || "Tool Processing"}
+                      </div>
+                      <div className="text-xs leading-relaxed whitespace-pre-wrap">
+                        {event.content || event.tool_response?.content || "Processing..."}
+                      </div>
+                      {event.status && (
+                        <div className="mt-1">
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            event.status === 'success' 
+                              ? 'bg-green-100 text-green-700' 
+                              : event.status === 'error' 
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {event.status}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -318,21 +421,22 @@ export function EnhancedChatMessages({
                     // Show tool result (like agent-chat-ui)
                     <ToolResult message={message} />
                   ) : (
-                    // Show AI message with inline tool calls (like agent-chat-ui)
+                    // Show AI message with tool calls BEFORE the message content
                     <>
+                      {/* Show tool calls FIRST (before AI message content) */}
+                      {hasToolCalls && message.tool_calls && (
+                        <ToolCalls toolCalls={message.tool_calls} />
+                      )}
+                      
+                      {/* Show AI message content with markdown rendering */}
                       {message.content && (
                         <div className="py-1">
                           <div className="p-3 bg-muted rounded-lg">
-                            <div className="prose prose-sm dark:prose-invert whitespace-pre-wrap">
-                              {message.content}
+                            <div className="prose prose-sm dark:prose-invert max-w-none">
+                              <ReactMarkdown>{message.content}</ReactMarkdown>
                             </div>
                           </div>
                         </div>
-                      )}
-                      
-                      {/* Show tool calls inline */}
-                      {hasToolCalls && message.tool_calls && (
-                        <ToolCalls toolCalls={message.tool_calls} />
                       )}
                     </>
                   )}
@@ -350,46 +454,17 @@ export function EnhancedChatMessages({
                   <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
                 </Avatar>
                 <div className="p-3 bg-muted rounded-lg">
-                  <div className="prose prose-sm dark:prose-invert">
-                    {incomingMessage}
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown>{incomingMessage}</ReactMarkdown>
                   </div>
                 </div>
               </div>
             </div>
           )}
           
-          {/* Display tool events like B-Bot Hub - separate from messages */}
+          {/* Display tool events like B-Bot Hub - separate from messages, now collapsible */}
           {toolEvents && toolEvents.length > 0 && (
-            <div className="my-2">
-              {toolEvents.map((event, index) => (
-                <div key={index} className="mx-4 my-2">
-                  <div className="flex items-start gap-3 bg-amber-50 text-amber-800 rounded-lg px-4 py-3 border-l-4 border-amber-400">
-                    <Wrench className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <div className="font-medium text-amber-900 mb-1">
-                        {event.tool_name || event.name || "Tool Processing"}
-                      </div>
-                      <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                        {event.content || event.tool_response?.content || "Processing..."}
-                      </div>
-                      {event.status && (
-                        <div className="mt-2">
-                          <span className={`text-xs px-2 py-1 rounded ${
-                            event.status === 'success' 
-                              ? 'bg-green-100 text-green-700' 
-                              : event.status === 'error' 
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-gray-100 text-gray-600'
-                          }`}>
-                            {event.status}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ToolEventsCollapsible toolEvents={toolEvents} />
           )}
           <div ref={messagesEndRef} />
         </>
