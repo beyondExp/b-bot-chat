@@ -132,7 +132,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     console.log(`[EmbedProxy] Checking for ADMIN_API_KEY. Is it set? ${!!process.env.ADMIN_API_KEY}`);
     const adminApiKey = process.env.ADMIN_API_KEY;
     console.log(`[EmbedProxy] ADMIN_API_KEY value (first 5 chars): ${adminApiKey?.substring(0, 5)}`);
-
+    console.log(`[EmbedProxy] ADMIN_API_KEY full value: ${adminApiKey}`);
 
     // Get the API key from environment variables (server-side only)
     // Use the same default as MainAPI if not configured
