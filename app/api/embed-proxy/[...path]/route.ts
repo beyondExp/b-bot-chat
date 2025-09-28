@@ -461,6 +461,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     console.log("[EmbedProxy] Response status:", response.status);
     console.log("[EmbedProxy] Response data type:", typeof data);
     console.log("[EmbedProxy] Response data length:", Array.isArray(data) ? data.length : "not an array");
+    console.log("[EmbedProxy] Response data:", JSON.stringify(data, null, 2));
     
     return Response.json(data, { status: response.status });
   } catch (error) {
