@@ -128,6 +128,9 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
   try {
     console.log("[EmbedProxy] Processing embed request");
 
+    // Add detailed logging to check for the environment variable
+    console.log(`[EmbedProxy] Checking for ADMIN_API_KEY. Is it set? ${!!process.env.ADMIN_API_KEY}`);
+
     // Get the API key from environment variables (server-side only)
     // Use the same default as MainAPI if not configured
     const apiKey = process.env.ADMIN_API_KEY || "your-super-secret-admin-key"
@@ -347,8 +350,8 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     headers.set("Content-Type", "application/json");
 
     // Configure headers for all proxied requests
-    console.log("[EmbedProxy] Using Admin API Key as Admin-API-Key header for embed request");
-    headers.set("Admin-API-Key", apiKey);
+    console.log("[EmbedProxy] Using Admin API Key as adminapikey header for embed request");
+    headers.set("adminapikey", apiKey);
 
     // Forward any existing Authorization header if present (for authenticated embed users)
     const authHeader = request.headers.get("Authorization")
@@ -359,7 +362,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
 
     // Optionally, log forwarded headers for debugging
     console.log("[EmbedProxy] Forwarding headers:", {
-      "Admin-API-Key": "***HIDDEN***",
+      "adminapikey": "***HIDDEN***",
       "Authorization": authHeader ? "***PRESENT***" : "none",
       "X-User-ID": headers.get("X-User-ID"),
     });
