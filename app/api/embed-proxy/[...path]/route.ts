@@ -326,16 +326,11 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     
     // For other requests, set up the target URL
     let url: URL
+    const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
+    url = new URL(`${mainApiUrl}/v2/${targetPath}`)
     if (isAssistantByIdRequest) {
-      // For individual assistant requests, use the public assistants endpoint
-      // We'll fetch all public assistants and filter client-side
-      const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
-      url = new URL(`${mainApiUrl}/v3/public/assistants`)
-      console.log("[EmbedProxy] Routing assistant by ID request to public assistants endpoint:", url);
+      console.log("[EmbedProxy] Routing assistant by ID request to single assistant endpoint:", url);
     } else {
-      // Handle other requests through MainAPI proxy to LangGraph  
-      const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
-      url = new URL(`${mainApiUrl}/v2/${targetPath}`)
       console.log("[EmbedProxy] Routing through MainAPI to LangGraph:", url);
     }
     
@@ -351,16 +346,9 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     // Always set Content-Type to application/json (or preserve original if needed)
     headers.set("Content-Type", "application/json");
 
-    // Configure headers based on request type
-    if (isAssistantByIdRequest) {
-      // For public assistant requests: use Admin API Key via X-API-Key header
-      console.log("[EmbedProxy] Using Admin API Key via X-API-Key for public assistant request");
-      headers.set("X-API-Key", apiKey);
-    } else {
-      // For other requests: use Admin API Key as bbot-api-key for MainAPI/LangGraph
-      console.log("[EmbedProxy] Using Admin API Key as bbot-api-key for embed request");
-      headers.set("bbot-api-key", apiKey);
-    }
+    // Configure headers for all proxied requests
+    console.log("[EmbedProxy] Using Admin API Key as bbot-api-key for embed request");
+    headers.set("bbot-api-key", apiKey);
 
     // Forward any Authorization header if present (for authenticated embed users)
     const authHeader = request.headers.get("Authorization")
@@ -371,8 +359,8 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
 
     // Optionally, log forwarded headers for debugging
     console.log("[EmbedProxy] Forwarding headers:", {
-      "bbot-api-key": !isAssistantByIdRequest ? "***HIDDEN***" : "none",
-      "X-API-Key": isAssistantByIdRequest ? "***HIDDEN***" : "none",
+      "bbot-api-key": "***HIDDEN***",
+      "X-API-Key": "none", // No longer using public assistants endpoint
       "X-User-ID": headers.get("X-User-ID"),
       "Authorization": authHeader ? "***PRESENT***" : "none",
     });
@@ -384,13 +372,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     let body = null
     let requestMethod = method
     
-    if (isAssistantByIdRequest) {
-      // Keep as GET request for public assistants endpoint
-      // We'll filter the results client-side by assistant ID
-      requestMethod = "GET"
-      body = null
-      console.log("[EmbedProxy] Using GET for public assistants, will filter results client-side");
-    } else if (method !== "GET" && method !== "HEAD") {
+    if (method !== "GET" && method !== "HEAD") {
       try {
         body = await request.json()
 
@@ -481,43 +463,6 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     console.log("[EmbedProxy] Response status:", response.status);
     console.log("[EmbedProxy] Response data type:", typeof data);
     console.log("[EmbedProxy] Response data length:", Array.isArray(data) ? data.length : "not an array");
-    
-    // Special handling for assistant by ID requests
-    if (isAssistantByIdRequest) {
-      const assistantIdMatch = targetPath.match(/^assistants\/([^\/]+)$/)
-      const requestedAssistantId = assistantIdMatch ? assistantIdMatch[1] : null
-      
-      console.log(`[EmbedProxy] Looking for assistant ID: ${requestedAssistantId}`);
-      console.log(`[EmbedProxy] Public assistants data:`, JSON.stringify(data, null, 2));
-      
-      if (requestedAssistantId && Array.isArray(data)) {
-        // Log all available assistant IDs for debugging
-        const availableIds = data.map(assistant => ({
-          assistant_id: assistant.assistant_id,
-          id: assistant.id,
-          name: assistant.name
-        }));
-        console.log("[EmbedProxy] Available assistant IDs:", availableIds);
-        
-        // Filter the public assistants list to find the requested one
-        const foundAssistant = data.find(assistant => 
-          assistant.assistant_id === requestedAssistantId || 
-          assistant.id === requestedAssistantId
-        );
-        
-        if (foundAssistant) {
-          console.log("[EmbedProxy] Found requested assistant in public list:", foundAssistant);
-          return Response.json(foundAssistant, { status: response.status });
-        } else {
-          console.log(`[EmbedProxy] Assistant ${requestedAssistantId} not found in public assistants list`);
-          console.log(`[EmbedProxy] Available IDs were:`, availableIds.map(a => a.assistant_id || a.id));
-          return Response.json({ error: "Assistant not found" }, { status: 404 });
-        }
-      } else {
-        console.log("[EmbedProxy] Invalid response format for public assistants:", data);
-        return Response.json({ error: "Invalid response format" }, { status: 500 });
-      }
-    }
     
     return Response.json(data, { status: response.status });
   } catch (error) {
