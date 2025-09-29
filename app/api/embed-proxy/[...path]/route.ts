@@ -198,7 +198,8 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       const targetUrl = `${LANGGRAPH_API_URL}/${pathSegments.join('/')}${request.nextUrl.search}`;
       
       const headers = new Headers(request.headers);
-      headers.set('x-api-key', ADMIN_API_KEY);
+      // Synapse expects Admin-API-Key for admin auth
+      headers.set('Admin-API-Key', apiKey);
       headers.delete('host');
       headers.delete('authorization');
 
