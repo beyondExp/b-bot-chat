@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 
 // Helper function to create anonymous threads for embed mode
-async function handleAnonymousThreadCreation() {
+async function handleAnonymousThreadCreation(request: NextRequest) {
   console.log("[EmbedProxy] Creating anonymous thread for embed mode");
   
   try {
@@ -17,14 +17,48 @@ async function handleAnonymousThreadCreation() {
     headers.set("X-User-ID", "anonymous-embed-user");
     headers.set("Admin-API-Key", apiKey);
     
+    // Try to extract assistant/agent and expert from the embed context
+    let agentId: string | undefined = undefined;
+    let expertId: string | undefined = undefined;
+    try {
+      // Prefer explicit headers if provided
+      const headerAgent = request.headers.get('x-embed-agent-id') || request.headers.get('x-assistant-id');
+      const headerExpert = request.headers.get('x-embed-expert-id') || request.headers.get('x-expert-id');
+
+      // Fallback to referer URL query params
+      const referer = request.headers.get('referer') || '';
+      if (referer) {
+        const refUrl = new URL(referer);
+        const qpAgent = refUrl.searchParams.get('agent') || refUrl.searchParams.get('assistantId') || undefined;
+        const qpExpert = refUrl.searchParams.get('expertId') || undefined;
+        agentId = (headerAgent || qpAgent || undefined) as string | undefined;
+        expertId = (headerExpert || qpExpert || undefined) as string | undefined;
+      } else {
+        agentId = headerAgent || undefined;
+        expertId = headerExpert || undefined;
+      }
+    } catch (e) {
+      console.log('[EmbedProxy] Failed to parse embed context for agent/expert:', e);
+    }
+
     // Create thread payload
-    const threadPayload = {
+    const threadPayload: any = {
       metadata: {
         anonymous: true,
         distributionChannel: { type: "Embed" },
         user_id: "anonymous-embed-user"
       }
     };
+
+    // Enrich metadata when available so Hub can later filter by expert_id
+    if (agentId) {
+      threadPayload.metadata.assistant_id = agentId;
+      threadPayload.metadata.agent_id = agentId;
+      threadPayload.metadata.entity_id = `anonymoususer_${agentId}`;
+    }
+    if (expertId) {
+      threadPayload.metadata.expert_id = isNaN(Number(expertId)) ? expertId : Number(expertId);
+    }
     
     console.log("[EmbedProxy] Creating thread in LangGraph with payload:", threadPayload);
     
@@ -156,7 +190,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     if (isThreadCreationRequest) {
       // For thread creation in embed mode, create anonymous threads locally
       console.log("[EmbedProxy] Handling anonymous thread creation for embed mode");
-      return handleAnonymousThreadCreation();
+      return handleAnonymousThreadCreation(request);
     }
 
     if (isThreadMetadataUpdateRequest) {
