@@ -30,6 +30,7 @@ export function useLangGraphService() {
             created_at: new Date().toISOString(),
             user_id: "anonymous",
             agent_id: "b-bot",
+            expert_id: data.expert_id,
             metadata: { anonymous: true },
           }
         }
