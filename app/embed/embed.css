@@ -54,10 +54,24 @@
 }
 
 /* iOS Safari safe area support and layout fixes for embed view */
+.embedded-chat .embed-input-wrapper {
+  flex-shrink: 0; /* Prevent wrapper from shrinking */
+  max-height: 300px; /* Constrain wrapper */
+  overflow: visible; /* Allow dropdowns to show */
+}
+
 .embedded-chat .chat-input-container {
   padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
   position: static !important; /* Override sticky positioning in embed */
   bottom: auto !important;
+  max-height: 280px; /* Prevent input container from growing */
+  overflow-y: auto; /* Allow scrolling if needed */
+}
+
+/* Constrain textarea in embed view */
+.embedded-chat .chat-input-container textarea {
+  max-height: 150px !important; /* Limit textarea growth on mobile */
+  overflow-y: auto !important; /* Enable scrolling in textarea */
 }
 
 /* Ensure messages area is scrollable and fills space correctly */
@@ -69,15 +83,50 @@
   /* Remove conflicting flex properties */
 }
 
+/* Constrain header height - use class selector for reliability */
+.embedded-chat .embed-header {
+  flex-shrink: 0; /* Header should not shrink */
+  min-height: 64px; /* Minimum header height */
+  max-height: 80px; /* Prevent header from growing */
+}
+
+/* Ensure middle container (messages + input) uses remaining space */
+.embedded-chat > div:nth-child(2) {
+  flex: 1;
+  min-height: 0; /* Important for flex children with overflow */
+  max-height: 100%; /* Prevent from exceeding container */
+  overflow: hidden;
+}
+
 /* Fix for mobile layout */
 @media (max-width: 640px) {
   .embedded-chat {
     height: 100vh;
     height: 100dvh;
+    position: fixed; /* Fix layout on mobile */
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+  }
+  
+  .embedded-chat .embed-input-wrapper {
+    max-height: 220px; /* Even stricter limit on mobile */
   }
   
   .embedded-chat .chat-input-container {
     position: relative;
     bottom: auto;
+    max-height: 200px; /* Even stricter limit on mobile */
+  }
+  
+  .embedded-chat .chat-input-container textarea {
+    max-height: 100px !important; /* Stricter limit on mobile - about 4 lines */
+  }
+  
+  /* Ensure header is visible on mobile */
+  .embedded-chat .embed-header {
+    max-height: 64px;
   }
 }

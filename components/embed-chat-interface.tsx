@@ -1001,7 +1001,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           />
         </div>
         
-        <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700">
+        <div className="embed-input-wrapper flex-shrink-0 border-t border-gray-200 dark:border-gray-700">
           <ChatInput
             onSubmit={handleFormSubmit}
             isLoading={thread.isLoading}
