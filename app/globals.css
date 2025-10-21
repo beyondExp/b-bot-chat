@@ -1697,7 +1697,6 @@
 /* Mobile-specific improvements for chat input */
 @media (max-width: 640px) {
   .chat-input-container {
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
     position: sticky;
     bottom: 0;
     background-color: hsl(var(--background));

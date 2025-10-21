@@ -580,6 +580,11 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
+      
+      // Add manual blacklist to apps if in Embed mode (in addition to automatic blacklisting)
+      // This allows for custom blacklist overrides per app
+      // Example: mergedApps["knowledge_companyinfoludemedia"].blacklist = ["edit_line_knowledge_companyinfoludemedia"]
+      // Note: Automatic blacklisting for Embed mode is already handled by the backend
 
       // Create the new message
       const newMessage: Message = {
@@ -609,6 +614,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           top_p: 1.0,
           instructions: "Be helpful and concise.",
           apps: mergedApps,
+              distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
           },
           streamMode: ["messages", "updates"], // Use messages/updates for proper event streaming like B-Bot Hub
@@ -784,6 +790,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               top_p: 1.0,
               instructions: "Be helpful and concise.",
               apps: mergedApps,
+              distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
           },
           metadata: {
@@ -884,6 +891,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               top_p: 1.0,
               instructions: "Be helpful and concise.",
               apps: mergedApps,
+              distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
           },
           metadata: {
@@ -936,15 +944,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background" style={{ maxHeight: '100vh', overflow: 'hidden' }}>
+    <div className="flex flex-col h-screen bg-background embedded-chat">
       <EmbedChatHeader
         agentName={agentObj?.name}
         onNewChat={handleNewChat}
         onShowHistory={() => setShowHistory(true)}
       />
       
-      <div className="flex-1 min-h-0 flex flex-col">
-        <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
           <EnhancedChatMessages
             messages={useMemo(() => {
               // Always use the branch manager as the source of truth when it has data
@@ -993,7 +1001,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           />
         </div>
         
-        <div className="bg-background border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700">
           <ChatInput
             onSubmit={handleFormSubmit}
             isLoading={thread.isLoading}

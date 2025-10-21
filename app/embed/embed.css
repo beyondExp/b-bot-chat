@@ -1,8 +1,13 @@
 .embedded-chat {
   margin: 0;
   padding: 0;
-  height: 100%;
+  height: 100vh;
+  height: 100dvh; /* Use dynamic viewport height for mobile browsers */
+  max-height: 100vh;
+  max-height: 100dvh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .embed-container {
@@ -19,4 +24,60 @@
   flex-direction: column;
   height: 100%;
   padding: 1rem;
+}
+
+/* Ensure links are blue in embed view */
+.embedded-chat a,
+.embed-container a,
+.chat-container a {
+  color: #2563eb !important;
+  text-decoration: underline !important;
+}
+
+.embedded-chat a:hover,
+.embed-container a:hover,
+.chat-container a:hover {
+  color: #1d4ed8 !important;
+}
+
+/* Dark mode link styling */
+.dark .embedded-chat a,
+.dark .embed-container a,
+.dark .chat-container a {
+  color: #60a5fa !important;
+}
+
+.dark .embedded-chat a:hover,
+.dark .embed-container a:hover,
+.dark .chat-container a:hover {
+  color: #93c5fd !important;
+}
+
+/* iOS Safari safe area support and layout fixes for embed view */
+.embedded-chat .chat-input-container {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  position: static !important; /* Override sticky positioning in embed */
+  bottom: auto !important;
+}
+
+/* Ensure messages area is scrollable and fills space correctly */
+.embedded-chat .chat-messages {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+  /* Remove conflicting flex properties */
+}
+
+/* Fix for mobile layout */
+@media (max-width: 640px) {
+  .embedded-chat {
+    height: 100vh;
+    height: 100dvh;
+  }
+  
+  .embedded-chat .chat-input-container {
+    position: relative;
+    bottom: auto;
+  }
 }

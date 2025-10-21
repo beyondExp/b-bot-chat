@@ -47,8 +47,8 @@ self.addEventListener("activate", (event) => {
 
 // Serve cached content when offline
 self.addEventListener("fetch", (event) => {
-  // Skip caching for API requests
-  if (event.request.url.includes("/api/")) {
+  // Skip caching for API requests and non-GET requests
+  if (event.request.url.includes("/api/") || event.request.method !== "GET") {
     return
   }
 
@@ -70,8 +70,10 @@ self.addEventListener("fetch", (event) => {
           const responseToCache = response.clone()
 
           caches.open(CACHE_NAME).then((cache) => {
-            // Don't cache API requests or auth endpoints
-            if (!event.request.url.includes("/api/") && !event.request.url.includes("/auth/")) {
+            // Don't cache API requests, auth endpoints, or non-GET requests
+            if (!event.request.url.includes("/api/") && 
+                !event.request.url.includes("/auth/") && 
+                event.request.method === "GET") {
               cache.put(event.request, responseToCache)
             }
           })

@@ -43,6 +43,7 @@
     "@radix-ui/react-tooltip": "1.1.6",
     "@stripe/react-stripe-js": "latest",
     "@stripe/stripe-js": "latest",
+    "@tailwindcss/typography": "^0.5.19",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

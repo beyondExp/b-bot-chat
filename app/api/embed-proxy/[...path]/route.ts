@@ -367,15 +367,15 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     // For other requests, set up the target URL
     let url: URL
     if (isAssistantByIdRequest) {
-      // For individual assistant requests, use the new specific assistant endpoint via MainAPI
+      // For individual assistant requests, use the new specific assistant endpoint
       const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
       url = new URL(`${mainApiUrl}/v3/public/assistants/${pathSegments[1]}`)
       console.log("[EmbedProxy] Routing assistant by ID request to specific assistant endpoint:", url);
     } else {
-      // For other requests (threads, etc), route DIRECTLY to LangGraph (not through MainAPI)
-      const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app"
-      url = new URL(`${langGraphApiUrl}/${targetPath}`)
-      console.log("[EmbedProxy] Routing directly to LangGraph:", url);
+      // Handle other requests through MainAPI proxy to LangGraph  
+      const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
+      url = new URL(`${mainApiUrl}/v2/${targetPath}`)
+      console.log("[EmbedProxy] Routing through MainAPI to LangGraph:", url);
     }
     
     // Copy query parameters
@@ -390,17 +390,9 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     // Always set Content-Type to application/json (or preserve original if needed)
     headers.set("Content-Type", "application/json");
 
-    // Configure headers based on target
-    if (isAssistantByIdRequest) {
-      // For MainAPI requests, use X-API-Key
-      console.log("[EmbedProxy] Using Admin API Key as X-API-Key header for MainAPI request");
-      headers.set("X-API-Key", apiKey);
-    } else {
-      // For direct LangGraph requests, use Admin-API-Key
-      console.log("[EmbedProxy] Using Admin API Key as Admin-API-Key header for LangGraph request");
-      headers.set("Admin-API-Key", apiKey);
-      headers.set("X-User-ID", "anonymous-embed-user");
-    }
+    // Configure headers for all proxied requests
+    console.log("[EmbedProxy] Using Admin API Key as X-API-Key header for embed request");
+    headers.set("X-API-Key", apiKey);
 
     // Forward any existing Authorization header if present (for authenticated embed users)
     const authHeader = request.headers.get("Authorization")
