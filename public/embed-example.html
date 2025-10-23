@@ -74,6 +74,8 @@
         <li><code>agent</code> - The AI agent to use (e.g., bbot, open_deep_research, retrieval_graph)</li>
         <li><code>embedId</code> - Unique identifier for this embed instance (required for multiple embeds)</li>
         <li><code>user_id</code> - Optional user identifier for personalized chat history</li>
+        <li><code>color</code> - Custom color for buttons and user messages (hex color, e.g., #2563eb)</li>
+        <li><code>dark</code> - Enable dark mode (true or 1). Defaults to light mode if not specified</li>
       </ul>
       
       <div class="multi-embed-note">
@@ -90,8 +92,11 @@
       
       <h3>Example URLs</h3>
       <ul>
-        <li><code>?agent=bbot&embedId=support-chat</code> - Default B-Bot for customer support</li>
-        <li><code>?agent=open_deep_research&embedId=research-assistant</code> - Research agent</li>
+        <li><code>?agent=bbot&embedId=support-chat</code> - Default B-Bot (light mode)</li>
+        <li><code>?agent=bbot&embedId=support-chat&dark=true</code> - Dark mode enabled</li>
+        <li><code>?agent=bbot&embedId=support-chat&dark=1</code> - Dark mode enabled (alternative)</li>
+        <li><code>?agent=bbot&embedId=support-chat&color=%23ff6b6b</code> - Custom red color (light mode)</li>
+        <li><code>?agent=open_deep_research&embedId=research-assistant&dark=true&color=%234ecdc4</code> - Research agent with dark mode and custom color</li>
         <li><code>?agent=retrieval_graph&embedId=doc-search&user_id=user123</code> - Document search with user ID</li>
       </ul>
     </div>

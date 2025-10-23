@@ -53,6 +53,21 @@
   color: #93c5fd !important;
 }
 
+/* Dark mode support for embed view */
+.dark .embedded-chat {
+  background-color: hsl(0 0% 3.9%);
+  color: hsl(0 0% 98%);
+}
+
+.dark .embed-header {
+  background-color: hsl(0 0% 3.9% / 0.95);
+  border-color: hsl(0 0% 14.9%);
+}
+
+.dark .embed-input-wrapper {
+  border-color: hsl(0 0% 14.9%);
+}
+
 /* iOS Safari safe area support and layout fixes for embed view */
 .embedded-chat .embed-input-wrapper {
   flex-shrink: 0; /* Prevent wrapper from shrinking */

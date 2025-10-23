@@ -51,9 +51,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const [waitingForEditResponse, setWaitingForEditResponse] = useState<{messageIndex: number, originalContent: string} | null>(null);
   const [branchRefreshKey, setBranchRefreshKey] = useState(0);
 
-  // Get streaming and color from query params
+  // Get streaming, color, and dark mode from query params
   let streaming = true;
   let userColor = '#2563eb'; // default blue
+  let darkMode = false;
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
     if (params.has('streaming')) {
@@ -62,7 +63,24 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     if (params.has('color')) {
       userColor = params.get('color') || userColor;
     }
+    // Only enable dark mode if explicitly passed as 'true' or '1'
+    if (params.has('dark')) {
+      const darkValue = params.get('dark');
+      darkMode = darkValue === 'true' || darkValue === '1';
+    }
   }
+  
+  // Apply dark mode class to root element
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const html = document.documentElement;
+      if (darkMode) {
+        html.classList.add('dark');
+      } else {
+        html.classList.remove('dark');
+      }
+    }
+  }, [darkMode]);
 
   const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
 
@@ -949,6 +967,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         agentName={agentObj?.name}
         onNewChat={handleNewChat}
         onShowHistory={() => setShowHistory(true)}
+        userColor={userColor}
       />
       
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
