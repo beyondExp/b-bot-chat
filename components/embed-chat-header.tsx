@@ -3,12 +3,14 @@
 import React from 'react'
 import { Button } from '@/components/ui/button'
 import { Plus, History, Bot } from 'lucide-react'
+import * as LucideIcons from 'lucide-react'
 
 interface EmbedChatHeaderProps {
   agentName?: string
   onNewChat: () => void
   onShowHistory: () => void
   userColor?: string
+  headerIcon?: string
 }
 
 // Helper to determine readable text color
@@ -28,12 +30,33 @@ export function EmbedChatHeader({
   agentName,
   onNewChat,
   onShowHistory,
-  userColor = '#2563eb'
+  userColor = '#2563eb',
+  headerIcon = 'bot'
 }: EmbedChatHeaderProps) {
+  // Get the icon component dynamically from Lucide
+  const getIconComponent = (iconName: string) => {
+    if (!iconName) return Bot;
+    
+    // Convert kebab-case to PascalCase (e.g., 'message-circle' -> 'MessageCircle')
+    const iconKey = iconName
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join('');
+    
+    // Get the icon from lucide-react
+    const IconComponent = (LucideIcons as any)[iconKey];
+    return IconComponent || Bot; // Fallback to Bot if icon not found
+  };
+  
+  const IconComponent = getIconComponent(headerIcon);
+  
   return (
     <div className="embed-header flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex-shrink-0">
       <div className="flex items-center gap-2">
-        <Bot className="h-5 w-5 text-primary" />
+        <IconComponent 
+          className="h-5 w-5" 
+          style={{ color: userColor }}
+        />
         <h1 className="font-semibold text-lg">
           {agentName || 'Chat Assistant'}
         </h1>

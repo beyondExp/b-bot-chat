@@ -968,6 +968,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         onNewChat={handleNewChat}
         onShowHistory={() => setShowHistory(true)}
         userColor={userColor}
+        headerIcon={agentObj?.metadata?.headerIcon || 'bot'}
       />
       
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
