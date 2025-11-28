@@ -369,7 +369,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     if (isAssistantByIdRequest) {
       // For individual assistant requests, use the new specific assistant endpoint
       const mainApiUrl = process.env.MAIN_API_URL || "https://api.b-bot.space/api"
-      url = new URL(`${mainApiUrl}/v3/public/assistants/${pathSegments[1]}`)
+      url = new URL(`${mainApiUrl}/v3/public/distribution-channels/${pathSegments[1]}`)
       console.log("[EmbedProxy] Routing assistant by ID request to MainAPI:", url);
     } else {
       // Handle other requests through MainAPI proxy to LangGraph  
