@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@ai-sdk/react':
-        specifier: latest
+        specifier: ^1.2.12
         version: 1.2.12(react@19.0.0)(zod@3.24.1)
       '@auth0/auth0-react':
         specifier: latest
