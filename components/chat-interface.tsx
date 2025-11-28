@@ -576,60 +576,78 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           // Get output modalities directly from agent config
           const outputModalities = config.output_modalities || [];
 
+          // EXCEPTION: For the BBot Platform assistant ("bbot" or "b-bot"), we ALWAYS enable TTS by default
+          const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
+          const defaultBBotTTS = [{
+            type: "tts",
+            model_name: "elevenlabs/eleven_turbo_v2_5",
+            voice: "nPczCjzI2devNBz1zQrb",
+            auto_play: true,
+            streaming: true,
+            provider: "elevenlabs",
+            api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
+            user_provider_key_id: 29,
+            speed: 1
+          }];
+          
+          const finalOutputModalities = (isBBot && outputModalities.length === 0) 
+            ? defaultBBotTTS 
+            : outputModalities;
+
           // Create the new message
-      const newMessage = {
-        id: `msg-${Date.now()}`,
-        role: "user" as const,
-        content: messageContent,
-      };
+          const newMessage = {
+            id: `msg-${Date.now()}`,
+            role: "user" as const,
+            content: messageContent,
+          };
 
-      // Get current conversation history and ensure tool calls have responses (like agent-chat-ui)
-      const currentMessages = thread.messages || []
-      
-      // Ensure tool calls have responses before adding new message (like agent-chat-ui)
-      const toolMessages: any[] = [] // ensureToolCallsHaveResponses(currentMessages)
-      const allMessages = [...toolMessages, newMessage]
+          // Get current conversation history and ensure tool calls have responses (like agent-chat-ui)
+          const currentMessages = thread.messages || []
+          
+          // Ensure tool calls have responses before adding new message (like agent-chat-ui)
+          const toolMessages: any[] = [] // ensureToolCallsHaveResponses(currentMessages)
+          const allMessages = [...toolMessages, newMessage]
 
-      console.log('[Chat] Submitting with message history:', allMessages.length, 'messages')
-      console.log('[Chat] Current apiKey for submission:', apiKey ? 'present' : 'undefined')
-      console.log('[Chat] Can initialize stream:', canInitializeStream)
+          console.log('[Chat] Submitting with message history:', allMessages.length, 'messages')
+          console.log('[Chat] Current apiKey for submission:', apiKey ? 'present' : 'undefined')
+          console.log('[Chat] Can initialize stream:', canInitializeStream)
 
-      // Submit using LangGraph's useStream (like agent-chat-ui)
-      thread.submit(
-        { 
-          messages: allMessages,
-          entity_id: entityId,
-          user_id: userId,
-          agent_id: agentId
-        },
-        {
-          config: {
-            configurable: {
-              agent_id: agentId,
-              user_id: userId,
+          // Submit using LangGraph's useStream (like agent-chat-ui)
+          thread.submit(
+            { 
+              messages: allMessages,
               entity_id: entityId,
-              temperature: 0.7,
-              top_p: 1.0,
-              instructions: "Be helpful and concise.",
-              apps: mergedApps,
-              input_modalities: [],
-              output_modalities: outputModalities, // Use agent's configured TTS output modalities
+              user_id: userId,
+              agent_id: agentId
+            },
+            {
+              config: {
+                configurable: {
+                  agent_id: agentId,
+                  user_id: userId,
+                  entity_id: entityId,
+                  temperature: 0.7,
+                  top_p: 1.0,
+                  instructions: "Be helpful and concise.",
+                  apps: mergedApps,
+                  input_modalities: [],
+                  output_modalities: finalOutputModalities, // Use configured or default BBot modalities
+                }
+              },
+              streamMode: ["values", "messages", "updates", "custom"], // Full stream modes
+              optimisticValues: (prev) => ({
+                ...prev,
+                messages: [
+                  ...(prev.messages ?? []),
+                  ...toolMessages,
+                  newMessage,
+                ] as any,
+                entity_id: entityId,
+                user_id: userId,
+                agent_id: agentId,
+              }),
             }
-          },
-          streamMode: ["values", "messages", "updates", "custom"], // Full stream modes
-          optimisticValues: (prev) => ({
-            ...prev,
-            messages: [
-              ...(prev.messages ?? []),
-              ...toolMessages,
-              newMessage,
-            ] as any,
-            entity_id: entityId,
-            user_id: userId,
-            agent_id: agentId,
-          }),
-        }
-      );
+          );
 
       console.log('[Chat] Message submitted to stream');
     } catch (error) {
@@ -683,6 +701,24 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           // Get output modalities directly from agent config
           const outputModalities = config.output_modalities || [];
 
+          // EXCEPTION: For the BBot Platform assistant ("bbot" or "b-bot"), we ALWAYS enable TTS by default
+          const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
+          const defaultBBotTTS = [{
+            type: "tts",
+            model_name: "elevenlabs/eleven_turbo_v2_5",
+            voice: "nPczCjzI2devNBz1zQrb",
+            auto_play: true,
+            streaming: true,
+            provider: "elevenlabs",
+            api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
+            user_provider_key_id: 29,
+            speed: 1
+          }];
+          
+          const finalOutputModalities = (isBBot && outputModalities.length === 0) 
+            ? defaultBBotTTS 
+            : outputModalities;
+
           // Convert blob to base64 data URL (keep as webm)
       const reader = new FileReader();
       const base64DataUrl = await new Promise<string>((resolve, reject) => {
@@ -717,30 +753,30 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         duration
       })
 
-      // Submit using LangGraph's useStream with audio modality
-      // 🎤 Use audio-capable model for voice messages
-      thread.submit(
-        { 
-          messages: allMessages,
-          entity_id: entityId,
-          user_id: userId,
-          agent_id: agentId
-        },
-        {
-          config: {
-            configurable: {
-              agent_id: agentId,
-              user_id: userId,
+          // Submit using LangGraph's useStream with audio modality
+          // 🎤 Use audio-capable model for voice messages
+          thread.submit(
+            { 
+              messages: allMessages,
               entity_id: entityId,
-              response_model: "openai/gpt-4o-mini", // Testing with gpt-4o-mini
-              temperature: 0.7,
-              top_p: 1.0,
-              instructions: "Be helpful and concise.",
-              apps: mergedApps,
-              input_modalities: [], // No special input modalities needed (audio is in content)
-              output_modalities: outputModalities, // Use agent's configured TTS output modalities
-            }
-          },
+              user_id: userId,
+              agent_id: agentId
+            },
+            {
+              config: {
+                configurable: {
+                  agent_id: agentId,
+                  user_id: userId,
+                  entity_id: entityId,
+                  response_model: "openai/gpt-4o-mini", // Testing with gpt-4o-mini
+                  temperature: 0.7,
+                  top_p: 1.0,
+                  instructions: "Be helpful and concise.",
+                  apps: mergedApps,
+                  input_modalities: [], // No special input modalities needed (audio is in content)
+                  output_modalities: finalOutputModalities, // Use configured or default BBot modalities
+                }
+              },
           streamMode: ["values", "messages", "updates", "custom"], // Full stream modes
           optimisticValues: (prev) => ({
             ...prev,
@@ -913,13 +949,23 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       // Strictly use what's in the config, do not default to adding TTS if not present
       const outputModalities = config.output_modalities || []
       
-      // If no TTS output modality, add default ElevenLabs only if explicitly needed/fallback
-      // BUT user requested: "we should pass the modalitites the distributionChannel has"
-      // So we should strictly respect `outputModalities`. 
-      // However, the previous code was adding a default. 
-      // If `outputModalities` is empty, we pass empty array to disable TTS.
+      // EXCEPTION: For the BBot Platform assistant ("bbot" or "b-bot"), we ALWAYS enable TTS by default
+      const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
+      const defaultBBotTTS = [{
+        type: "tts",
+        model_name: "elevenlabs/eleven_turbo_v2_5",
+        voice: "nPczCjzI2devNBz1zQrb",
+        auto_play: true,
+        streaming: true,
+        provider: "elevenlabs",
+        api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
+        user_provider_key_id: 29,
+        speed: 1
+      }];
       
-      const finalOutputModalities = outputModalities;
+      const finalOutputModalities = (isBBot && outputModalities.length === 0) 
+        ? defaultBBotTTS 
+        : outputModalities;
 
       // Submit to LangGraph stream
       await thread.submit({
