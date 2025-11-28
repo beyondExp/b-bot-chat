@@ -566,27 +566,17 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const agentId = selectedAgent || "bbot";
       const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
 
-      // Merge assistant apps with user apps (user apps take precedence)
-      const agentObj = agents.find((a: any) => a.id === selectedAgent);
-      const assistantApps = agentObj?.rawData?.config?.apps || {};
-      const userApps = {};
-      const mergedApps = { ...assistantApps, ...userApps };
-      
-      // Get output modalities from agent config, or use default TTS for standard B-Bot
-      const outputModalities = agentObj?.rawData?.config?.output_modalities || [
-        {
-          type: "tts",
-          model_name: "elevenlabs/eleven_turbo_v2_5",
-          voice: "nPczCjzI2devNBz1zQrb",
-          auto_play: true,
-          provider: "elevenlabs",
-          speed: 1,
-          streaming: true,
-          api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18"
-        }
-      ];
+          // Merge assistant apps with user apps (user apps take precedence)
+          const agentObj = agents.find((a: any) => a.id === selectedAgent);
+          const assistantApps = agentObj?.rawData?.config?.apps || {};
+          const userApps = {};
+          const mergedApps = { ...assistantApps, ...userApps };
+          const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
+          
+          // Get output modalities directly from agent config
+          const outputModalities = config.output_modalities || [];
 
-      // Create the new message
+          // Create the new message
       const newMessage = {
         id: `msg-${Date.now()}`,
         role: "user" as const,
@@ -683,27 +673,17 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const agentId = selectedAgent || "bbot";
       const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
 
-      // Merge assistant apps with user apps and get modalities
-      const agentObj = agents.find((a: any) => a.id === selectedAgent);
-      const assistantApps = agentObj?.rawData?.config?.apps || {};
-      const userApps = {};
-      const mergedApps = { ...assistantApps, ...userApps };
-      
-      // Get output modalities from agent config, or use default TTS for standard B-Bot
-      const outputModalities = agentObj?.rawData?.config?.output_modalities || [
-        {
-          type: "tts",
-          model_name: "elevenlabs/eleven_turbo_v2_5",
-          voice: "nPczCjzI2devNBz1zQrb",
-          auto_play: true,
-          provider: "elevenlabs",
-          speed: 1,
-          streaming: true,
-          api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18"
-        }
-      ];
+          // Merge assistant apps with user apps and get modalities
+          const agentObj = agents.find((a: any) => a.id === selectedAgent);
+          const assistantApps = agentObj?.rawData?.config?.apps || {};
+          const userApps = {};
+          const mergedApps = { ...assistantApps, ...userApps };
+          const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
+          
+          // Get output modalities directly from agent config
+          const outputModalities = config.output_modalities || [];
 
-      // Convert blob to base64 data URL (keep as webm)
+          // Convert blob to base64 data URL (keep as webm)
       const reader = new FileReader();
       const base64DataUrl = await new Promise<string>((resolve, reject) => {
         reader.onloadend = () => resolve(reader.result as string);
@@ -927,32 +907,27 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       // Get agent configuration
       const agentObj = agents.find((a: any) => a.id === selectedAgent)
       const rawData = agentObj?.rawData || {}
+      const config = rawData.config || rawData.metadata?.config || {}
 
       // Extract output modalities from agent config
-      const outputModalities = rawData.config?.output_modalities || []
+      // Strictly use what's in the config, do not default to adding TTS if not present
+      const outputModalities = config.output_modalities || []
       
-      // If no TTS output modality, add default ElevenLabs
-      const finalOutputModalities = outputModalities.length > 0 
-        ? outputModalities 
-        : [{
-            type: "tts",
-            model_name: "elevenlabs/eleven_turbo_v2_5",
-            voice: "nPczCjzI2devNBz1zQrb",
-            auto_play: true,
-            streaming: true,
-            provider: "elevenlabs",
-            api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
-            user_provider_key_id: 29,
-            speed: 1
-          }]
+      // If no TTS output modality, add default ElevenLabs only if explicitly needed/fallback
+      // BUT user requested: "we should pass the modalitites the distributionChannel has"
+      // So we should strictly respect `outputModalities`. 
+      // However, the previous code was adding a default. 
+      // If `outputModalities` is empty, we pass empty array to disable TTS.
+      
+      const finalOutputModalities = outputModalities;
 
       // Submit to LangGraph stream
       await thread.submit({
         messages: [newMessage],
-        ...rawData.config,
+        ...config,
         configurable: {
-          ...rawData.config?.configurable,
-          input_modalities: rawData.config?.input_modalities || [],
+          ...config.configurable,
+          input_modalities: config.input_modalities || [],
           output_modalities: finalOutputModalities,
           streamMode: ["values", "messages", "updates", "custom"]
         }
@@ -1192,6 +1167,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onSearchMessages={handleSearchMessages}
           agentName={selectedAgentData?.name || "B-Bot"}
           agentAvatar={selectedAgentData?.profileImage || "/helpful-robot.png"}
+          agentData={selectedAgentData}
+          hasMessages={thread.messages && thread.messages.length > 0}
         />
 
         {/* Message Search Bar */}

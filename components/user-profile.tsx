@@ -40,10 +40,10 @@ export function UserProfile() {
     return (
       <button
         onClick={() => loginWithRedirect()}
-        className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+        className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-muted transition-colors"
+        title="Sign In"
       >
-        <LogIn size={16} />
-        <span>Sign In</span>
+        <LogIn size={20} className="text-muted-foreground hover:text-primary" />
       </button>
     )
   }

@@ -44,7 +44,15 @@ export function useAgents() {
       console.log("Response from public assistants:", data)
 
       // Transform the API response into our Agent format
-      const agents = Array.isArray(data) ? data.map(transformApiAssistantToAgent) : []
+      const agents = Array.isArray(data) 
+        ? data.map(transformApiAssistantToAgent)
+            // Filter only agents with "Chat" distribution channel type
+            // Or those without a distribution channel type (legacy compatibility if needed)
+            .filter(agent => {
+              const distType = agent.metadata?.distributionChannel?.type;
+              return distType === 'Chat' || !distType; // Keep Chat or unspecified, filter out Embed/Template unless specifically intended
+            })
+        : []
 
       // Mark agents published by the current user
       if (user && user.sub) {
