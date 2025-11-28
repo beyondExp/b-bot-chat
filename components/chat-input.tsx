@@ -3,12 +3,15 @@
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Loader2 } from "lucide-react"
+import { Send, Loader2, Mic, Trash2 } from "lucide-react"
+import { useVoiceRecorder } from "@/hooks/use-voice-recorder"
 import type React from "react"
 import type { FormEvent } from "react"
+import { toast } from "sonner"
 
 interface ChatInputProps {
   onSubmit: (e: React.FormEvent<HTMLFormElement>, input: string) => void
+  onVoiceMessage?: (audioBlob: Blob, transcription: string, duration: number) => void
   isLoading: boolean
   selectedAgent: string | null
   agentName?: string
@@ -32,10 +35,23 @@ interface App {
   isConnected: boolean
 }
 
-export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName, userColor = '#2563eb' }: ChatInputProps) {
+export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, agentName, userColor = '#2563eb' }: ChatInputProps) {
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Voice recording
+  const {
+    isRecording,
+    recordingTime,
+    audioBlob,
+    startRecording,
+    stopRecording,
+    cancelRecording,
+    error: recordingError
+  } = useVoiceRecorder()
+
+  const [isSendingVoice, setIsSendingVoice] = useState(false)
 
   const [isAudioMode, setIsAudioMode] = useState(false)
   const [showAbilities, setShowAbilities] = useState(false)
@@ -230,50 +246,181 @@ export function ChatInput({ onSubmit, isLoading, selectedAgent, agentName, userC
     }
   }
 
+  // Show recording error
+  useEffect(() => {
+    if (recordingError) {
+      toast.error(recordingError)
+    }
+  }, [recordingError])
+
+  // Handle audio blob after recording stops
+  useEffect(() => {
+    if (audioBlob && !isRecording) {
+      handleSendVoiceMessage(audioBlob, recordingTime)
+    }
+  }, [audioBlob, isRecording])
+
+  // Handle voice message sending (send audio directly as modality)
+  const handleSendVoiceMessage = async (blob: Blob, duration: number) => {
+    setIsSendingVoice(true)
+    try {
+      console.log('[ChatInput] Sending voice message as audio modality:', { duration, size: blob.size })
+
+      // Call the voice message callback to send audio directly
+      if (onVoiceMessage) {
+        await onVoiceMessage(blob, '', duration) // No transcription needed
+        toast.success('Voice message sent!')
+      } else {
+        toast.error('Voice message handling not available')
+      }
+    } catch (error) {
+      console.error('[ChatInput] Error sending voice message:', error)
+      toast.error('Failed to send voice message')
+    } finally {
+      setIsSendingVoice(false)
+    }
+  }
+
+  // Start recording
+  const handleStartRecording = async () => {
+    try {
+      await startRecording()
+    } catch (err) {
+      console.error('Failed to start recording:', err)
+      toast.error('Failed to start recording. Please check microphone permissions.')
+    }
+  }
+
+  // Stop recording and send
+  const handleStopAndSend = () => {
+    stopRecording()
+  }
+
+  // Cancel recording
+  const handleCancelRecording = () => {
+    cancelRecording()
+  }
+
+  // Format time as MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }
+
   const placeholderName = agentName || selectedAgent || "Assistant"
 
   return (
     <div className="chat-input-container p-4 sticky bottom-0 bg-background z-10">
       <form onSubmit={handleSubmit} className="w-full max-w-4xl mx-auto">
-        {/* ChatGPT-style rounded input container */}
-        <div className="relative flex items-end bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 focus-within:ring-2 focus-within:ring-offset-0 focus-within:ring-primary">
-          {/* Main input area */}
-          <div className="flex-1 min-w-0">
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={`Message ${placeholderName}`}
-              className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent px-4 py-3 text-base placeholder:text-gray-500 focus:outline-none focus:ring-0"
-              disabled={isLoading}
-              style={{ 
-                lineHeight: '1.5',
-                paddingRight: '60px' // Space for send button
-              }}
-            />
-          </div>
-          
-          {/* Send button integrated inside the input */}
-          <div className="absolute right-2 bottom-2">
+        {isRecording ? (
+          /* Full-width recording UI */
+          <div className="relative flex items-center bg-red-50 dark:bg-red-950/20 rounded-3xl border border-red-200 dark:border-red-900 px-4 py-3 min-h-[52px]">
+            {/* Cancel Button */}
             <Button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              size="sm"
-              className={`w-10 h-10 rounded-full p-0 transition-all duration-200 ${
-                input.trim() && !isLoading
-                  ? 'bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-gray-900'
-                  : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-              }`}
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={handleCancelRecording}
+              disabled={isSendingVoice}
+              className="h-10 w-10 flex-shrink-0 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400"
             >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+              <Trash2 className="h-5 w-5" />
+            </Button>
+
+            {/* Recording Indicator & Waveform - Takes full space */}
+            <div className="flex items-center gap-3 flex-1 px-3">
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
+                <span className="text-sm font-medium text-red-600 dark:text-red-400 min-w-[45px]">
+                  {formatTime(recordingTime)}
+                </span>
+              </div>
+              
+              {/* Full-width waveform animation */}
+              <div className="flex items-center gap-[3px] h-10 flex-1">
+                {Array.from({ length: 50 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="flex-1 bg-red-400 dark:bg-red-500 rounded-full animate-pulse min-w-[2px]"
+                    style={{
+                      height: `${Math.random() * 60 + 40}%`,
+                      animationDelay: `${i * 0.02}s`,
+                      animationDuration: '0.8s'
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Send Button */}
+            <Button
+              type="button"
+              size="icon"
+              onClick={handleStopAndSend}
+              disabled={isSendingVoice}
+              className="h-10 w-10 flex-shrink-0 rounded-full bg-green-600 hover:bg-green-700 text-white dark:bg-green-600 dark:hover:bg-green-700"
+            >
+              {isSendingVoice ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
-                <Send className="w-4 h-4" />
+                <Send className="h-5 w-5" />
               )}
             </Button>
           </div>
-        </div>
+        ) : (
+          /* Normal input UI */
+          <div className="relative flex items-center bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 focus-within:shadow-lg">
+            {/* Main input area */}
+            <div className="flex-1 min-w-0">
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={`Message ${placeholderName}`}
+                className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent px-4 py-3 text-base placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                disabled={isLoading}
+                style={{ 
+                  lineHeight: '1.5',
+                  paddingRight: '60px' // Space for button (voice or send)
+                }}
+              />
+            </div>
+            
+            {/* Action buttons integrated inside the input - vertically centered */}
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {/* Voice message button - only show when input is empty AND agent supports audio */}
+              {!input.trim() && onVoiceMessage ? (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleStartRecording}
+                  disabled={isLoading}
+                  className="h-10 w-10 rounded-full hover:bg-primary/10 flex-shrink-0"
+                  title="Send voice message"
+                >
+                  <Mic className="h-5 w-5 text-primary" />
+                </Button>
+              ) : (
+                /* Send button - always show (disabled when empty and no voice support) */
+                <Button
+                  type="submit"
+                  disabled={isLoading || !input.trim()}
+                  size="icon"
+                  className="h-10 w-10 rounded-full p-0 transition-all duration-200 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
         
         {/* Loading indicator below input */}
         {isLoading && (

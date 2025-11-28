@@ -31,7 +31,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       clientId="RShGzaeQqPJwM850f6MwzyODEDD4wMwK"
       authorizationParams={{
         redirect_uri: window.location.origin,
-        audience: "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app",
+        audience: process.env.NEXT_PUBLIC_SYNAPSE_URL || "http://localhost:2024",
         scope: "openid profile email",
       }}
       skipRedirectCallback={window.location.pathname === "/api/auth/callback"}

@@ -57,6 +57,44 @@ export class ChatHistoryManager {
     }
   }
 
+  static getAllSessions(): ChatSession[] {
+    if (typeof window === 'undefined') return [];
+    
+    try {
+      const allSessions: ChatSession[] = [];
+      
+      // Get sessions from default storage (no embedId)
+      const defaultSessions = this.getChatSessions();
+      allSessions.push(...defaultSessions);
+      
+      // Scan localStorage for all embed-specific sessions
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(this.STORAGE_KEY) && key !== this.STORAGE_KEY) {
+          try {
+            const data = localStorage.getItem(key);
+            if (data) {
+              const sessions = JSON.parse(data) as ChatSession[];
+              allSessions.push(...sessions);
+            }
+          } catch (error) {
+            console.error(`Failed to parse sessions from ${key}:`, error);
+          }
+        }
+      }
+      
+      // Remove duplicates based on session ID and sort by timestamp
+      const uniqueSessions = Array.from(
+        new Map(allSessions.map(session => [session.id, session])).values()
+      ).sort((a, b) => b.timestamp - a.timestamp);
+      
+      return uniqueSessions;
+    } catch (error) {
+      console.error('Failed to get all sessions:', error);
+      return [];
+    }
+  }
+
   static deleteChatSession(sessionId: string, embedId?: string): void {
     if (typeof window === 'undefined') return;
     

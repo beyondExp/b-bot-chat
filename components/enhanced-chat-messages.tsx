@@ -11,6 +11,8 @@ import { AIMessage } from "./messages/ai-message"
 import { ensureToolCallsHaveResponses, DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses"
 import ReactMarkdown from "react-markdown"
 
+import { StreamingAudioPlayer } from "./streaming-audio-player"
+
 // Tool Calls Component (like agent-chat-ui) - Now collapsible
 function ToolCalls({ toolCalls }: { toolCalls: Array<{ id?: string; name: string; args: Record<string, any> }> }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -228,10 +230,12 @@ interface EnhancedChatMessagesProps {
   userColor?: string
   isLoading?: boolean
   onMessageEdit?: (messageId: string, newContent: string, parentCheckpoint?: string) => void
+  audioMap?: Record<string, string[]> // 🔊 TTS audio chunks mapped by message ID
   onMessageRegenerate?: (messageId: string, parentCheckpoint?: string) => void
   onBranchSelect?: (messageId: string, direction: 'prev' | 'next') => void
   getMessageMetadata?: (message: ChatMessage) => MessageMetadata | undefined
   toolEvents?: any[] // Tool events like B-Bot Hub
+  shouldAutoPlayAudio?: boolean // Whether to auto-play audio (false for old conversations)
 }
 
 // Helper to determine readable text color
@@ -262,6 +266,8 @@ export function EnhancedChatMessages({
   onBranchSelect,
   getMessageMetadata,
   toolEvents,
+  audioMap = {}, // 🔊 TTS audio chunks map
+  shouldAutoPlayAudio = true, // Auto-play audio by default (false for old conversations)
 }: EnhancedChatMessagesProps) {
   // Get agent avatar
   const getAgentAvatar = () => {
@@ -342,18 +348,35 @@ export function EnhancedChatMessages({
           {messages
             .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
             .filter((m) => {
+              // Handle both string and array content
+              let contentIsEmpty = false;
+              let contentLength = 0;
+              
+              const content = m.content as any; // Type assertion to handle multiple content types
+              
+              if (typeof content === 'string') {
+                contentIsEmpty = !content || content.trim() === "";
+                contentLength = content?.length || 0;
+              } else if (Array.isArray(content)) {
+                contentIsEmpty = content.length === 0;
+                contentLength = content.length;
+              } else {
+                contentIsEmpty = !content;
+              }
+              
               console.log("Processing message for display:", {
                 id: m.id,
                 type: m.type,
                 role: m.role,
-                hasContent: !!(m.content && m.content.trim()),
-                contentLength: m.content?.length || 0,
+                hasContent: !contentIsEmpty,
+                contentType: typeof m.content,
+                contentLength,
                 hasToolCalls: !!(m.tool_calls && m.tool_calls.length > 0),
                 toolCallsCount: m.tool_calls?.length || 0
               });
               
               // Filter out empty AI messages that only contain tool_calls (trigger messages)
-              if (m.type === "ai" && (!m.content || m.content.trim() === "") && m.tool_calls && m.tool_calls.length > 0) {
+              if (m.type === "ai" && contentIsEmpty && m.tool_calls && m.tool_calls.length > 0) {
                 console.log("🚫 Filtering out empty AI message with tool_calls:", m.id);
                 return false;
               }
@@ -435,6 +458,16 @@ export function EnhancedChatMessages({
                             <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
                               <ReactMarkdown>{message.content}</ReactMarkdown>
                             </div>
+                            
+                            {/* 🔊 TTS Audio Player: Show if this message has audio chunks */}
+                            {audioMap[message.id] && audioMap[message.id].length > 0 && (
+                              <div className="mt-2 pt-2 border-t border-muted-foreground/20">
+                                <StreamingAudioPlayer 
+                                  audioChunks={audioMap[message.id]} 
+                                  autoPlay={shouldAutoPlayAudio} 
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}

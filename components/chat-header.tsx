@@ -1,77 +1,121 @@
 "use client"
 
 import { useState } from "react"
-import { Menu, X, Sparkles } from "lucide-react"
+import { Menu, X, Sparkles, Phone, Video, MoreVertical, Search, ArrowLeft, Users, MessageSquare } from "lucide-react"
 import { UserProfile } from "@/components/user-profile"
 import { useAuth0 } from "@auth0/auth0-react"
 import Image from "next/image"
+import { Button } from "@/components/ui/button"
 
 interface ChatHeaderProps {
   onToggleSidebar: () => void
   isSidebarOpen: boolean
   onToggleDiscover: () => void
+  onViewContacts: () => void
+  onVoiceCall?: () => void
+  onVideoCall?: () => void
+  onSearchMessages?: () => void
+  agentName?: string
+  agentAvatar?: string
 }
 
-export function ChatHeader({ onToggleSidebar, isSidebarOpen, onToggleDiscover }: ChatHeaderProps) {
+export function ChatHeader({ 
+  onToggleSidebar, 
+  isSidebarOpen, 
+  onToggleDiscover,
+  onViewContacts,
+  onVoiceCall,
+  onVideoCall,
+  onSearchMessages,
+  agentName = "B-Bot",
+  agentAvatar = "/logo-black.svg"
+}: ChatHeaderProps) {
   const { isAuthenticated, isLoading } = useAuth0()
   const [showDebugInfo, setShowDebugInfo] = useState(false)
 
   return (
-    <header className="flex items-center justify-between p-3 border-b border-border bg-card">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onToggleSidebar}
-          className="p-2 rounded-md hover:bg-muted transition-colors"
-          aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+    <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-card h-16">
+      <div className="flex items-center gap-3">
+        {/* Back to Contacts Button (WhatsApp style) */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onViewContacts}
+          className="rounded-full flex-shrink-0"
+          aria-label="Back to contacts"
         >
-          {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
-        <div className="flex items-center">
-          <div className="w-8 h-8 relative flex items-center justify-center">
-            <Image src="/logo-black.svg" alt="Beyond-Bot.ai Logo" width={32} height={32} className="dark:invert" />
+          <ArrowLeft size={20} />
+        </Button>
+        
+        {/* Conversations Drawer Button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggleSidebar}
+          className="rounded-full flex-shrink-0"
+          aria-label="View conversations"
+        >
+          <MessageSquare size={20} />
+        </Button>
+        
+        {/* Agent Info (WhatsApp Style) */}
+        <div className="flex items-center gap-3 cursor-pointer hover:bg-muted/50 p-1 pr-3 rounded-lg transition-colors">
+          <div className="relative w-10 h-10 rounded-full overflow-hidden bg-muted border border-border">
+            <Image 
+              src={agentAvatar} 
+              alt={agentName} 
+              fill 
+              className="object-cover dark:invert" 
+            />
+          </div>
+          <div className="flex flex-col">
+            <span className="font-semibold text-sm leading-none">{agentName}</span>
+            <span className="text-xs text-muted-foreground mt-1">Online</span>
           </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onToggleDiscover}
-          className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+      <div className="flex items-center gap-1">
+        {/* Call Actions - Only show if agent supports voice calls */}
+        {(onVideoCall || onVoiceCall) && (
+          <>
+            {onVideoCall && (
+              <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted" onClick={onVideoCall}>
+                <Video size={22} />
+              </Button>
+            )}
+            {onVoiceCall && (
+              <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted" onClick={onVoiceCall}>
+                <Phone size={20} />
+              </Button>
+            )}
+            
+            <div className="w-px h-6 bg-border mx-2 hidden sm:block"></div>
+          </>
+        )}
+
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted hidden sm:flex"
+          onClick={onSearchMessages}
+          aria-label="Search messages"
         >
-          <Sparkles size={16} />
-          <span>Discover Agents</span>
-        </button>
+          <Search size={20} />
+        </Button>
 
-        {/* Debug button - only in development */}
-        {process.env.NODE_ENV === "development" && (
-          <button
-            onClick={() => setShowDebugInfo(!showDebugInfo)}
-            className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
-          >
-            Debug
-          </button>
-        )}
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted"
+          onClick={onToggleDiscover}
+        >
+          <Sparkles size={20} />
+        </Button>
 
-        {/* Debug info panel */}
-        {showDebugInfo && (
-          <div className="fixed top-14 right-4 z-50 bg-white border border-gray-300 rounded-md shadow-lg p-4 text-xs max-w-xs">
-            <h4 className="font-bold mb-2">Auth Debug Info:</h4>
-            <p>isAuthenticated: {isAuthenticated ? "true" : "false"}</p>
-            <p>isLoading: {isLoading ? "true" : "false"}</p>
-            <button
-              onClick={() => {
-                // Force auth state refresh
-                localStorage.removeItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated")
-                window.location.reload()
-              }}
-              className="mt-2 px-2 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200"
-            >
-              Reset Auth State
-            </button>
-          </div>
-        )}
-
-        <UserProfile />
+        <div className="ml-2">
+          <UserProfile />
+        </div>
       </div>
     </header>
   )

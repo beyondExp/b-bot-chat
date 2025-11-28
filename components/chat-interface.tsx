@@ -9,17 +9,21 @@ import { ChatHistoryManager, type ChatSession } from "@/lib/chat-history"
 import { ChatInput } from "./chat-input"
 import { ChatHeader } from "./chat-header"
 import { EnhancedChatMessages } from "./enhanced-chat-messages"
+import { MessageSearch } from "./message-search"
 // Temporarily remove tool response handling to avoid type conflicts
 // import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
 import { MainChatSidebar } from "./main-chat-sidebar"
 import { PaymentRequiredModal } from "./payment-required-modal"
 import { AutoRechargeNotification } from "./auto-recharge-notification"
 import { DiscoverPage } from "./discover-page"
+import { ContactsPage } from "./contacts-page"
+import { VoiceCallView } from "./voice-call-view"
 import { AgentSelector } from "./agent-selector"
 import { useAgents } from "@/lib/agent-service"
 import { useAuth0 } from "@auth0/auth0-react"
 import { useAuthenticatedFetch, isLocallyAuthenticated, getAuthToken } from "@/lib/api"
 import { ThreadService, type Thread } from "@/lib/thread-service"
+import { convertToWav } from "@/lib/audio-converter"
 
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
@@ -53,12 +57,18 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   }
   
   const [selectedAgent, setSelectedAgent] = useState<string | null>(getInitialAgent())
+  const [showContactsPage, setShowContactsPage] = useState(false)
+  const [showVoiceCall, setShowVoiceCall] = useState(false)
+  const [showMessageSearch, setShowMessageSearch] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const [remainingCredits, setRemainingCredits] = useState(0)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
   const [autoRechargeAmount, setAutoRechargeAmount] = useState(0)
   const [toolEvents, setToolEvents] = useState<any[]>([])
+  const [audioMap, setAudioMap] = useState<Record<string, string[]>>({}) // Store TTS audio chunks mapped to message IDs
+  const [isLoadingOldConversation, setIsLoadingOldConversation] = useState(false) // Track if loading old conversation
+  const messagesRef = useRef<any[]>([]); // Ref to track messages for event handlers
 
   // Add tool event handling like B-Bot Hub
   const handleToolEvent = (event: any) => {
@@ -336,6 +346,37 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       console.log("Thread ID received:", threadId);
       ChatHistoryManager.setCurrentThreadId(threadId, MAIN_CHAT_ID);
     },
+    onCustomEvent: (event: any) => {
+      // 🔊 Handle TTS streaming audio chunks from 'custom' events
+      if (event && event.audio_chunk) {
+        console.log('[ChatInterface] 🎵 Received custom audio chunk:', event.audio_chunk.chunk_index);
+        
+        // Extract base64 data from URL if present
+        let base64Data = '';
+        if (event.audio_chunk.url && event.audio_chunk.url.startsWith('data:')) {
+          base64Data = event.audio_chunk.url.split(',')[1];
+        } else {
+          base64Data = event.audio_chunk.data || '';
+        }
+        
+        if (base64Data) {
+          // Associate with the last AI message
+          const messages = messagesRef.current;
+          const lastMsg = messages[messages.length - 1] as any;
+          
+          // Check if we have a valid AI message to attach to
+          if (lastMsg && (lastMsg.role === 'assistant' || lastMsg.type === 'ai') && lastMsg.id) {
+            const msgId = lastMsg.id;
+            setAudioMap(prev => ({
+              ...prev,
+              [msgId]: [...(prev[msgId] || []), base64Data]
+            }));
+          } else {
+            console.warn('[ChatInterface] ⚠️ Received audio chunk but no valid AI message found to attach to');
+          }
+        }
+      }
+    },
     // TODO: LangGraph SDK useStream doesn't support onToolEvent directly
     // Tool events need to be extracted from the message stream based on metadata/namespace
     // onToolEvent: handleToolEvent,
@@ -343,6 +384,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Extract tool events from message stream (since LangGraph SDK doesn't support onToolEvent directly)
   useEffect(() => {
+    // Sync messages ref for event handlers
+    if (thread.messages) {
+      messagesRef.current = thread.messages;
+    }
+
     if (thread.messages && thread.messages.length > 0) {
       // Find tool messages and convert them to tool events
       const toolMessages = thread.messages.filter(msg => msg.type === "tool");
@@ -360,6 +406,28 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       }
     }
   }, [thread.messages, toolEvents.length]);
+
+  // 🔊 Extract audio chunks from AI messages (TTS streaming fallback & history)
+  useEffect(() => {
+    if (thread.messages && thread.messages.length > 0) {
+      thread.messages.forEach((msg: any) => {
+        if (msg.type === "ai" && msg.id) {
+          const additionalKwargs = msg.additional_kwargs;
+          if (additionalKwargs && additionalKwargs.audio_chunks) {
+            const chunks = additionalKwargs.audio_chunks;
+            // Only update if we don't have these chunks yet (simple check)
+            setAudioMap(prev => {
+              if (prev[msg.id] && prev[msg.id].length >= chunks.length) return prev;
+              return {
+                ...prev,
+                [msg.id]: chunks
+              };
+            });
+          }
+        }
+      });
+    }
+  }, [thread.messages]);
 
   // Effect to clear chat when agent changes (but not on initial load/restore)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
@@ -503,6 +571,20 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const userApps = {};
       const mergedApps = { ...assistantApps, ...userApps };
+      
+      // Get output modalities from agent config, or use default TTS for standard B-Bot
+      const outputModalities = agentObj?.rawData?.config?.output_modalities || [
+        {
+          type: "tts",
+          model_name: "elevenlabs/eleven_turbo_v2_5",
+          voice: "nPczCjzI2devNBz1zQrb",
+          auto_play: true,
+          provider: "elevenlabs",
+          speed: 1,
+          streaming: true,
+          api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18"
+        }
+      ];
 
       // Create the new message
       const newMessage = {
@@ -531,19 +613,20 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           agent_id: agentId
         },
         {
-        config: {
+          config: {
             configurable: {
-          agent_id: agentId,
-          user_id: userId,
+              agent_id: agentId,
+              user_id: userId,
               entity_id: entityId,
-          temperature: 0.7,
-          max_tokens: 1024,
-          top_p: 1.0,
-          instructions: "Be helpful and concise.",
-          apps: mergedApps,
+              temperature: 0.7,
+              top_p: 1.0,
+              instructions: "Be helpful and concise.",
+              apps: mergedApps,
+              input_modalities: [],
+              output_modalities: outputModalities, // Use agent's configured TTS output modalities
             }
           },
-          streamMode: ["messages", "updates"], // Use messages/updates for proper event streaming like B-Bot Hub
+          streamMode: ["values", "messages", "updates", "custom"], // Full stream modes
           optimisticValues: (prev) => ({
             ...prev,
             messages: [
@@ -586,6 +669,119 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     handleSendMessage(transcriptionText)
   }
 
+  // Handle voice message submission with audio modality
+  const handleVoiceMessage = async (audioBlob: Blob, transcription: string, duration: number) => {
+    setToolEvents([]); // Clear previous tool events
+    console.log('[ChatInterface] Voice message received:', { 
+      size: audioBlob.size, 
+      type: audioBlob.type, 
+      duration 
+    })
+
+    try {
+      const userId = user?.sub || "anonymous-user";
+      const agentId = selectedAgent || "bbot";
+      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+
+      // Merge assistant apps with user apps and get modalities
+      const agentObj = agents.find((a: any) => a.id === selectedAgent);
+      const assistantApps = agentObj?.rawData?.config?.apps || {};
+      const userApps = {};
+      const mergedApps = { ...assistantApps, ...userApps };
+      
+      // Get output modalities from agent config, or use default TTS for standard B-Bot
+      const outputModalities = agentObj?.rawData?.config?.output_modalities || [
+        {
+          type: "tts",
+          model_name: "elevenlabs/eleven_turbo_v2_5",
+          voice: "nPczCjzI2devNBz1zQrb",
+          auto_play: true,
+          provider: "elevenlabs",
+          speed: 1,
+          streaming: true,
+          api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18"
+        }
+      ];
+
+      // Convert blob to base64 data URL (keep as webm)
+      const reader = new FileReader();
+      const base64DataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(audioBlob);
+      });
+
+      // Create the new message with media type (audio/webm)
+      const newMessage = {
+        id: `msg-${Date.now()}`,
+        role: "user" as const,
+        type: "human" as const,
+        content: [
+          {
+            type: "media",
+            mime_type: "audio/webm",
+            data: base64DataUrl // Full data URL with prefix
+          }
+        ]
+      };
+
+      // Get current conversation history
+      const currentMessages = thread.messages || []
+      const toolMessages: any[] = []
+      const allMessages = [...toolMessages, newMessage]
+
+      console.log('[ChatInterface] Submitting voice message as media modality:', {
+        messageId: newMessage.id,
+        audioSize: base64DataUrl.length,
+        format: audioBlob.type,
+        duration
+      })
+
+      // Submit using LangGraph's useStream with audio modality
+      // 🎤 Use audio-capable model for voice messages
+      thread.submit(
+        { 
+          messages: allMessages,
+          entity_id: entityId,
+          user_id: userId,
+          agent_id: agentId
+        },
+        {
+          config: {
+            configurable: {
+              agent_id: agentId,
+              user_id: userId,
+              entity_id: entityId,
+              response_model: "openai/gpt-4o-mini", // Testing with gpt-4o-mini
+              temperature: 0.7,
+              top_p: 1.0,
+              instructions: "Be helpful and concise.",
+              apps: mergedApps,
+              input_modalities: [], // No special input modalities needed (audio is in content)
+              output_modalities: outputModalities, // Use agent's configured TTS output modalities
+            }
+          },
+          streamMode: ["values", "messages", "updates", "custom"], // Full stream modes
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [
+              ...(prev.messages ?? []),
+              ...toolMessages,
+              newMessage,
+            ] as any,
+            entity_id: entityId,
+            user_id: userId,
+            agent_id: agentId,
+          }),
+        }
+      );
+
+      console.log('[ChatInterface] Voice message submitted to stream');
+    } catch (error) {
+      console.error("Error in handleVoiceMessage:", error);
+    }
+  }
+
   // Sidebar handlers
   const handleToggleSidebar = () => {
     setShowSidebar(!showSidebar)
@@ -597,17 +793,15 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     // Set flag to prevent agent change useEffect from clearing session
     setIsSelectingChat(true)
     
+    // Mark that we're loading an old conversation (don't auto-play audio)
+    setIsLoadingOldConversation(true)
+    
     // Set the current session and thread ID first
     setCurrentSession(session)
     ChatHistoryManager.setCurrentThreadId(session.threadId, MAIN_CHAT_ID)
     
     // Then set the agent
     setSelectedAgent(session.agentId)
-    
-    // Clear the flag after a short delay to allow React to process the state updates
-    setTimeout(() => {
-      setIsSelectingChat(false)
-    }, 100)
     
     console.log('[Chat] Selected chat - agent:', session.agentId, 'thread:', session.threadId)
     
@@ -616,11 +810,20 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const threadWithMessages = await threadService.getThread(session.threadId)
       if (threadWithMessages && threadWithMessages.values?.messages) {
         console.log('[Chat] Loaded thread messages from server:', threadWithMessages.values.messages.length, 'messages')
-            } else {
+      } else {
         console.log('[Chat] No messages found in thread on server')
       }
     } catch (error) {
       console.error('[Chat] Error loading thread from server:', error)
+    } finally {
+      // Clear the loading flag after messages are loaded (or failed to load)
+      setTimeout(() => {
+        setIsSelectingChat(false)
+        // After conversation is loaded, reset the flag so new messages can auto-play
+        setTimeout(() => {
+          setIsLoadingOldConversation(false)
+        }, 1000) // Give extra time for messages to render
+      }, 300) // Small delay to ensure UI updates
     }
   }
 
@@ -634,11 +837,177 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     console.log('[Chat] Starting new chat')
     setCurrentSession(null)
     ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+    setIsLoadingOldConversation(false) // New chat should auto-play audio
     // No need to reload the page - useStream will start a new thread on next message
   }
 
   const handleToggleDiscover = () => {
     setSelectedAgent(null) // This will show the DiscoverPage
+    setShowContactsPage(false)
+  }
+
+  const handleViewContacts = () => {
+    setShowContactsPage(true)
+  }
+
+  const handleBackFromContacts = () => {
+    setShowContactsPage(false)
+  }
+
+  const handleCloseDiscover = () => {
+    // If there's a selected agent, go back to chat
+    // Otherwise, go to contacts page
+    if (selectedAgent) {
+      // Already have an agent, just close discover (shouldn't happen)
+      return
+    }
+    setShowContactsPage(true)
+  }
+
+  const handleSelectAgentFromContacts = (agentId: string) => {
+    setSelectedAgent(agentId)
+    setShowContactsPage(false)
+    // Start a new chat with this agent
+    handleNewChat()
+  }
+
+  const handleVoiceCall = () => {
+    console.log('[Chat] Starting voice call')
+    setShowVoiceCall(true)
+  }
+
+  const handleVideoCall = () => {
+    console.log('[Chat] Video call not yet implemented')
+    // For now, just start voice call (video can be added later)
+    setShowVoiceCall(true)
+  }
+
+  const handleSearchMessages = () => {
+    setShowMessageSearch(!showMessageSearch)
+  }
+
+  const handleSelectSearchResult = (messageIndex: number) => {
+    // Scroll to the message (implementation can be enhanced)
+    console.log('[Chat] Selected search result:', messageIndex)
+    // TODO: Implement scrolling to specific message
+  }
+
+  const handleEndCall = () => {
+    console.log('[Chat] Ending call')
+    setShowVoiceCall(false)
+  }
+
+  const handleCallAudioData = async (audioBuffer: Float32Array, timestamp: number) => {
+    console.log('[Chat] Received audio from call, length:', audioBuffer.length)
+    
+    // Convert Float32Array to WAV Blob
+    const wavBlob = await convertFloat32ToWav(audioBuffer)
+    
+    // Convert to base64 data URL
+    const reader = new FileReader()
+    reader.onloadend = async () => {
+      const base64DataUrl = reader.result as string
+      
+      // Create message with audio modality
+      const newMessage: any = {
+        id: `msg-${Date.now()}`,
+        role: 'user',
+        content: [
+          {
+            type: "media",
+            mime_type: "audio/wav",
+            data: base64DataUrl
+          }
+        ],
+        timestamp: timestamp
+      }
+
+      console.log('[Chat] Submitting audio message:', newMessage)
+
+      // Get agent configuration
+      const agentObj = agents.find((a: any) => a.id === selectedAgent)
+      const rawData = agentObj?.rawData || {}
+
+      // Extract output modalities from agent config
+      const outputModalities = rawData.config?.output_modalities || []
+      
+      // If no TTS output modality, add default ElevenLabs
+      const finalOutputModalities = outputModalities.length > 0 
+        ? outputModalities 
+        : [{
+            type: "tts",
+            model_name: "elevenlabs/eleven_turbo_v2_5",
+            voice: "nPczCjzI2devNBz1zQrb",
+            auto_play: true,
+            streaming: true,
+            provider: "elevenlabs",
+            api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
+            user_provider_key_id: 29,
+            speed: 1
+          }]
+
+      // Submit to LangGraph stream
+      await thread.submit({
+        messages: [newMessage],
+        ...rawData.config,
+        configurable: {
+          ...rawData.config?.configurable,
+          input_modalities: rawData.config?.input_modalities || [],
+          output_modalities: finalOutputModalities,
+          streamMode: ["values", "messages", "updates", "custom"]
+        }
+      } as any)
+    }
+    
+    reader.readAsDataURL(wavBlob)
+  }
+
+  // Convert Float32Array to WAV Blob
+  const convertFloat32ToWav = async (float32Array: Float32Array): Promise<Blob> => {
+    const sampleRate = 16000 // VAD outputs at 16kHz
+    const numChannels = 1
+    const bitsPerSample = 16
+
+    // Convert float32 to int16
+    const int16Array = new Int16Array(float32Array.length)
+    for (let i = 0; i < float32Array.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32Array[i]))
+      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+    }
+
+    // Create WAV file
+    const dataLength = int16Array.length * (bitsPerSample / 8)
+    const buffer = new ArrayBuffer(44 + dataLength)
+    const view = new DataView(buffer)
+
+    // WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i))
+      }
+    }
+
+    writeString(0, 'RIFF')
+    view.setUint32(4, 36 + dataLength, true)
+    writeString(8, 'WAVE')
+    writeString(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, numChannels, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true)
+    view.setUint16(32, numChannels * (bitsPerSample / 8), true)
+    view.setUint16(34, bitsPerSample, true)
+    writeString(36, 'data')
+    view.setUint32(40, dataLength, true)
+
+    // Write audio data
+    const offset = 44
+    for (let i = 0; i < int16Array.length; i++) {
+      view.setInt16(offset + i * 2, int16Array[i], true)
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' })
   }
 
   // Get recent agents from chat history
@@ -670,10 +1039,43 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       .slice(0, 5) // Return top 5 recent agents
   }
 
+  // Show voice call view
+  if (showVoiceCall && selectedAgent) {
+    const agentData = agents.find((a: any) => a.id === selectedAgent)
+    return (
+      <VoiceCallView
+        agentName={agentData?.name || "B-Bot"}
+        agentAvatar={agentData?.profileImage || "/helpful-robot.png"}
+        onEndCall={handleEndCall}
+        onAudioData={handleCallAudioData}
+        messages={thread.messages || []}
+      />
+    )
+  }
+
+  // Show contacts page
+  if (showContactsPage) {
+    return (
+      <ContactsPage
+        agents={agents}
+        onSelectAgent={handleSelectAgentFromContacts}
+        onSelectConversation={(session) => {
+          handleSelectChat(session)
+          setShowContactsPage(false)
+        }}
+        onDiscoverAgents={handleToggleDiscover}
+        onBack={handleBackFromContacts}
+        currentAgentId={selectedAgent || undefined}
+      />
+    )
+  }
+
+  // Show discover page when no agent is selected
   if (!selectedAgent) {
     return (
       <DiscoverPage
         onSelectAgent={setSelectedAgent}
+        onClose={handleCloseDiscover}
         recentAgents={getRecentAgents()}
       />
     )
@@ -692,6 +1094,91 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     )
   }
 
+  const selectedAgentData = agents.find((a: any) => a.id === selectedAgent)
+  
+  // Debug: Log the full agent data structure
+  if (selectedAgentData && selectedAgent) {
+    console.log('[Audio Check] Selected agent:', selectedAgent)
+    console.log('[Audio Check] Agent data structure:', {
+      hasRawData: !!selectedAgentData.rawData,
+      hasConfig: !!selectedAgentData.rawData?.config,
+      hasMetadataConfig: !!selectedAgentData.rawData?.metadata?.config,
+      configKeys: selectedAgentData.rawData?.config ? Object.keys(selectedAgentData.rawData.config) : [],
+      metadataConfigKeys: selectedAgentData.rawData?.metadata?.config ? Object.keys(selectedAgentData.rawData.metadata.config) : [],
+      fullAgent: selectedAgentData
+    })
+  }
+  
+  // Check if agent supports audio input (for voice recording and calls)
+  const hasAudioInput = () => {
+    // Default to true for B-Bot standard expert
+    const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot'
+    
+    if (!selectedAgentData?.rawData) {
+      console.log('[Audio Check] No rawData found for agent:', selectedAgent, '- defaulting to', isBBot)
+      return isBBot // Default to true for B-Bot
+    }
+    
+    // Check both possible locations: config and metadata.config
+    const config = selectedAgentData.rawData.config || selectedAgentData.rawData.metadata?.config
+    if (!config) {
+      console.log('[Audio Check] No config found in rawData for agent:', selectedAgent, '- defaulting to', isBBot)
+      return isBBot // Default to true for B-Bot
+    }
+    
+    const inputModalities = config.input_modalities || []
+    console.log('[Audio Check] Input modalities:', inputModalities)
+    
+    // If no modalities configured, default to true for B-Bot
+    if (inputModalities.length === 0) {
+      console.log('[Audio Check] No input modalities configured - defaulting to', isBBot)
+      return isBBot
+    }
+    
+    const hasInput = inputModalities.some((mod: any) => 
+      mod.type === 'audio' || mod.type === 'stt' || mod.type === 'voice'
+    )
+    console.log('[Audio Check] Has audio input:', hasInput)
+    return hasInput
+  }
+  
+  // Check if agent supports audio output (for TTS and calls)
+  const hasAudioOutput = () => {
+    // Default to true for B-Bot standard expert
+    const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot'
+    
+    if (!selectedAgentData?.rawData) {
+      console.log('[Audio Check] No rawData found for agent:', selectedAgent, '- defaulting to', isBBot)
+      return isBBot // Default to true for B-Bot
+    }
+    
+    // Check both possible locations: config and metadata.config
+    const config = selectedAgentData.rawData.config || selectedAgentData.rawData.metadata?.config
+    if (!config) {
+      console.log('[Audio Check] No config found in rawData for agent:', selectedAgent, '- defaulting to', isBBot)
+      return isBBot // Default to true for B-Bot
+    }
+    
+    const outputModalities = config.output_modalities || []
+    console.log('[Audio Check] Output modalities:', outputModalities)
+    
+    // If no modalities configured, default to true for B-Bot
+    if (outputModalities.length === 0) {
+      console.log('[Audio Check] No output modalities configured - defaulting to', isBBot)
+      return isBBot
+    }
+    
+    const hasOutput = outputModalities.some((mod: any) => 
+      mod.type === 'tts' || mod.type === 'audio' || mod.type === 'voice'
+    )
+    console.log('[Audio Check] Has audio output:', hasOutput)
+    return hasOutput
+  }
+  
+  // Agent supports voice calls if it has both audio input and output
+  const supportsVoiceCalls = hasAudioInput() && hasAudioOutput()
+  console.log('[Audio Check] Supports voice calls:', supportsVoiceCalls)
+
   return (
     <>
       <div className="flex flex-col h-screen bg-background">
@@ -699,21 +1186,37 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={showSidebar}
           onToggleDiscover={handleToggleDiscover}
+          onViewContacts={handleViewContacts}
+          onVoiceCall={supportsVoiceCalls ? handleVoiceCall : undefined}
+          onVideoCall={supportsVoiceCalls ? handleVideoCall : undefined}
+          onSearchMessages={handleSearchMessages}
+          agentName={selectedAgentData?.name || "B-Bot"}
+          agentAvatar={selectedAgentData?.profileImage || "/helpful-robot.png"}
         />
+
+        {/* Message Search Bar */}
+        {showMessageSearch && (
+          <MessageSearch
+            messages={thread.messages || []}
+            onClose={() => setShowMessageSearch(false)}
+            onSelectMessage={handleSelectSearchResult}
+          />
+        )}
 
         <div className="flex-1 overflow-hidden flex flex-col">
           {isSelectingChat ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center text-muted-foreground">
+            <div className="flex items-center justify-center h-full bg-background">
+              <div className="text-center">
                 <div className="flex items-center justify-center mb-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div>
                 </div>
-                <p>Loading conversation...</p>
-                <p className="text-sm">Please wait while we load your chat</p>
+                <p className="text-lg font-semibold text-foreground mb-2">Loading conversation...</p>
+                <p className="text-sm text-muted-foreground">Please wait while we load your chat history</p>
               </div>
             </div>
           ) : (
             <EnhancedChatMessages
+              shouldAutoPlayAudio={!isLoadingOldConversation}
               messages={thread.messages?.filter((msg: any) => {
                 // Filter out empty AI messages that only contain tool_calls (trigger messages)
                 if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {
@@ -724,7 +1227,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               }).map((msg: any) => ({
                 id: msg.id || `msg-${Date.now()}-${Math.random()}`,
                 role: msg.role || (msg.type === 'human' ? 'user' : msg.type === 'tool' ? 'tool_response' : 'assistant'),
-                content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+                content: msg.content, // ✅ Keep content as-is (string or array) for multimodality support
                 type: msg.type,
                 // Pass through tool call properties for proper inline display
                 tool_calls: msg.tool_calls,
@@ -743,6 +1246,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               userColor="#2563eb"
               isLoading={thread.isLoading}
               toolEvents={toolEvents}
+              audioMap={audioMap}
             />
           )}
         </div>
@@ -750,6 +1254,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         <div className="bg-background border-t border-gray-200 dark:border-gray-700">
           <ChatInput
             onSubmit={handleFormSubmit}
+            onVoiceMessage={hasAudioInput() ? handleVoiceMessage : undefined}
             isLoading={thread.isLoading}
             selectedAgent={selectedAgent}
             agentName={agents.find((a: any) => a.id === selectedAgent)?.name}

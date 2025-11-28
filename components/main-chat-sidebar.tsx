@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { Trash2, MessageSquare, Bot, Sparkles, ChevronDown, ChevronRight, Users, Plus } from 'lucide-react'
+import { Trash2, MessageSquare, Plus, Search, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import { ChatSession, ChatHistoryManager } from '@/lib/chat-history'
 import { cn } from '@/lib/utils'
 import { ThreadService, type Thread } from "@/lib/thread-service"
@@ -100,6 +101,7 @@ export function MainChatSidebar({
 }: MainChatSidebarProps) {
   const [agentsWithChats, setAgentsWithChats] = useState<AgentWithChats[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const { isAuthenticated, getAccessTokenSilently } = useAuth0()
 
   // Initialize thread service with auth token getter
@@ -330,160 +332,140 @@ export function MainChatSidebar({
     )
   }
 
-  const handleDiscoverAgents = () => {
-    onDiscoverAgents()
-    onClose()
-  }
+
+  // Get current agent's chats
+  const currentAgentData = agentsWithChats.find(a => a.agentId === currentAgentId)
+  const allCurrentAgentSessions = currentAgentData?.sessions || []
+  const currentAgentName = currentAgentData?.agentName || getAgentName(currentAgentId, agents)
+  
+  // Filter sessions based on search query
+  const currentAgentSessions = allCurrentAgentSessions.filter(session => {
+    if (!searchQuery.trim()) return true
+    
+    const query = searchQuery.toLowerCase()
+    const title = session.title?.toLowerCase() || ''
+    const lastMessage = session.lastMessage?.toLowerCase() || ''
+    
+    return title.includes(query) || lastMessage.includes(query)
+  })
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent side="left" className="w-80 p-0 flex flex-col">
-        <SheetHeader className="p-4 border-b">
+        <SheetHeader className="p-4 border-b space-y-3">
           <SheetTitle className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
-            Your Conversations
+            {currentAgentName}
           </SheetTitle>
           <SheetDescription>
-            Browse your chat history organized by agent
+            Your conversations with this agent
           </SheetDescription>
+          
+          {/* Search Input */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search conversations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 pr-9"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </SheetHeader>
         
         <ScrollArea className="flex-1">
-          <div className="p-4">
+          <div className="p-2">
             {isLoading ? (
               <div className="text-center text-muted-foreground py-8">
                 <div className="flex items-center justify-center mb-4">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                 </div>
                 <p>Loading conversations...</p>
-                <p className="text-sm">Please wait while we fetch your chat history</p>
               </div>
-            ) : agentsWithChats.length === 0 ? (
+            ) : currentAgentSessions.length === 0 ? (
               <div className="text-center text-muted-foreground py-8">
-                <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>No conversations yet</p>
-                <p className="text-sm">Start chatting to see your history</p>
+                {searchQuery ? (
+                  <>
+                    <Search className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                    <p>No conversations found</p>
+                    <p className="text-sm">Try a different search term</p>
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                    <p>No conversations yet</p>
+                    <p className="text-sm">Start a new chat to begin</p>
+                  </>
+                )}
               </div>
             ) : (
-              <div className="space-y-4">
-                {agentsWithChats.map((agentData) => {
-                  const visibleSessions = agentData.showAll 
-                    ? agentData.sessions 
-                    : agentData.sessions.slice(0, 5)
-                  
-                  return (
-                    <div key={agentData.agentId} className="space-y-2">
-                      {/* Agent Header */}
-                      <div className="flex items-center justify-between">
-                        <button
-                          onClick={() => handleSelectAgent(agentData.agentId)}
-                          className={cn(
-                            "flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors flex-1 text-left",
-                            agentData.agentId === currentAgentId && "bg-primary/10 text-primary"
-                          )}
-                        >
-                          <div className="relative w-8 h-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
-                            <Image
-                              src={agentData.agentIcon || '/helpful-robot.png'}
-                              alt={agentData.agentName}
-                              fill
-                              className="object-cover"
-                              onError={(e) => {
-                                // Fallback to default image on error
-                                const target = e.target as HTMLImageElement
-                                target.src = '/helpful-robot.png'
-                              }}
-                            />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="font-medium truncate block">{agentData.agentName}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {agentData.sessions.length} conversation{agentData.sessions.length !== 1 ? 's' : ''}
-                            </span>
-                          </div>
-                        </button>
+              <div className="space-y-1">
+                {currentAgentSessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className={cn(
+                      "group relative p-3 rounded-lg hover:bg-muted cursor-pointer transition-colors border-b last:border-b-0",
+                      session.threadId === currentThreadId && "bg-primary/10"
+                    )}
+                    onClick={() => handleSelectChat(session)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <h4 className="text-sm font-semibold truncate">
+                            {session.title}
+                          </h4>
+                          <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
+                            {new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {session.lastMessage}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {new Date(session.timestamp).toLocaleDateString()}
+                        </p>
                       </div>
-
-                      {/* Chat Sessions */}
-                      <div className="ml-4 space-y-1">
-                        {visibleSessions.map((session) => (
-                          <div
-                            key={session.id}
-                            className={cn(
-                              "group relative p-3 rounded-md bg-muted/50 hover:bg-muted cursor-pointer transition-colors",
-                              session.threadId === currentThreadId && "bg-primary/20 border border-primary/30"
-                            )}
-                            onClick={() => handleSelectChat(session)}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <h4 className="text-sm font-medium line-clamp-2 leading-tight mb-1">
-                                  {session.title}
-                                </h4>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {session.lastMessage}
-                                </p>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  {new Date(session.timestamp).toLocaleDateString()}
-                                </p>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDeleteChat(session.id)
-                                }}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                        
-                        {/* Show More/Less Button */}
-                        {agentData.sessions.length > 5 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="w-full text-xs text-muted-foreground hover:text-foreground"
-                            onClick={() => toggleShowAll(agentData.agentId)}
-                          >
-                            {agentData.showAll 
-                              ? 'Show less' 
-                              : `Show ${agentData.sessions.length - 5} more`}
-                          </Button>
-                        )}
-                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-destructive flex-shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeleteChat(session.id)
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </div>
         </ScrollArea>
 
         {/* Action Buttons */}
-        <div className="p-4 border-t bg-background space-y-2">
+        <div className="p-3 border-t bg-background">
           <Button
             onClick={() => {
               onNewChat()
               onClose()
             }}
             className="w-full flex items-center gap-2"
-            variant="outline"
+            variant="default"
           >
             <Plus className="h-4 w-4" />
             New Chat
-          </Button>
-          <Button
-            onClick={handleDiscoverAgents}
-            className="w-full flex items-center gap-2"
-            variant="default"
-          >
-            <Users className="h-4 w-4" />
-            Discover Agents
           </Button>
         </div>
       </SheetContent>

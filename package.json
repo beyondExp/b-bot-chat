@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@ai-sdk/react": "latest",
+    "@ai-sdk/react": "^1.2.12",
     "@auth0/auth0-react": "latest",
     "@hookform/resolvers": "^3.9.1",
     "@langchain/core": "^0.3.59",

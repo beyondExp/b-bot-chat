@@ -14,6 +14,7 @@ import {
   AppWindow,
   ExternalLink,
   UserIcon,
+  ArrowLeft,
 } from "lucide-react"
 import Image from "next/image"
 import type { Agent } from "@/types/agent"
@@ -24,6 +25,7 @@ import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 
 interface DiscoverPageProps {
   onSelectAgent: (agentId: string) => void
+  onClose?: () => void
   recentAgents: string[]
 }
 
@@ -86,7 +88,7 @@ const fallbackAgents: Agent[] = [
   },
 ]
 
-export function DiscoverPage({ onSelectAgent, recentAgents = [] }: DiscoverPageProps) {
+export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: DiscoverPageProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [filteredAgents, setFilteredAgents] = useState<Agent[]>([])
@@ -257,7 +259,20 @@ export function DiscoverPage({ onSelectAgent, recentAgents = [] }: DiscoverPageP
       )}
 
       <div className="discover-header">
-        <h1 className="discover-title">Discover AI Agents</h1>
+        <div className="flex items-center gap-3 mb-4">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full hover:bg-muted transition-colors"
+              aria-label="Go back"
+            >
+              <ArrowLeft size={20} />
+            </button>
+          )}
+          <div className="flex-1">
+            <h1 className="discover-title">Discover AI Agents</h1>
+          </div>
+        </div>
         <p className="discover-description">Find the perfect AI agent for your needs from our growing collection</p>
 
         {/* Search bar */}
