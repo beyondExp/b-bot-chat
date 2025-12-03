@@ -69,7 +69,7 @@ const getFirstUserMessage = (thread: any): string => {
 // Helper function to get agent profile image
 const getAgentProfileImage = (agentId: string, agents: any[]): string => {
   if (agentId === 'bbot' || agentId === 'b-bot') {
-    return '/helpful-robot.png'
+    return 'https://beyond-bot.ai/logo-schwarz.svg'
   }
   
   const agent = agents.find(a => a.id === agentId)

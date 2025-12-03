@@ -46,8 +46,8 @@ export function ChatMessages({
 }: ChatMessagesProps) {
   // Get agent avatar
   const getAgentAvatar = () => {
-    if (selectedAgent === "bbot" || !selectedAgent) {
-      return "/helpful-robot.png";
+    if (selectedAgent === "bbot" || selectedAgent === "b-bot" || !selectedAgent) {
+      return "https://beyond-bot.ai/logo-schwarz.svg";
     }
     const agent = agents.find(a => a.id === selectedAgent);
     if (agent && agent.profileImage) {

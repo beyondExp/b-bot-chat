@@ -37,7 +37,7 @@ const fallbackAgents: Agent[] = [
     shortDescription: "Your personal AI assistant",
     description:
       "B-Bot is your personal AI assistant that can help with a wide range of tasks, from answering questions to generating content and providing recommendations.",
-    profileImage: "/helpful-robot.png",
+    profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
     category: "General",
     featured: true,
     popular: true,

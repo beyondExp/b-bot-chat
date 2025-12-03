@@ -133,15 +133,36 @@ export class SimpleVAD {
   }
   
   start() {
-    console.log('[SimpleVAD] Started')
-    // Already started in constructor
+    console.log('[SimpleVAD] Starting/Resuming')
+    // Reconnect the scriptProcessor if it was disconnected
+    if (this.scriptProcessor && this.analyser) {
+      try {
+        // Reconnect: analyser -> scriptProcessor -> destination
+        this.analyser.connect(this.scriptProcessor)
+        this.scriptProcessor.connect(this.audioContext.destination)
+        console.log('[SimpleVAD] Reconnected and listening')
+      } catch (e) {
+        // May already be connected, that's fine
+        console.log('[SimpleVAD] Already connected or error:', e)
+      }
+    }
+    // Reset state for fresh detection
+    this.isSpeaking = false
+    this.audioChunks = []
   }
   
   pause() {
     console.log('[SimpleVAD] Paused')
     if (this.scriptProcessor) {
-      this.scriptProcessor.disconnect()
+      try {
+        this.scriptProcessor.disconnect()
+      } catch (e) {
+        console.log('[SimpleVAD] Already disconnected')
+      }
     }
+    // Reset speaking state
+    this.isSpeaking = false
+    this.audioChunks = []
   }
   
   destroy() {

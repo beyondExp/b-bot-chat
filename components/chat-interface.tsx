@@ -68,6 +68,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [toolEvents, setToolEvents] = useState<any[]>([])
   const [audioMap, setAudioMap] = useState<Record<string, string[]>>({}) // Store TTS audio chunks mapped to message IDs
   const [isLoadingOldConversation, setIsLoadingOldConversation] = useState(false) // Track if loading old conversation
+  const [playedDuringCall, setPlayedDuringCall] = useState<Set<string>>(new Set()) // Track message IDs played during call
   const messagesRef = useRef<any[]>([]); // Ref to track messages for event handlers
 
   // Add tool event handling like B-Bot Hub
@@ -343,8 +344,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       saveCurrentSession();
     },
     onThreadId: (threadId: string) => {
-      console.log("Thread ID received:", threadId);
+      console.log("[Chat] Thread ID received from LangGraph:", threadId);
+      console.log("[Chat] Saving thread ID to localStorage");
       ChatHistoryManager.setCurrentThreadId(threadId, MAIN_CHAT_ID);
+      // Verify it was saved
+      const savedId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID);
+      console.log("[Chat] Verified saved thread ID:", savedId);
     },
     onCustomEvent: (event: any) => {
       // 🔊 Handle TTS streaming audio chunks from 'custom' events
@@ -461,16 +466,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Debug logging for thread state changes
   useEffect(() => {
-    console.log("[Chat] Thread state changed:", {
-      messagesLength: thread.messages?.length || 0,
-      isLoading: thread.isLoading,
-      values: thread.values,
-      firstMessage: thread.messages?.[0],
-      lastMessage: thread.messages?.[thread.messages.length - 1],
-      currentThreadId: getCurrentThreadId(),
-      selectedAgent: selectedAgent
-    });
-  }, [thread.messages, thread.isLoading, thread.values, selectedAgent]);
+    // Access thread ID from the hook's internal state
+    const hookThreadId = (thread as any).threadId;
+    console.log("[Chat] Messages:", thread.messages?.length || 0, "Loading:", thread.isLoading, "ThreadID:", hookThreadId || getCurrentThreadId() || 'none');
+  }, [thread.messages?.length, thread.isLoading]);
 
   // Monitor thread ID changes for debugging
   const [lastThreadId, setLastThreadId] = useState<string | undefined>(undefined)
@@ -585,7 +584,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             auto_play: true,
             streaming: true,
             provider: "elevenlabs",
-            api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
+            api_key: "sk_369bc04b35b9b5d9ad73db94bb90234b57f414ab23410c98",
             user_provider_key_id: 29,
             speed: 1
           }];
@@ -710,7 +709,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             auto_play: true,
             streaming: true,
             provider: "elevenlabs",
-            api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
+            api_key: "sk_369bc04b35b9b5d9ad73db94bb90234b57f414ab23410c98",
             user_provider_key_id: 29,
             speed: 1
           }];
@@ -908,45 +907,79 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     // TODO: Implement scrolling to specific message
   }
 
+  // Track if we just left a call (to prevent auto-playing audio that was already heard)
+  const [justLeftCall, setJustLeftCall] = useState(false);
+  
+  // Callback when audio is played during call - mark message ID as played
+  const handleAudioPlayedDuringCall = (messageIds: string[]) => {
+    console.log('[Chat] Marking message IDs as played during call:', messageIds)
+    setPlayedDuringCall(prev => {
+      const newSet = new Set(prev)
+      messageIds.forEach(id => newSet.add(id))
+      return newSet
+    })
+  }
+  
   const handleEndCall = () => {
-    console.log('[Chat] Ending call')
+    // Mark that we just left a call - audio should not auto-play
+    setJustLeftCall(true)
     setShowVoiceCall(false)
+    // Messages will be shown in the chat view - don't auto-scroll so user sees full conversation
   }
 
+  // Track if we're currently submitting audio to prevent double calls
+  const isSubmittingAudioRef = useRef(false);
+  
   const handleCallAudioData = async (audioBuffer: Float32Array, timestamp: number) => {
+    // Prevent double submissions
+    if (isSubmittingAudioRef.current) {
+      console.log('[Chat] Already submitting audio, skipping duplicate call')
+      return;
+    }
+    
+    isSubmittingAudioRef.current = true;
     console.log('[Chat] Received audio from call, length:', audioBuffer.length)
     
-    // Convert Float32Array to WAV Blob
-    const wavBlob = await convertFloat32ToWav(audioBuffer)
-    
-    // Convert to base64 data URL
-    const reader = new FileReader()
-    reader.onloadend = async () => {
-      const base64DataUrl = reader.result as string
+    try {
+      // Convert Float32Array to WAV Blob
+      const wavBlob = await convertFloat32ToWav(audioBuffer)
       
-      // Create message with audio modality
+      // Convert to base64 data URL using Promise instead of callback to avoid double-fire
+      const base64DataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(wavBlob)
+      });
+      
+      // Create message with audio modality (matching handleVoiceMessage format)
       const newMessage: any = {
         id: `msg-${Date.now()}`,
         role: 'user',
+        type: 'human',
         content: [
           {
             type: "media",
             mime_type: "audio/wav",
             data: base64DataUrl
           }
-        ],
-        timestamp: timestamp
+        ]
       }
 
-      console.log('[Chat] Submitting audio message:', newMessage)
+      console.log('[Chat] Submitting audio message:', newMessage.id)
+      console.log('[Chat] Current thread messages before submit:', thread.messages?.length || 0)
+      console.log('[Chat] Thread ID:', (thread as any).threadId || getCurrentThreadId() || 'new thread')
 
-      // Get agent configuration
+      // Get required IDs for LangGraph (same as handleSendMessage)
+      const userId = user?.sub || "anonymous-user";
+      const agentId = selectedAgent || "bbot";
+      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+
+      // Get agent configuration (same as handleSendMessage)
       const agentObj = agents.find((a: any) => a.id === selectedAgent)
-      const rawData = agentObj?.rawData || {}
-      const config = rawData.config || rawData.metadata?.config || {}
+      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
 
       // Extract output modalities from agent config
-      // Strictly use what's in the config, do not default to adding TTS if not present
       const outputModalities = config.output_modalities || []
       
       // EXCEPTION: For the BBot Platform assistant ("bbot" or "b-bot"), we ALWAYS enable TTS by default
@@ -958,7 +991,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         auto_play: true,
         streaming: true,
         provider: "elevenlabs",
-        api_key: "sk_b713243e39e908a55f2343b91c8113ee3010ecdf85c2ec18",
+        api_key: "sk_369bc04b35b9b5d9ad73db94bb90234b57f414ab23410c98",
         user_provider_key_id: 29,
         speed: 1
       }];
@@ -967,20 +1000,60 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         ? defaultBBotTTS 
         : outputModalities;
 
-      // Submit to LangGraph stream
-      await thread.submit({
-        messages: [newMessage],
-        ...config,
-        configurable: {
-          ...config.configurable,
-          input_modalities: config.input_modalities || [],
-          output_modalities: finalOutputModalities,
-          streamMode: ["values", "messages", "updates", "custom"]
+      // Merge assistant apps with user apps as OBJECTS (not arrays!)
+      const assistantApps = agentObj?.rawData?.config?.apps || {};
+      const userApps = {};
+      const mergedApps = { ...assistantApps, ...userApps };
+
+      // Get the current thread ID to ensure we use the same thread
+      const currentThreadId = getCurrentThreadId();
+      console.log('[Chat] Submitting to thread:', currentThreadId || 'new thread will be created');
+      
+      // Submit to LangGraph stream with required entity_id
+      thread.submit(
+        { 
+          messages: [newMessage],
+          entity_id: entityId,
+          user_id: userId,
+          agent_id: agentId
+        },
+        {
+          config: {
+            configurable: {
+              agent_id: agentId,
+              user_id: userId,
+              entity_id: entityId,
+              temperature: 0.7,
+              top_p: 1.0,
+              instructions: "Be helpful and concise.",
+              apps: mergedApps,
+              input_modalities: [],
+              output_modalities: finalOutputModalities,
+            }
+          },
+          streamMode: ["values", "messages", "updates", "custom"],
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [
+              ...(prev.messages ?? []),
+              newMessage,
+            ] as any,
+            entity_id: entityId,
+            user_id: userId,
+            agent_id: agentId,
+          }),
         }
-      } as any)
+      );
+      
+      console.log('[Chat] Voice call audio submitted to stream');
+    } catch (error) {
+      console.error('[Chat] Error submitting call audio:', error);
+    } finally {
+      // Reset the flag after a short delay to allow for next speech segment
+      setTimeout(() => {
+        isSubmittingAudioRef.current = false;
+      }, 500);
     }
-    
-    reader.readAsDataURL(wavBlob)
   }
 
   // Convert Float32Array to WAV Blob
@@ -1066,10 +1139,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return (
       <VoiceCallView
         agentName={agentData?.name || "B-Bot"}
-        agentAvatar={agentData?.profileImage || "/helpful-robot.png"}
+        agentAvatar={agentData?.profileImage || (selectedAgent === 'bbot' || selectedAgent === 'b-bot' ? "https://beyond-bot.ai/logo-schwarz.svg" : "/helpful-robot.png")}
         onEndCall={handleEndCall}
         onAudioData={handleCallAudioData}
+        onAudioPlayed={handleAudioPlayedDuringCall}
         messages={thread.messages || []}
+        audioMap={audioMap}
+        isLoading={thread.isLoading}
       />
     )
   }
@@ -1212,7 +1288,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onVideoCall={supportsVoiceCalls ? handleVideoCall : undefined}
           onSearchMessages={handleSearchMessages}
           agentName={selectedAgentData?.name || "B-Bot"}
-          agentAvatar={selectedAgentData?.profileImage || "/helpful-robot.png"}
+          agentAvatar={selectedAgentData?.profileImage || (selectedAgent === 'bbot' || selectedAgent === 'b-bot' ? "https://beyond-bot.ai/logo-schwarz.svg" : "/helpful-robot.png")}
           agentData={selectedAgentData}
           hasMessages={thread.messages && thread.messages.length > 0}
         />
@@ -1240,6 +1316,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           ) : (
             <EnhancedChatMessages
               shouldAutoPlayAudio={!isLoadingOldConversation}
+              playedMessageIds={playedDuringCall}
               messages={thread.messages?.filter((msg: any) => {
                 // Filter out empty AI messages that only contain tool_calls (trigger messages)
                 if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {

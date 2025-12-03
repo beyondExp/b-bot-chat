@@ -133,7 +133,7 @@ export function useAgents() {
             name: "B-Bot",
             shortDescription: "Your helpful AI assistant powered by LangGraph",
             description: "B-Bot is an intelligent AI assistant that can help you with various tasks, answer questions, and provide assistance across different domains. Built with LangGraph for reliable and efficient responses.",
-            profileImage: "/helpful-robot.png",
+            profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
             category: "General",
             publisherId: "b-bot-official",
             publisher: {
@@ -160,7 +160,7 @@ export function useAgents() {
             metadata: {
               owner: "b-bot-official",
               expert_profession: "General Assistant",
-              profileImage: "/helpful-robot.png"
+              profileImage: "https://beyond-bot.ai/logo-schwarz.svg"
             },
             rawData: {
               assistant_id: "bbot",
@@ -169,7 +169,7 @@ export function useAgents() {
               metadata: {
                 owner: "b-bot-official",
                 expert_profession: "General Assistant",
-                profileImage: "/helpful-robot.png"
+                profileImage: "https://beyond-bot.ai/logo-schwarz.svg"
               }
             }
           };

@@ -236,6 +236,7 @@ interface EnhancedChatMessagesProps {
   getMessageMetadata?: (message: ChatMessage) => MessageMetadata | undefined
   toolEvents?: any[] // Tool events like B-Bot Hub
   shouldAutoPlayAudio?: boolean // Whether to auto-play audio (false for old conversations)
+  playedMessageIds?: Set<string> // Message IDs that were already played (e.g., during a call)
 }
 
 // Helper to determine readable text color
@@ -268,11 +269,12 @@ export function EnhancedChatMessages({
   toolEvents,
   audioMap = {}, // 🔊 TTS audio chunks map
   shouldAutoPlayAudio = true, // Auto-play audio by default (false for old conversations)
+  playedMessageIds = new Set(), // Message IDs already played during call
 }: EnhancedChatMessagesProps) {
   // Get agent avatar
   const getAgentAvatar = () => {
-    if (selectedAgent === "bbot" || !selectedAgent) {
-      return "/helpful-robot.png";
+    if (selectedAgent === "bbot" || selectedAgent === "b-bot" || !selectedAgent) {
+      return "https://beyond-bot.ai/logo-schwarz.svg";
     }
     const agent = agents.find(a => a.id === selectedAgent);
     if (agent && agent.profileImage) {
@@ -350,43 +352,27 @@ export function EnhancedChatMessages({
             .filter((m) => {
               // Handle both string and array content
               let contentIsEmpty = false;
-              let contentLength = 0;
               
-              const content = m.content as any; // Type assertion to handle multiple content types
+              const content = m.content as any;
               
               if (typeof content === 'string') {
                 contentIsEmpty = !content || content.trim() === "";
-                contentLength = content?.length || 0;
               } else if (Array.isArray(content)) {
+                // Array content (multimodal) - check if it has any content
                 contentIsEmpty = content.length === 0;
-                contentLength = content.length;
               } else {
                 contentIsEmpty = !content;
               }
               
-              console.log("Processing message for display:", {
-                id: m.id,
-                type: m.type,
-                role: m.role,
-                hasContent: !contentIsEmpty,
-                contentType: typeof m.content,
-                contentLength,
-                hasToolCalls: !!(m.tool_calls && m.tool_calls.length > 0),
-                toolCallsCount: m.tool_calls?.length || 0
-              });
-              
               // Filter out empty AI messages that only contain tool_calls (trigger messages)
               if (m.type === "ai" && contentIsEmpty && m.tool_calls && m.tool_calls.length > 0) {
-                console.log("🚫 Filtering out empty AI message with tool_calls:", m.id);
                 return false;
               }
               // Filter out tool messages since they're displayed separately as tool events
               if (m.type === "tool") {
-                console.log("🚫 Filtering out tool message (shown as tool event):", m.id);
                 return false;
               }
               
-              console.log("✅ Message will be displayed:", m.id, m.type);
               return true;
             })
             .map((message: ChatMessage, idx: number) => {
@@ -464,7 +450,7 @@ export function EnhancedChatMessages({
                               <div className="mt-2 pt-2 border-t border-muted-foreground/20">
                                 <StreamingAudioPlayer 
                                   audioChunks={audioMap[message.id]} 
-                                  autoPlay={shouldAutoPlayAudio} 
+                                  autoPlay={shouldAutoPlayAudio && !playedMessageIds.has(message.id)} 
                                 />
                               </div>
                             )}
