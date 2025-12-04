@@ -150,6 +150,7 @@ export async function PATCH(request: NextRequest, contextPromise: Promise<{ para
 }
 
 const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app";
+const MAIN_API_URL = process.env.MAIN_API_URL || "https://api.b-bot.space/api";
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 
 // Helper to check for valid UUID
@@ -368,13 +369,11 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     let url: URL
     if (isAssistantByIdRequest) {
       // For individual assistant requests, use the new specific assistant endpoint
-      const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
-      url = new URL(`${mainApiUrl}/v3/public/assistants/${pathSegments[1]}`)
+      url = new URL(`${MAIN_API_URL}/v3/public/assistants/${pathSegments[1]}`)
       console.log("[EmbedProxy] Routing assistant by ID request to specific assistant endpoint:", url);
     } else {
       // Handle other requests through MainAPI proxy to LangGraph  
-      const mainApiUrl = process.env.LANGGRAPH_API_URL || "https://api.b-bot.space/api"
-      url = new URL(`${mainApiUrl}/v2/${targetPath}`)
+      url = new URL(`${MAIN_API_URL}/v2/${targetPath}`)
       console.log("[EmbedProxy] Routing through MainAPI to LangGraph:", url);
     }
     
