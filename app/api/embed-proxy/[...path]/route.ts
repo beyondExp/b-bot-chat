@@ -368,9 +368,9 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     // For other requests, set up the target URL
     let url: URL
     if (isAssistantByIdRequest) {
-      // For individual assistant requests, use the new specific assistant endpoint
-      url = new URL(`${MAIN_API_URL}/v3/public/assistants/${pathSegments[1]}`)
-      console.log("[EmbedProxy] Routing assistant by ID request to specific assistant endpoint:", url);
+      // For individual assistant requests, use the distribution channels endpoint
+      url = new URL(`${MAIN_API_URL}/v3/public/distribution-channels/${pathSegments[1]}`)
+      console.log("[EmbedProxy] Routing assistant by ID request to distribution channels endpoint:", url);
     } else {
       // Handle other requests through MainAPI proxy to LangGraph  
       url = new URL(`${MAIN_API_URL}/v2/${targetPath}`)
