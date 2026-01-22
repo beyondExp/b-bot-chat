@@ -320,7 +320,7 @@ export function EnhancedChatMessages({
   const welcomeSuggestions = suggestions && suggestions.length > 0 ? suggestions : ["Hello! How can you help me?", "What can you do?", "Tell me about yourself"];
 
   return (
-    <div className="chat-messages flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
+    <div className="chat-messages min-h-full p-4 space-y-2">
       {messages.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[400px]">
           <Avatar className="h-20 w-20 mb-4">
