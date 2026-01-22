@@ -1312,7 +1312,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   return (
     <>
-      <div className="fixed inset-0 flex flex-col bg-background overflow-hidden supports-[height:100dvh]:h-[100dvh]">
+      <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
         <ChatHeader
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={showSidebar}
@@ -1336,58 +1336,56 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           />
         )}
 
-        <div className="flex-1 min-h-0 relative">
-          <div className="absolute inset-0 overflow-y-auto overflow-x-hidden flex flex-col">
-            {isSelectingChat ? (
-              <div className="flex items-center justify-center h-full bg-background">
-                <div className="text-center">
-                  <div className="flex items-center justify-center mb-4">
-                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div>
-                  </div>
-                  <p className="text-lg font-semibold text-foreground mb-2">Loading conversation...</p>
-                  <p className="text-sm text-muted-foreground">Please wait while we load your chat history</p>
+        <div className="flex-1 overflow-y-auto min-h-0 scroll-smooth">
+          {isSelectingChat ? (
+            <div className="flex items-center justify-center h-full bg-background">
+              <div className="text-center">
+                <div className="flex items-center justify-center mb-4">
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div>
                 </div>
+                <p className="text-lg font-semibold text-foreground mb-2">Loading conversation...</p>
+                <p className="text-sm text-muted-foreground">Please wait while we load your chat history</p>
               </div>
-            ) : (
-              <EnhancedChatMessages
-                shouldAutoPlayAudio={!isLoadingOldConversation}
-                playedMessageIds={playedDuringCall}
-                messages={thread.messages?.filter((msg: any) => {
-                  // Filter out empty AI messages that only contain tool_calls (trigger messages)
-                  if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {
-                    console.log("🚫 [ChatInterface] Filtering out empty AI message with tool_calls:", msg.id);
-                    return false;
-                  }
-                  return true;
-                }).map((msg: any) => ({
-                  id: msg.id || `msg-${Date.now()}-${Math.random()}`,
-                  role: msg.role || (msg.type === 'human' ? 'user' : msg.type === 'tool' ? 'tool_response' : 'assistant'),
-                  content: msg.content, // ✅ Keep content as-is (string or array) for multimodality support
-                  type: msg.type,
-                  // Pass through tool call properties for proper inline display
-                  tool_calls: msg.tool_calls,
-                  tool_call_id: msg.tool_call_id,
-                  name: msg.name
-                })) || []}
-                messagesEndRef={messagesEndRef}
-                selectedAgent={selectedAgent}
-                agents={agents}
-                onSuggestionClick={handleSuggestionClick}
-                suggestions={
-                  agents.find((a: any) => a.id === selectedAgent)?.templates?.map((t: any) =>
-                    t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
-                  )
+            </div>
+          ) : (
+            <EnhancedChatMessages
+              shouldAutoPlayAudio={!isLoadingOldConversation}
+              playedMessageIds={playedDuringCall}
+              messages={thread.messages?.filter((msg: any) => {
+                // Filter out empty AI messages that only contain tool_calls (trigger messages)
+                if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {
+                  console.log("🚫 [ChatInterface] Filtering out empty AI message with tool_calls:", msg.id);
+                  return false;
                 }
-                userColor="#2563eb"
-                isLoading={thread.isLoading}
-                toolEvents={toolEvents}
-                audioMap={audioMap}
-              />
-            )}
-          </div>
+                return true;
+              }).map((msg: any) => ({
+                id: msg.id || `msg-${Date.now()}-${Math.random()}`,
+                role: msg.role || (msg.type === 'human' ? 'user' : msg.type === 'tool' ? 'tool_response' : 'assistant'),
+                content: msg.content, // ✅ Keep content as-is (string or array) for multimodality support
+                type: msg.type,
+                // Pass through tool call properties for proper inline display
+                tool_calls: msg.tool_calls,
+                tool_call_id: msg.tool_call_id,
+                name: msg.name
+              })) || []}
+              messagesEndRef={messagesEndRef}
+              selectedAgent={selectedAgent}
+              agents={agents}
+              onSuggestionClick={handleSuggestionClick}
+              suggestions={
+                agents.find((a: any) => a.id === selectedAgent)?.templates?.map((t: any) =>
+                  t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
+                )
+              }
+              userColor="#2563eb"
+              isLoading={thread.isLoading}
+              toolEvents={toolEvents}
+              audioMap={audioMap}
+            />
+          )}
         </div>
 
-        <div className="flex-shrink-0 bg-background border-t border-gray-200 dark:border-gray-700">
+        <div className="flex-none bg-background border-t border-gray-200 dark:border-gray-700">
           <ChatInput
             onSubmit={handleFormSubmit}
             onVoiceMessage={hasAudioInput() ? handleVoiceMessage : undefined}
