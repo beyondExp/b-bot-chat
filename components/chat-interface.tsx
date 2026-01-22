@@ -37,6 +37,30 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [agents, setAgents] = useState<any[]>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [agentsError, setAgentsError] = useState<string | null>(null)
+
+  // Prevent page-level scrolling; the chat should scroll inside the messages pane only.
+  // This avoids the "second scrollbar" + growing blank space below the sticky input.
+  useEffect(() => {
+    const body = document.body
+    const html = document.documentElement
+
+    const originalBodyOverflow = body.style.overflow
+    const originalHtmlOverflow = html.style.overflow
+    const originalBodyHeight = body.style.height
+    const originalHtmlHeight = html.style.height
+
+    body.style.overflow = "hidden"
+    html.style.overflow = "hidden"
+    body.style.height = "100%"
+    html.style.height = "100%"
+
+    return () => {
+      body.style.overflow = originalBodyOverflow
+      html.style.overflow = originalHtmlOverflow
+      body.style.height = originalBodyHeight
+      html.style.height = originalHtmlHeight
+    }
+  }, [])
   // Initialize selectedAgent from initialAgent, currentSession, or saved thread data
   const getInitialAgent = (): string | null => {
     // First priority: initialAgent prop
@@ -502,7 +526,21 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Scroll to bottom function
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      // Prefer scrolling the messages container to avoid page-level scrolling/layout growth
+      const chatContainer = messagesEndRef.current.closest(".chat-messages");
+      if (chatContainer) {
+        chatContainer.scrollTo({
+          top: chatContainer.scrollHeight,
+          behavior: "smooth",
+        });
+      } else {
+        // Fallback: keep the scroll local if possible
+        messagesEndRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "nearest",
+        });
+      }
     }
   };
 
@@ -1278,7 +1316,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   return (
     <>
-      <div className="flex flex-col h-screen bg-background">
+      <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
         <ChatHeader
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={showSidebar}
@@ -1302,7 +1340,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           />
         )}
 
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           {isSelectingChat ? (
             <div className="flex items-center justify-center h-full bg-background">
               <div className="text-center">
@@ -1351,7 +1389,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           )}
         </div>
 
-        <div className="bg-background border-t border-gray-200 dark:border-gray-700">
+        <div className="flex-shrink-0 bg-background border-t border-gray-200 dark:border-gray-700">
           <ChatInput
             onSubmit={handleFormSubmit}
             onVoiceMessage={hasAudioInput() ? handleVoiceMessage : undefined}

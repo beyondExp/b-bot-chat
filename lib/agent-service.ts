@@ -17,12 +17,62 @@ export const anonymousPublisher: Publisher = {
   followerCount: 0,
 }
 
+// Built-in B-Bot agent (should always be available in Chat, even if the backend returns no agents)
+const BBOT_AGENT: Agent = {
+  id: "bbot",
+  name: "B-Bot",
+  shortDescription: "Your helpful AI assistant powered by LangGraph",
+  description:
+    "B-Bot is an intelligent AI assistant that can help you with various tasks, answer questions, and provide assistance across different domains. Built with LangGraph for reliable and efficient responses.",
+  profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
+  category: "General",
+  publisherId: "b-bot-official",
+  publisher: {
+    id: "b-bot-official",
+    name: "B-Bot Team",
+    description: "The official B-Bot development team",
+    profileImage: "/logo.svg",
+    verified: true,
+    agentCount: 1,
+    followerCount: 0,
+  },
+  abilities: [
+    { id: "chat", name: "Chat", description: "General conversation and assistance" },
+    { id: "assistance", name: "Assistance", description: "Help with various tasks" },
+    { id: "general-knowledge", name: "General Knowledge", description: "Answer questions on various topics" },
+  ],
+  apps: [],
+  templates: ["Hello! How can I help you today?", "What can you do?", "Tell me about yourself", "Help me with a task"],
+  metadata: {
+    owner: "b-bot-official",
+    expert_profession: "General Assistant",
+    profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
+  },
+  rawData: {
+    assistant_id: "bbot",
+    name: "B-Bot",
+    description: "Your helpful AI assistant powered by LangGraph",
+    metadata: {
+      owner: "b-bot-official",
+      expert_profession: "General Assistant",
+      profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
+    },
+  },
+}
+
 export function useAgents() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const authenticatedFetch = useAuthenticatedFetch()
   const apiKeyFetch = useApiKeyFetch()
   const { user } = useAuth0()
+
+  const ensureBBotAgent = useCallback((list: Agent[]): Agent[] => {
+    const hasBBot = list.some(
+      (a) => a.id === "bbot" || a.id === "b-bot" || a.name?.toLowerCase?.() === "b-bot" || a.name?.toLowerCase?.() === "bbot",
+    )
+    return hasBBot ? list : [BBOT_AGENT, ...list]
+  }, [])
 
   // Function to get all agents using the new v3 endpoint
   const getAgents = useCallback(async (): Promise<Agent[]> => {
@@ -64,7 +114,7 @@ export function useAgents() {
       }
 
       console.log(`Processed ${agents.length} agents`)
-      return agents
+      return ensureBBotAgent(agents)
     } catch (err) {
       console.error("Error fetching agents:", err)
       setError("Failed to load agents")
@@ -86,15 +136,15 @@ export function useAgents() {
         const fallbackAgents = Array.isArray(fallbackResponse) ? fallbackResponse.map(transformApiAssistantToAgent) : []
         console.log(`Fetched ${fallbackAgents.length} agents from fallback endpoint`)
 
-        return fallbackAgents
+        return ensureBBotAgent(fallbackAgents)
       } catch (fallbackErr) {
         console.error("Error fetching agents from fallback endpoint:", fallbackErr)
-        return []
+        return ensureBBotAgent([])
       }
     } finally {
       setIsLoading(false)
     }
-  }, [authenticatedFetch, user])
+  }, [authenticatedFetch, ensureBBotAgent, user])
 
   // Helper function to transform API assistant format to our Agent format
   const transformApiAssistantToAgent = (assistant: any): Agent => {
@@ -128,52 +178,7 @@ export function useAgents() {
       try {
         // Special case for "bbot" - inject the agent information instead of fetching
         if (agentId === "bbot" || agentId === "b-bot") {
-          const bbotAgent: Agent = {
-            id: "bbot",
-            name: "B-Bot",
-            shortDescription: "Your helpful AI assistant powered by LangGraph",
-            description: "B-Bot is an intelligent AI assistant that can help you with various tasks, answer questions, and provide assistance across different domains. Built with LangGraph for reliable and efficient responses.",
-            profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
-            category: "General",
-            publisherId: "b-bot-official",
-            publisher: {
-              id: "b-bot-official",
-              name: "B-Bot Team",
-              description: "The official B-Bot development team",
-              profileImage: "/logo.svg",
-              verified: true,
-              agentCount: 1,
-              followerCount: 0,
-            },
-            abilities: [
-              { id: "chat", name: "Chat", description: "General conversation and assistance" },
-              { id: "assistance", name: "Assistance", description: "Help with various tasks" },
-              { id: "general-knowledge", name: "General Knowledge", description: "Answer questions on various topics" }
-            ],
-            apps: [],
-            templates: [
-              "Hello! How can I help you today?",
-              "What can you do?",
-              "Tell me about yourself",
-              "Help me with a task"
-            ],
-            metadata: {
-              owner: "b-bot-official",
-              expert_profession: "General Assistant",
-              profileImage: "https://beyond-bot.ai/logo-schwarz.svg"
-            },
-            rawData: {
-              assistant_id: "bbot",
-              name: "B-Bot",
-              description: "Your helpful AI assistant powered by LangGraph",
-              metadata: {
-                owner: "b-bot-official",
-                expert_profession: "General Assistant",
-                profileImage: "https://beyond-bot.ai/logo-schwarz.svg"
-              }
-            }
-          };
-          return bbotAgent;
+          return BBOT_AGENT
         }
 
         let responseData

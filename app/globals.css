@@ -1166,7 +1166,7 @@
 }
 
 .agent-card {
-  border-radius: 1rem;
+  border-radius: 2rem;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--card));
   overflow: hidden;
@@ -1186,7 +1186,7 @@
   top: 0.75rem;
   right: 0.75rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 1rem;
+  border-radius: 2rem;
   font-size: 0.75rem;
   font-weight: 500;
   z-index: 1;
@@ -1529,7 +1529,7 @@
   align-items: center;
   gap: 1rem;
   padding: 1rem;
-  border-radius: 1rem;
+  border-radius: 2rem;
   background-color: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   transition: transform 0.2s, box-shadow 0.2s;
@@ -1561,7 +1561,7 @@
   display: inline-block;
   padding: 0.25rem 0.5rem;
   background-color: hsla(var(--muted), 0.5);
-  border-radius: 1rem;
+  border-radius: 2rem;
   font-size: 0.75rem;
   color: hsl(var(--foreground));
   margin-top: 0.5rem;
@@ -1697,8 +1697,6 @@
 /* Mobile-specific improvements for chat input */
 @media (max-width: 640px) {
   .chat-input-container {
-    position: sticky;
-    bottom: 0;
     background-color: hsl(var(--background));
     border-top: 1px solid hsl(var(--border));
     z-index: 10;
@@ -1706,8 +1704,6 @@
   
   /* Ensure proper mobile viewport handling */
   .chat-input-container.sticky {
-    position: sticky;
-    bottom: 0;
     background-color: hsl(var(--background));
     backdrop-filter: blur(8px);
   }

@@ -962,7 +962,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background embedded-chat">
+    <div className="fixed inset-0 flex flex-col bg-background embedded-chat overflow-hidden">
       <EmbedChatHeader
         agentName={agentObj?.name}
         onNewChat={handleNewChat}
@@ -972,7 +972,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       />
       
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <EnhancedChatMessages
             messages={useMemo(() => {
               // Always use the branch manager as the source of truth when it has data
