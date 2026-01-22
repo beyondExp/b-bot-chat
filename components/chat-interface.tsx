@@ -1312,7 +1312,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   return (
     <>
-      <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
+      <div className="fixed inset-0 flex flex-col bg-background overflow-hidden supports-[height:100dvh]:h-[100dvh]">
         <ChatHeader
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={showSidebar}

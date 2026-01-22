@@ -311,7 +311,7 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
   const placeholderName = agentName || selectedAgent || "Assistant"
 
   return (
-    <div className="chat-input-container flex-shrink-0 p-4 bg-background z-10">
+    <div className="chat-input-container flex-shrink-0 p-4 bg-background z-10 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <form onSubmit={handleSubmit} className="w-full max-w-4xl mx-auto">
         {isRecording ? (
           /* Full-width recording UI */
