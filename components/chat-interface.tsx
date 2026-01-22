@@ -617,13 +617,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
           const defaultBBotTTS = [{
             type: "tts",
-            model_name: "elevenlabs/eleven_turbo_v2_5",
-            voice: "nPczCjzI2devNBz1zQrb",
+            model_name: "tts-1",
+            voice: "alloy",
             auto_play: true,
             streaming: true,
-            provider: "elevenlabs",
-            api_key: "sk_369bc04b35b9b5d9ad73db94bb90234b57f414ab23410c98",
-            user_provider_key_id: 29,
+            provider: "openai",
             speed: 1
           }];
           
@@ -742,13 +740,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
           const defaultBBotTTS = [{
             type: "tts",
-            model_name: "elevenlabs/eleven_turbo_v2_5",
-            voice: "nPczCjzI2devNBz1zQrb",
+            model_name: "tts-1",
+            voice: "alloy",
             auto_play: true,
             streaming: true,
-            provider: "elevenlabs",
-            api_key: "sk_369bc04b35b9b5d9ad73db94bb90234b57f414ab23410c98",
-            user_provider_key_id: 29,
+            provider: "openai",
             speed: 1
           }];
           
