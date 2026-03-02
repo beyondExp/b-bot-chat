@@ -1,12 +1,12 @@
 "use client"
 
-import { useAuth0 } from "@auth0/auth0-react"
 import { Sparkles } from "lucide-react"
 import Image from "next/image"
 import { useState } from "react"
+import { useAppAuth } from "@/lib/app-auth"
 
 export function LoginPage() {
-  const { loginWithRedirect, isLoading, error } = useAuth0()
+  const { loginWithRedirect, isLoading, error } = useAppAuth()
   const [loginError, setLoginError] = useState<string | null>(null)
   const [isAttemptingLogin, setIsAttemptingLogin] = useState(false)
 

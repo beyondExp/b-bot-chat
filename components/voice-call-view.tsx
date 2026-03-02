@@ -268,13 +268,6 @@ export function VoiceCallView({
     isAgentSpeakingRef.current = isAgentSpeaking
   }, [isAgentSpeaking])
   
-  // Auto-scroll messages to bottom when new messages arrive
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [messages])
-
   // Update audio amplitude for blob animation with smoothing
   const updateAmplitude = () => {
     let targetAmplitude = 0

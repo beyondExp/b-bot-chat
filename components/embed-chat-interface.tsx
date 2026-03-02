@@ -8,7 +8,6 @@ import { EnhancedChatMessages } from "./enhanced-chat-messages"
 // import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
 import { EmbedChatHeader } from "./embed-chat-header"
 import { ChatHistorySidebar } from "./chat-history-sidebar"
-import { useAuth0 } from "@auth0/auth0-react"
 import { getAuthToken, isLocallyAuthenticated } from "@/lib/api"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 import { useAgents } from "@/lib/agent-service"
@@ -17,6 +16,7 @@ import { useStream } from "@langchain/langgraph-sdk/react"
 import type { Message } from "@langchain/langgraph-sdk"
 import { ChatHistoryManager, ChatSession } from "@/lib/chat-history"
 import { messageMetadataManager, type ChatMessage, type MessageMetadata } from "@/lib/message-metadata"
+import { useAppAuth } from "@/lib/app-auth"
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
@@ -82,7 +82,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
   }, [darkMode]);
 
-  const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
+  const { isAuthenticated, getAccessTokenSilently, user } = useAppAuth()
 
   const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
 
@@ -297,7 +297,6 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     },
     onFinish: () => {
       console.log("Stream finished");
-      scrollToBottom();
       saveCurrentSession();
     },
     onThreadId: async (threadId: string) => {
@@ -500,33 +499,6 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     // Reload to load the selected thread
     window.location.reload();
   };
-
-  // Scroll to bottom function
-  const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      // Find the scrollable chat container
-      const chatContainer = messagesEndRef.current.closest('.chat-messages');
-      if (chatContainer) {
-        // Scroll the chat container to the bottom instead of using scrollIntoView
-        chatContainer.scrollTo({
-          top: chatContainer.scrollHeight,
-          behavior: 'smooth'
-        });
-      } else {
-        // Fallback to the element's scrollIntoView but with block: 'nearest' to prevent page scrolling
-        messagesEndRef.current.scrollIntoView({ 
-          behavior: "smooth", 
-          block: "nearest",
-          inline: "nearest" 
-        });
-      }
-    }
-  };
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    scrollToBottom();
-  }, [streamingMessages, thread.messages]);
 
   // Prevent page-level scrolling by setting body/html overflow
   useEffect(() => {

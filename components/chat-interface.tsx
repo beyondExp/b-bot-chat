@@ -20,10 +20,10 @@ import { ContactsPage } from "./contacts-page"
 import { VoiceCallView } from "./voice-call-view"
 import { AgentSelector } from "./agent-selector"
 import { useAgents } from "@/lib/agent-service"
-import { useAuth0 } from "@auth0/auth0-react"
 import { useAuthenticatedFetch, isLocallyAuthenticated, getAuthToken } from "@/lib/api"
 import { ThreadService, type Thread } from "@/lib/thread-service"
 import { convertToWav } from "@/lib/audio-converter"
+import { useAppAuth } from "@/lib/app-auth"
 
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
@@ -33,7 +33,7 @@ interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
-  const { user, isAuthenticated, getAccessTokenSilently } = useAuth0()
+  const { user, isAuthenticated, getAccessTokenSilently } = useAppAuth()
   const [agents, setAgents] = useState<any[]>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [agentsError, setAgentsError] = useState<string | null>(null)
@@ -364,7 +364,6 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     },
     onFinish: () => {
       console.log("Stream finished");
-      scrollToBottom();
       saveCurrentSession();
     },
     onThreadId: (threadId: string) => {
@@ -521,32 +520,6 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         content: typeof msg.content === 'string' ? msg.content.substring(0, 50) + '...' : msg.content
       })));
     }
-  }, [thread.messages]);
-
-  // Scroll to bottom function
-  const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      // Prefer scrolling the messages container to avoid page-level scrolling/layout growth
-      const chatContainer = messagesEndRef.current.closest(".chat-messages");
-      if (chatContainer) {
-        chatContainer.scrollTo({
-          top: chatContainer.scrollHeight,
-          behavior: "smooth",
-        });
-      } else {
-        // Fallback: keep the scroll local if possible
-        messagesEndRef.current.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-          inline: "nearest",
-        });
-      }
-    }
-  };
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    scrollToBottom();
   }, [thread.messages]);
 
   // Save current session to chat history (only once per thread)
@@ -1020,13 +993,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
       const defaultBBotTTS = [{
         type: "tts",
-        model_name: "elevenlabs/eleven_turbo_v2_5",
-        voice: "nPczCjzI2devNBz1zQrb",
+        model_name: "google/gemini-2.5-pro-preview-tts",
+        voice: "Zephyr",
         auto_play: true,
         streaming: true,
-        provider: "elevenlabs",
-        api_key: "sk_369bc04b35b9b5d9ad73db94bb90234b57f414ab23410c98",
-        user_provider_key_id: 29,
+        provider: "google",
         speed: 1
       }];
       

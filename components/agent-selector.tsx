@@ -13,7 +13,6 @@ import {
   LogIn,
 } from "lucide-react"
 import { useAgents } from "@/lib/agent-service"
-import { useAuth0 } from "@auth0/auth0-react"
 import type { Agent } from "@/types/agent"
 
 interface AgentSelectorProps {

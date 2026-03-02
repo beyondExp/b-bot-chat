@@ -27,6 +27,30 @@ export async function PATCH(request: NextRequest, contextPromise: Promise<{ para
   return handleProxyRequest(request, params.path, "PATCH");
 }
 
+function injectGeminiApiKey(body: any) {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return body
+
+  const configurable =
+    body?.config?.configurable ?? body?.configurable ?? body?.config?.configurable ?? body?.config?.configurable
+  const modalities = configurable?.output_modalities
+  if (!Array.isArray(modalities)) return body
+
+  configurable.output_modalities = modalities.map((m: any) => {
+    if (!m || m.type !== "tts") return m
+
+    const isGoogle = m.provider === "google" || (typeof m.model_name === "string" && m.model_name.startsWith("google/"))
+    if (!isGoogle) return m
+
+    if (!m.api_key) {
+      return { ...m, api_key: geminiKey }
+    }
+    return m
+  })
+
+  return body
+}
+
 async function handleProxyRequest(request: NextRequest, pathSegments: string[], method: string) {
   try {
     // Log the incoming headers for debugging
@@ -43,7 +67,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     }
 
     // Get the LangGraph API URL from environment variables
-    const langGraphApiUrl = process.env.SYNAPSE_URL || "http://localhost:2024"
+    const langGraphApiUrl = process.env.LANGGRAPH_API_URL || process.env.SYNAPSE_URL || "http://localhost:2024"
 
     // Get the API key from environment variables (server-side only)
     const apiKey = process.env.ADMIN_API_KEY
@@ -109,6 +133,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     if (method !== "GET" && method !== "HEAD") {
       try {
         body = await request.json()
+        body = injectGeminiApiKey(body)
 
         // If this is a streaming request to /threads/{threadId}/runs/stream
         // Format the payload according to the expected structure

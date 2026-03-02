@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { Menu, X, Sparkles, Phone, Video, MoreVertical, Search, ArrowLeft, Users, MessageSquare } from "lucide-react"
 import { UserProfile } from "@/components/user-profile"
-import { useAuth0 } from "@auth0/auth0-react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { AgentInfoModal } from "@/components/agent-info-modal"
@@ -35,7 +34,6 @@ export function ChatHeader({
   agentData,
   hasMessages = false
 }: ChatHeaderProps) {
-  const { isAuthenticated, isLoading } = useAuth0()
   const [showDebugInfo, setShowDebugInfo] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
 

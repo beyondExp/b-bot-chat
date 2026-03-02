@@ -28,12 +28,27 @@ This document describes the required environment variables for the B-Bot Chat Ap
 - **Default**: `your-super-secret-admin-key`
 - **Important**: Should match the ADMIN_API_KEY in your MainAPI/Synapse configuration
 
-#### Auth0 Configuration (for authenticated users)
+#### Auth Provider Selection
+
+#### `NEXT_PUBLIC_AUTH_PROVIDER`
+- **Purpose**: Select which authentication provider the frontend uses
+- **Values**:
+  - `auth0` (default)
+  - `zitadel`
+
+#### Auth0 Configuration (for authenticated users, default)
 
 - `NEXT_PUBLIC_AUTH0_DOMAIN`: Your Auth0 domain (e.g., `your-domain.auth0.com`)
 - `NEXT_PUBLIC_AUTH0_CLIENT_ID`: Your Auth0 client ID
-- `NEXT_PUBLIC_AUTH0_AUDIENCE`: Your API audience URL
+- `NEXT_PUBLIC_AUTH0_AUDIENCE`: Your API audience URL (recommended). Falls back to `NEXT_PUBLIC_SYNAPSE_URL`.
 - `NEXT_PUBLIC_SYNAPSE_URL`: Synapse URL for Auth0 audience (default: `http://localhost:2024`)
+
+#### Zitadel Configuration (for authenticated users, Swiss OC cluster local-dev)
+
+- `NEXT_PUBLIC_ZITADEL_AUTHORITY`: Zitadel issuer/authority URL (e.g., `https://zitadel.<cluster-domain>` or `https://<your-zitadel-domain>`).
+- `NEXT_PUBLIC_ZITADEL_CLIENT_ID`: Zitadel application client id (OIDC).
+- `NEXT_PUBLIC_ZITADEL_SCOPES`: OIDC scopes (default: `openid profile email`).
+- `NEXT_PUBLIC_ZITADEL_RESOURCE`: Optional resource parameter for Zitadel (only if your setup requires it).
 
 ### Payments
 
@@ -49,6 +64,17 @@ Create a `.env.local` file in the root of the b-bot-chat directory:
 LANGGRAPH_API_URL=http://localhost:2024
 MAIN_API_URL=http://localhost:8000/api
 ADMIN_API_KEY=your-super-secret-admin-key
+```
+
+If you want to use **Zitadel** locally (e.g. Swiss OC cluster):
+
+```env
+NEXT_PUBLIC_AUTH_PROVIDER=zitadel
+NEXT_PUBLIC_ZITADEL_AUTHORITY=https://your-zitadel-domain
+NEXT_PUBLIC_ZITADEL_CLIENT_ID=your-client-id
+NEXT_PUBLIC_ZITADEL_SCOPES=openid profile email
+# Optional:
+# NEXT_PUBLIC_ZITADEL_RESOURCE=your-resource
 ```
 
 ### Production Deployment

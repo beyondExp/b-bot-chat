@@ -16,20 +16,20 @@ import {
 } from "lucide-react"
 import Image from "next/image"
 import { formatPrice, formatTokenCount, calculateTokenCost } from "@/lib/stripe"
-import { useAuth0 } from "@auth0/auth0-react"
 import { PaymentModal } from "@/components/payment-modal"
 import { useRouter } from "next/navigation"
 import { PWAInstallGuide } from "@/components/pwa-install-guide"
 import { getFullAuth0User } from "@/lib/api"
 import { BbotTokenIcon } from "@/components/ui/bbot-token-icon"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
+import { useAppAuth } from "@/lib/app-auth"
 
 console.log("AccountPage file loaded");
 
 export default function AccountPage() {
   console.log("AccountPage component rendered");
   const router = useRouter()
-  const { user } = useAuth0()
+  const { user } = useAppAuth()
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<"overview" | "usage" | "billing" | "pricing">("overview")
   const [autoRechargeEnabled, setAutoRechargeEnabled] = useState(false)

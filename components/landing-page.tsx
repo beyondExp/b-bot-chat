@@ -1,6 +1,5 @@
 "use client"
 
-import { useAuth0 } from "@auth0/auth0-react"
 import {
   Sparkles,
   Bot,
@@ -24,9 +23,10 @@ import {
 import Image from "next/image"
 import { useState } from "react"
 import { PWAInstallGuide } from "./pwa-install-guide"
+import { useAppAuth } from "@/lib/app-auth"
 
 export function LandingPage() {
-  const { loginWithRedirect, isLoading, error } = useAuth0()
+  const { loginWithRedirect, isLoading, error } = useAppAuth()
   const [loginError, setLoginError] = useState<string | null>(null)
   const [isAttemptingLogin, setIsAttemptingLogin] = useState(false)
   const [showPWAGuide, setShowPWAGuide] = useState(false)

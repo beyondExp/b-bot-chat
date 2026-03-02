@@ -1,11 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useAuth0 } from "@auth0/auth0-react"
 import { LandingPage } from "./landing-page"
 import { useEffect, useState } from "react"
 import { PostLoginPWAPrompt } from "./post-login-pwa-prompt"
 import { useRouter } from "next/navigation"
+import { useAppAuth } from "@/lib/app-auth"
 
 interface AuthGuardProps {
   children: React.ReactNode
@@ -13,7 +13,7 @@ interface AuthGuardProps {
 }
 
 export function AuthGuard({ children, initialAgent }: AuthGuardProps) {
-  const { isAuthenticated, isLoading, error, loginWithRedirect } = useAuth0()
+  const { isAuthenticated, isLoading, error, loginWithRedirect } = useAppAuth()
   const [loadingTimeout, setLoadingTimeout] = useState(false)
   const [showPWAPrompt, setShowPWAPrompt] = useState(false)
   const router = useRouter()

@@ -2,6 +2,30 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 
+function injectGeminiApiKey(body: any) {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return body
+
+  const configurable =
+    body?.config?.configurable ?? body?.configurable ?? body?.config?.configurable ?? body?.config?.configurable
+  const modalities = configurable?.output_modalities
+  if (!Array.isArray(modalities)) return body
+
+  configurable.output_modalities = modalities.map((m: any) => {
+    if (!m || m.type !== "tts") return m
+
+    const isGoogle = m.provider === "google" || (typeof m.model_name === "string" && m.model_name.startsWith("google/"))
+    if (!isGoogle) return m
+
+    if (!m.api_key) {
+      return { ...m, api_key: geminiKey }
+    }
+    return m
+  })
+
+  return body
+}
+
 // Helper function to create anonymous threads for embed mode
 async function handleAnonymousThreadCreation(request: NextRequest) {
   console.log("[EmbedProxy] Creating anonymous thread for embed mode");
@@ -418,6 +442,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     if (method !== "GET" && method !== "HEAD") {
       try {
         body = await request.json()
+        body = injectGeminiApiKey(body)
 
         // If this is a streaming request to /threads/{threadId}/runs/stream
         // Format the payload according to the expected structure

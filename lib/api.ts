@@ -1,7 +1,7 @@
 "use client"
 
-import { useAuth0 } from "@auth0/auth0-react"
 import { useCallback } from "react"
+import { useAppAuth } from "@/lib/app-auth"
 
 const API_BASE_URL = "https://api.b-bot.space/api/v2"
 const API_V3_BASE_URL = "https://api.b-bot.space/api/v3"
@@ -83,7 +83,7 @@ export async function fetchWithServerAuth(endpoint: string): Promise<any> {
 
 // Custom hook for API calls that need authentication (client-side only)
 export function useAuthenticatedFetch() {
-  const { getAccessTokenSilently } = useAuth0()
+  const { getAccessTokenSilently } = useAppAuth()
 
   const getToken = useCallback(async () => {
     // Check if we have a valid cached token
@@ -199,13 +199,30 @@ export function getAuthToken(): string | null {
     return authToken
   }
 
-  // Try to get the token from Auth0 storage
+  // Try OIDC (Zitadel) user storage (oidc-client-ts)
   try {
-    const auth0Cache = localStorage.getItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.cache")
-    if (auth0Cache) {
-      const parsedCache = JSON.parse(auth0Cache)
-      if (parsedCache?.body?.access_token) {
-        return parsedCache.body.access_token
+    const oidcUserKey = Object.keys(localStorage).find((k) => k.startsWith("oidc.user:"))
+    if (oidcUserKey) {
+      const raw = localStorage.getItem(oidcUserKey)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed?.access_token) return parsed.access_token
+      }
+    }
+  } catch (e) {
+    console.error("Error retrieving token from OIDC cache:", e)
+  }
+
+  // Try to get the token from Auth0 storage (support any configured client id)
+  try {
+    const auth0CacheKey = Object.keys(localStorage).find((k) => k.startsWith("auth0.") && k.endsWith(".cache"))
+    if (auth0CacheKey) {
+      const auth0Cache = localStorage.getItem(auth0CacheKey)
+      if (auth0Cache) {
+        const parsedCache = JSON.parse(auth0Cache)
+        if (parsedCache?.body?.access_token) {
+          return parsedCache.body.access_token
+        }
       }
     }
   } catch (e) {
@@ -231,9 +248,10 @@ export function storeSynapseToken(token: string): void {
 export function isLocallyAuthenticated(): boolean {
   if (typeof window === "undefined") return false
 
-  // Check Auth0 authentication flag
-  const isAuth0Authenticated =
-    localStorage.getItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated") === "true"
+  // Check Auth0 authentication flag (any configured client id)
+  const isAuth0Authenticated = Object.keys(localStorage).some(
+    (k) => k.startsWith("auth0.") && k.endsWith(".is.authenticated") && localStorage.getItem(k) === "true",
+  )
 
   // Check if we have a synapse token
   const hasSynapseToken = !!localStorage.getItem("synapseToken")
@@ -250,8 +268,16 @@ export function isLocallyAuthenticated(): boolean {
 export function clearAuthData(): void {
   if (typeof window === "undefined") return
 
-  localStorage.removeItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated")
-  localStorage.removeItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.cache")
+  // Clear Auth0 keys (any client)
+  Object.keys(localStorage)
+    .filter((k) => k.startsWith("auth0."))
+    .forEach((k) => localStorage.removeItem(k))
+
+  // Clear oidc-client-ts keys (Zitadel)
+  Object.keys(localStorage)
+    .filter((k) => k.startsWith("oidc."))
+    .forEach((k) => localStorage.removeItem(k))
+
   localStorage.removeItem("synapseToken")
   localStorage.removeItem("auth_token")
 

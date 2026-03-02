@@ -20,8 +20,8 @@ import Image from "next/image"
 import type { Agent } from "@/types/agent"
 import { PublisherProfile } from "./publisher-profile"
 import { useAgents, anonymousPublisher } from "@/lib/agent-service"
-import { useAuth0 } from "@auth0/auth0-react"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
+import { useAppAuth } from "@/lib/app-auth"
 
 interface DiscoverPageProps {
   onSelectAgent: (agentId: string) => void
@@ -100,7 +100,7 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
   const [useFallback, setUseFallback] = useState(false)
   const [showMyAgents, setShowMyAgents] = useState(false)
 
-  const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
+  const { isAuthenticated, getAccessTokenSilently, user } = useAppAuth()
   const { getAgents } = useAgents()
 
   // Fetch agents

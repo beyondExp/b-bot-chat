@@ -1,27 +1,27 @@
 "use client"
 
-import { useAuth0 } from "@auth0/auth0-react"
 import { LogOut, Settings, User, LogIn } from "lucide-react"
 import Image from "next/image"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { useAppAuth } from "@/lib/app-auth"
+import { clearAuthData, isLocallyAuthenticated } from "@/lib/api"
 
 export function UserProfile() {
-  const { user, logout, isAuthenticated, loginWithRedirect, isLoading } = useAuth0()
+  const { user, logout, isAuthenticated, loginWithRedirect, isLoading } = useAppAuth()
   const [showDropdown, setShowDropdown] = useState(false)
   const [localAuthState, setLocalAuthState] = useState(false)
   const router = useRouter()
 
   // Check for local storage auth state on mount
   useEffect(() => {
-    const localAuth = localStorage.getItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated") === "true"
-    setLocalAuthState(localAuth)
+    setLocalAuthState(isLocallyAuthenticated())
 
     // Log auth state for debugging
     console.log("Auth state:", {
       isAuthenticated,
       isLoading,
-      localAuth,
+      localAuth: isLocallyAuthenticated(),
       hasUser: !!user,
     })
   }, [isAuthenticated, isLoading, user])
@@ -49,13 +49,11 @@ export function UserProfile() {
   }
 
   const handleLogout = () => {
-    // Clear local storage auth state
-    localStorage.removeItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated")
+    clearAuthData()
 
-    // Call Auth0 logout
     logout({
       logoutParams: {
-        returnTo: `${window.location.origin}/api/auth/logout`,
+        returnTo: window.location.origin,
       },
     })
   }

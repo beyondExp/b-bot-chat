@@ -9,9 +9,9 @@ import { Input } from '@/components/ui/input'
 import { ChatSession, ChatHistoryManager } from '@/lib/chat-history'
 import { cn } from '@/lib/utils'
 import { ThreadService, type Thread } from "@/lib/thread-service"
-import { useAuth0 } from "@auth0/auth0-react"
 import { isLocallyAuthenticated, getAuthToken, LANGGRAPH_AUDIENCE } from "@/lib/api"
 import Image from "next/image"
+import { useAppAuth } from "@/lib/app-auth"
 
 interface AgentWithChats {
   agentId: string
@@ -102,7 +102,7 @@ export function MainChatSidebar({
   const [agentsWithChats, setAgentsWithChats] = useState<AgentWithChats[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const { isAuthenticated, getAccessTokenSilently } = useAuth0()
+  const { isAuthenticated, getAccessTokenSilently } = useAppAuth()
 
   // Initialize thread service with auth token getter
   const getAuthTokenForService = async (): Promise<string | null> => {

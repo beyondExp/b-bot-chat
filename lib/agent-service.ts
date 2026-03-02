@@ -4,7 +4,7 @@ import { useState, useCallback } from "react"
 import { useAuthenticatedFetch, useApiKeyFetch } from "./api"
 import type { Agent } from "@/types/agent"
 import type { Publisher } from "@/types/publisher"
-import { useAuth0 } from "@auth0/auth0-react"
+import { useAppAuth } from "@/lib/app-auth"
 
 // Default anonymous publisher to use when no publisher data is available
 export const anonymousPublisher: Publisher = {
@@ -65,7 +65,7 @@ export function useAgents() {
   const [error, setError] = useState<string | null>(null)
   const authenticatedFetch = useAuthenticatedFetch()
   const apiKeyFetch = useApiKeyFetch()
-  const { user } = useAuth0()
+  const { user } = useAppAuth()
 
   const ensureBBotAgent = useCallback((list: Agent[]): Agent[] => {
     const hasBBot = list.some(
