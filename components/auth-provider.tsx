@@ -132,6 +132,10 @@ function ZitadelBridge({ children }: { children: React.ReactNode }) {
           .catch(() => undefined)
       },
       getAccessTokenSilently: async () => {
+        // Don't trigger silent auth if the user isn't logged in yet
+        if (!oidc.user || !oidc.isAuthenticated) {
+          throw new Error("No access token available from Zitadel session.")
+        }
         if (oidc.user && !oidc.user.expired && oidc.user.access_token) {
           localStorage.setItem("auth_token", oidc.user.access_token)
           return oidc.user.access_token
