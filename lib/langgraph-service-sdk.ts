@@ -124,7 +124,7 @@ export class LangGraphService {
   async invokeGraphStream(agentId: string, threadId: string, options: any = {}, headersOverride?: Record<string, string>) {
     try {
       // Use the proxy endpoint for streaming
-      const url = `${this.baseURL}/threads/${threadId}/runs/stream`
+      const url = `${this.baseURL}/bbot/threads/${threadId}/runs/stream`
 
       // Build the messages array as an array of objects
       let messages: any[] = []

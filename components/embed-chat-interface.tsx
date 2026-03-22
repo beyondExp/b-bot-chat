@@ -8,7 +8,6 @@ import { EnhancedChatMessages } from "./enhanced-chat-messages"
 // import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
 import { EmbedChatHeader } from "./embed-chat-header"
 import { ChatHistorySidebar } from "./chat-history-sidebar"
-import { useAuth0 } from "@auth0/auth0-react"
 import { getAuthToken, isLocallyAuthenticated } from "@/lib/api"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
 import { useAgents } from "@/lib/agent-service"
@@ -17,6 +16,8 @@ import { useStream } from "@langchain/langgraph-sdk/react"
 import type { Message } from "@langchain/langgraph-sdk"
 import { ChatHistoryManager, ChatSession } from "@/lib/chat-history"
 import { messageMetadataManager, type ChatMessage, type MessageMetadata } from "@/lib/message-metadata"
+import { useAppAuth } from "@/lib/app-auth"
+import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/chat-user-profile"
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
@@ -36,6 +37,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const { getAgent } = useAgents()
   const [agentObj, setAgentObj] = useState<any>(null);
   const [toolEvents, setToolEvents] = useState<any[]>([])
+  const [embedPassword, setEmbedPassword] = useState<string>("")
+  const embedPasswordKey = useMemo(() => `bbot.embed.pw.${selectedAgent}`, [selectedAgent])
 
   // Add tool event handling like B-Bot Hub
   const handleToolEvent = (event: any) => {
@@ -82,7 +85,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
   }, [darkMode]);
 
-  const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
+  const { isAuthenticated, getAccessTokenSilently, user } = useAppAuth()
 
   const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
 
@@ -178,6 +181,28 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     return '/api/embed-proxy';
   };
 
+  // Inject X-Embed-Password for embed-proxy calls (LangGraph SDK internal fetches)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const originalFetch = window.fetch
+    window.fetch = async (url: string | URL | Request, options?: RequestInit) => {
+      try {
+        const urlString = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url
+        if (urlString.includes("/api/embed-proxy/") && embedPassword) {
+          const existingHeaders = new Headers(options?.headers)
+          existingHeaders.set("X-Embed-Password", embedPassword)
+          return originalFetch(url, { ...(options || {}), headers: existingHeaders })
+        }
+      } catch {
+        // ignore
+      }
+      return originalFetch(url, options)
+    }
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [embedPassword])
+
   // Function to set thread metadata
   const setThreadMetadata = async (threadId: string) => {
     try {
@@ -270,6 +295,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId(embedId);
   };
 
+  const resetBrokenThread = useCallback(() => {
+    try {
+      ChatHistoryManager.clearCurrentThreadId(embedId)
+    } catch {}
+    setCurrentSession(null)
+    setThreadMetadataSet(null)
+    setStreamingMessages([])
+  }, [embedId])
+
   // State to track if we've set thread metadata
   const [threadMetadataSet, setThreadMetadataSet] = useState<string | null>(null);
 
@@ -292,12 +326,24 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         console.log("Ignoring balance error for anonymous user");
         return;
       }
+
+      // Dead/stale stream threads can get stuck in a retry loop in embed mode.
+      // Drop the current thread so the next message starts a fresh run.
+      const lower = errorMessage.toLowerCase()
+      if (
+        lower.includes("fetch failed") ||
+        lower.includes("socket") ||
+        lower.includes("504") ||
+        lower.includes("timeout")
+      ) {
+        console.warn("Resetting broken embed thread after stream transport failure")
+        resetBrokenThread()
+      }
       
       setAgentError(errorMessage || "An error occurred");
     },
     onFinish: () => {
       console.log("Stream finished");
-      scrollToBottom();
       saveCurrentSession();
     },
     onThreadId: async (threadId: string) => {
@@ -501,33 +547,6 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     window.location.reload();
   };
 
-  // Scroll to bottom function
-  const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      // Find the scrollable chat container
-      const chatContainer = messagesEndRef.current.closest('.chat-messages');
-      if (chatContainer) {
-        // Scroll the chat container to the bottom instead of using scrollIntoView
-        chatContainer.scrollTo({
-          top: chatContainer.scrollHeight,
-          behavior: 'smooth'
-        });
-      } else {
-        // Fallback to the element's scrollIntoView but with block: 'nearest' to prevent page scrolling
-        messagesEndRef.current.scrollIntoView({ 
-          behavior: "smooth", 
-          block: "nearest",
-          inline: "nearest" 
-        });
-      }
-    }
-  };
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    scrollToBottom();
-  }, [streamingMessages, thread.messages]);
-
   // Prevent page-level scrolling by setting body/html overflow
   useEffect(() => {
     // Set body and html styles to prevent page scrolling
@@ -558,6 +577,40 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         const agentData = await getAgent(selectedAgent, { allowAnonymous: true });
         if (agentData) {
           setAgentObj(agentData);
+          // Password-protected embeds: prompt once and store in sessionStorage
+          try {
+            const protectedFlag =
+              agentData?.metadata?.distributionChannel?.config?.password_protected === true ||
+              agentData?.rawData?.metadata?.distributionChannel?.config?.password_protected === true ||
+              agentData?.rawData?.password_protected === true
+            if (protectedFlag) {
+              const existing = (typeof sessionStorage !== "undefined" ? sessionStorage.getItem(embedPasswordKey) : "") || ""
+              const initial = existing.trim()
+              if (initial) {
+                setEmbedPassword(initial)
+              } else {
+                const pw = window.prompt("This embed is password-protected. Please enter the password:") || ""
+                const next = pw.trim()
+                if (!next) {
+                  setAgentError("Password required for this embed.")
+                  setAgentValid(false)
+                  return
+                }
+                try {
+                  sessionStorage.setItem(embedPasswordKey, next)
+                } catch {}
+                setEmbedPassword(next)
+              }
+            } else {
+              setEmbedPassword("")
+              try {
+                sessionStorage.removeItem(embedPasswordKey)
+              } catch {}
+            }
+          } catch {
+            // ignore
+          }
+
           setAgentValid(true);
         } else {
           setAgentError(`Agent '${selectedAgent}' not found`);
@@ -598,6 +651,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
+      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
+      const userProfile = loadChatUserProfile(user?.sub || "anonymous")
+      const baseSystemMessage =
+        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
+          ? (config as any).system_message.trim()
+          : "") || "Be helpful and concise."
+      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
       
       // Add manual blacklist to apps if in Embed mode (in addition to automatic blacklisting)
       // This allows for custom blacklist overrides per app
@@ -631,6 +691,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           max_tokens: 1024,
           top_p: 1.0,
           instructions: "Be helpful and concise.",
+          system_message,
           apps: mergedApps,
               distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
@@ -788,6 +849,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
+      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
+      const userProfile = loadChatUserProfile(user?.sub || "anonymous")
+      const baseSystemMessage =
+        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
+          ? (config as any).system_message.trim()
+          : "") || "Be helpful and concise."
+      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
 
       // Submit the conversation from edit point to regenerate AI response
       thread.submit(
@@ -807,6 +875,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               max_tokens: 1024,
               top_p: 1.0,
               instructions: "Be helpful and concise.",
+              system_message,
               apps: mergedApps,
               distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
@@ -889,6 +958,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
+      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
+      const userProfile = loadChatUserProfile(user?.sub || "anonymous")
+      const baseSystemMessage =
+        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
+          ? (config as any).system_message.trim()
+          : "") || "Be helpful and concise."
+      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
 
       // Submit the conversation up to the regeneration point
       thread.submit(
@@ -908,6 +984,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               max_tokens: 1024,
               top_p: 1.0,
               instructions: "Be helpful and concise.",
+              system_message,
               apps: mergedApps,
               distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
@@ -962,7 +1039,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background embedded-chat">
+    <div className="fixed inset-0 flex flex-col bg-background embedded-chat overflow-hidden">
       <EmbedChatHeader
         agentName={agentObj?.name}
         onNewChat={handleNewChat}
@@ -972,7 +1049,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       />
       
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <EnhancedChatMessages
             messages={useMemo(() => {
               // Always use the branch manager as the source of truth when it has data
@@ -1028,6 +1105,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             selectedAgent={selectedAgent}
             agentName={agentObj?.name}
             userColor={userColor}
+            draft={input}
+            onDraftChange={setInput}
           />
         </div>
       </div>

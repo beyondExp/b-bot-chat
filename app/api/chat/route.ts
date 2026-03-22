@@ -3,8 +3,14 @@ import type { NextRequest } from "next/server"
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30
 
+function _baseApi(): string {
+  const b = (process.env.MAIN_API_URL || process.env.MAIN_API_PUBLIC_URL || "").replace(/\/+$/, "")
+  if (!b) throw new Error("MAIN_API_URL not configured")
+  return b
+}
+
 // Helper function to safely read the request body
-async function safelyReadBody(req: NextRequest): Promise<any> {
+async function safelyReadBody(req: Request): Promise<any> {
   try {
     // Check if the request has a body
     const contentType = req.headers.get("content-type") || ""
@@ -222,7 +228,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       }
 
       // Add the message to the thread
-      const messageUrl = `https://api.b-bot.space/api/v2/threads/${threadId}/messages`
+      const messageUrl = `${_baseApi()}/v2/threads/${threadId}/messages`
       console.log(`Adding message to thread ${threadId}`)
 
       const messageResponse = await fetch(messageUrl, {
@@ -263,7 +269,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
       if (instructions) runRequestBody.instructions = instructions;
 
       // Run the thread with the selected assistant
-      const runUrl = `https://api.b-bot.space/api/v2/threads/${threadId}/graph`
+      const runUrl = `${_baseApi()}/v2/threads/${threadId}/graph`
       console.log(`Running thread ${threadId} with assistant ${agent || "b-bot"}`)
 
       const runResponse = await fetch(`${runUrl}?assistant_id=${agent || "b-bot"}`, {
@@ -329,7 +335,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
     if (userId) createThreadBody.user_id = userId
 
     // Create a new thread
-    const createThreadUrl = `https://api.b-bot.space/api/v2/threads`
+    const createThreadUrl = `${_baseApi()}/v2/threads`
     const createThreadResponse = await fetch(createThreadUrl, {
       method: "POST",
       headers,
@@ -354,7 +360,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
     console.log(`Created new thread with ID: ${newThreadId}`)
 
     // Add the message to the new thread
-    const newMessageUrl = `https://api.b-bot.space/api/v2/threads/${newThreadId}/messages`
+    const newMessageUrl = `${_baseApi()}/v2/threads/${newThreadId}/messages`
     console.log(`Adding message to new thread ${newThreadId}`)
 
     const newMessageResponse = await fetch(newMessageUrl, {
@@ -395,7 +401,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
     if (instructions) newRunRequestBody.instructions = instructions;
 
     // Run the new thread with the selected assistant
-    const newRunUrl = `https://api.b-bot.space/api/v2/threads/${newThreadId}/graph`
+    const newRunUrl = `${_baseApi()}/v2/threads/${newThreadId}/graph`
     console.log(`Running new thread ${newThreadId} with assistant ${agent || "b-bot"}`)
 
     const newRunResponse = await fetch(`${newRunUrl}?assistant_id=${agent || "b-bot"}`, {
@@ -476,7 +482,7 @@ async function handleDirectChat(
 ) {
   try {
     // If no threadId, fall back to the direct chat endpoint
-    const apiUrl = `https://api.b-bot.space/api/v2/assistants/${agent || "b-bot"}/chat`
+    const apiUrl = `${_baseApi()}/v2/assistants/${agent || "b-bot"}/chat`
     console.log(`Making direct chat request to ${apiUrl}`)
 
     // Convert conversation history to the expected format if needed

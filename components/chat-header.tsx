@@ -1,12 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { Menu, X, Sparkles, Phone, Video, MoreVertical, Search, ArrowLeft, Users, MessageSquare } from "lucide-react"
+import { Phone, Search, ArrowLeft, MessageSquare, LayoutDashboard } from "lucide-react"
 import { UserProfile } from "@/components/user-profile"
-import { useAuth0 } from "@auth0/auth0-react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { AgentInfoModal } from "@/components/agent-info-modal"
+import { useI18n } from "@/lib/i18n"
 
 interface ChatHeaderProps {
   onToggleSidebar: () => void
@@ -14,8 +14,8 @@ interface ChatHeaderProps {
   onToggleDiscover: () => void
   onViewContacts: () => void
   onVoiceCall?: () => void
-  onVideoCall?: () => void
   onSearchMessages?: () => void
+  onOpenWorkdesk?: () => void
   agentName?: string
   agentAvatar?: string
   agentData?: any
@@ -28,16 +28,16 @@ export function ChatHeader({
   onToggleDiscover,
   onViewContacts,
   onVoiceCall,
-  onVideoCall,
   onSearchMessages,
+  onOpenWorkdesk,
   agentName = "B-Bot",
   agentAvatar = "/logo-black.svg",
   agentData,
   hasMessages = false
 }: ChatHeaderProps) {
-  const { isAuthenticated, isLoading } = useAuth0()
   const [showDebugInfo, setShowDebugInfo] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
+  const { t } = useI18n()
 
   return (
     <>
@@ -50,7 +50,7 @@ export function ChatHeader({
             size="icon"
             onClick={onViewContacts}
             className="rounded-full flex-shrink-0"
-            aria-label="Back to contacts"
+            aria-label={t("header.backToContacts")}
           >
             <ArrowLeft size={20} />
           </Button>
@@ -61,7 +61,7 @@ export function ChatHeader({
             size="icon"
             onClick={onToggleSidebar}
             className="rounded-full flex-shrink-0"
-            aria-label="View conversations"
+            aria-label={t("header.viewConversations")}
           >
             <MessageSquare size={20} />
           </Button>
@@ -71,7 +71,7 @@ export function ChatHeader({
             className="hidden md:flex items-center gap-3 cursor-pointer hover:bg-muted/50 p-1 pr-3 rounded-lg transition-colors"
             onClick={() => setShowInfoModal(true)}
           >
-            <div className="relative w-10 h-10 rounded-full overflow-hidden bg-muted border border-border">
+            <div className="relative w-10 h-10 rounded-[1rem] overflow-hidden bg-muted border border-border">
               <Image 
                 src={agentAvatar} 
                 alt={agentName} 
@@ -81,7 +81,7 @@ export function ChatHeader({
             </div>
             <div className="flex flex-col">
               <span className="font-semibold text-sm leading-none">{agentName}</span>
-              <span className="text-xs text-muted-foreground mt-1">Online</span>
+              <span className="text-xs text-muted-foreground mt-1">{t("header.online")}</span>
             </div>
           </div>
         </div>
@@ -91,8 +91,8 @@ export function ChatHeader({
           <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 md:hidden">
             <button 
               onClick={() => setShowInfoModal(true)}
-              className="relative w-10 h-10 rounded-full overflow-hidden bg-muted border border-border hover:ring-2 hover:ring-primary/50 transition-all cursor-pointer animate-in fade-in zoom-in duration-300"
-              title="View Agent Info"
+              className="relative w-10 h-10 rounded-[1rem] overflow-hidden bg-muted border border-border hover:ring-2 hover:ring-primary/50 transition-all cursor-pointer animate-in fade-in zoom-in duration-300"
+              title={t("header.viewAgentInfo")}
             >
               <Image 
                 src={agentAvatar} 
@@ -106,30 +106,40 @@ export function ChatHeader({
 
         {/* Right Section: Actions */}
         <div className="flex items-center gap-1">
-          {/* Call Actions - Only show if agent supports voice calls */}
-          {(onVideoCall || onVoiceCall) && (
-            <>
-              {onVideoCall && (
-                <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted" onClick={onVideoCall}>
-                  <Video size={22} />
-                </Button>
-              )}
-              {onVoiceCall && (
-                <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted" onClick={onVoiceCall}>
-                  <Phone size={20} />
-                </Button>
-              )}
-              
-              <div className="w-px h-6 bg-border mx-2 hidden sm:block"></div>
-            </>
+          {onOpenWorkdesk && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted"
+              onClick={onOpenWorkdesk}
+              aria-label={t("workdesk.open")}
+              title={t("workdesk.open")}
+            >
+              <LayoutDashboard size={20} />
+            </Button>
           )}
+
+          {/* Call Actions */}
+          {onVoiceCall && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted"
+              onClick={onVoiceCall}
+              aria-label={t("common.voiceCall")}
+            >
+              <Phone size={20} />
+            </Button>
+          )}
+
+          <div className="w-px h-6 bg-border mx-2 hidden sm:block"></div>
 
           <Button 
             variant="ghost" 
             size="icon" 
             className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted hidden sm:flex"
             onClick={onSearchMessages}
-            aria-label="Search messages"
+            aria-label={t("header.searchMessages")}
           >
             <Search size={20} />
           </Button>

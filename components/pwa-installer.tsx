@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from "react"
 import { Download, X } from "lucide-react"
+import { useI18n } from "@/lib/i18n"
 
 export function PWAInstaller() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
   const [showInstallBanner, setShowInstallBanner] = useState(false)
   const [isInstalled, setIsInstalled] = useState(false)
+  const { t } = useI18n()
 
   // Check if the app is already installed
   const checkIfInstalled = () => {
@@ -35,6 +37,31 @@ export function PWAInstaller() {
 
     // Set initial installed state
     setIsInstalled(checkIfInstalled())
+
+    // One-time cache bust: old service worker cached Next.js bundles and caused stale JS.
+    // Clear caches + unregister once per version marker.
+    const cacheBustKey = "sw-cache-busted"
+    const cacheBustVersion = "v25"
+    if (localStorage.getItem(cacheBustKey) !== cacheBustVersion) {
+      ;(async () => {
+        try {
+          if ("caches" in window) {
+            const keys = await caches.keys()
+            await Promise.all(keys.map((k) => caches.delete(k)))
+          }
+        } catch {}
+        try {
+          if ("serviceWorker" in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations()
+            await Promise.all(regs.map((r) => r.unregister()))
+          }
+        } catch {}
+
+        localStorage.setItem(cacheBustKey, cacheBustVersion)
+        window.location.reload()
+      })()
+      return
+    }
 
     // Register service worker
     if ("serviceWorker" in navigator) {
@@ -133,20 +160,20 @@ export function PWAInstaller() {
         </div>
         <div className="flex-1">
           <div className="flex justify-between items-start">
-            <h3 className="font-medium">Install Beyond-Bot.ai</h3>
+            <h3 className="font-medium">{t("pwa.banner.title")}</h3>
             <button onClick={handleDismiss} className="text-muted-foreground hover:text-foreground">
               <X size={16} />
             </button>
           </div>
           <p className="text-sm text-muted-foreground mt-1 mb-3">
-            Install this app on your device for quick access even when you're offline.
+            {t("pwa.banner.body")}
           </p>
           <button
             onClick={handleInstallClick}
             className="w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
           >
             <Download size={16} />
-            <span>Install App</span>
+            <span>{t("pwa.banner.install")}</span>
           </button>
         </div>
       </div>

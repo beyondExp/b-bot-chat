@@ -13,7 +13,6 @@ import {
   LogIn,
 } from "lucide-react"
 import { useAgents } from "@/lib/agent-service"
-import { useAuth0 } from "@auth0/auth0-react"
 import type { Agent } from "@/types/agent"
 
 interface AgentSelectorProps {
@@ -93,7 +92,7 @@ export function AgentSelector({
         name: "B-Bot",
         shortDescription: "Your personal AI assistant",
         description: "B-Bot is your personal AI assistant that can help with a wide range of tasks.",
-        profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
+        profileImage: agentsList.find((a) => a.id === "bbot")?.profileImage || "https://beyond-bot.ai/logo-schwarz.svg",
         category: "General",
         publisherId: "beyond-official",
         abilities: [],

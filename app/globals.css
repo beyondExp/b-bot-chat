@@ -3,7 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --primary: 291 59% 31%;
+  /* Swiss Chat accent */
+  --primary: 0 100% 60%;
   --primary-foreground: 0 0% 100%;
 
   --background: 0 0% 100%;
@@ -18,7 +19,7 @@
   --muted: 0 0% 96.1%;
   --muted-foreground: 0 0% 45.1%;
 
-  --accent: 291 59% 31%;
+  --accent: 0 100% 60%;
   --accent-foreground: 0 0% 100%;
 
   --destructive: 0 84.2% 60.2%;
@@ -26,18 +27,18 @@
 
   --border: 0 0% 89.8%;
   --input: 0 0% 89.8%;
-  --ring: 291 59% 31%;
+  --ring: 0 100% 60%;
 
   --radius: 2rem;
 
   /* Badge colors */
-  --featured: 291 59% 31%;
+  --featured: 0 100% 60%;
   --new: 217 91% 60%;
   --popular: 25 95% 53%;
 }
 
 .dark {
-  --primary: 291 59% 31%;
+  --primary: 0 100% 60%;
   --primary-foreground: 0 0% 100%;
 
   --background: 0 0% 3.9%;
@@ -52,7 +53,7 @@
   --muted: 0 0% 14.9%;
   --muted-foreground: 0 0% 63.9%;
 
-  --accent: 291 59% 31%;
+  --accent: 0 100% 60%;
   --accent-foreground: 0 0% 100%;
 
   --destructive: 0 62.8% 30.6%;
@@ -60,10 +61,10 @@
 
   --border: 0 0% 14.9%;
   --input: 0 0% 14.9%;
-  --ring: 291 59% 31%;
+  --ring: 0 100% 60%;
 
   /* Badge colors */
-  --featured: 291 59% 31%;
+  --featured: 0 100% 60%;
   --new: 217 91% 60%;
   --popular: 25 95% 53%;
 }
@@ -998,13 +999,22 @@
   max-width: 1200px;
   margin: 0 auto;
   padding: 1.5rem;
-  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 @media (max-width: 640px) {
   .discover-page {
     padding: 1rem 1rem; /* Changed from 1rem 0.5rem to add more horizontal space */
   }
+}
+
+.discover-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 1rem;
 }
 
 .discover-header {
@@ -1166,7 +1176,7 @@
 }
 
 .agent-card {
-  border-radius: 1rem;
+  border-radius: 2rem;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--card));
   overflow: hidden;
@@ -1186,7 +1196,7 @@
   top: 0.75rem;
   right: 0.75rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 1rem;
+  border-radius: 2rem;
   font-size: 0.75rem;
   font-weight: 500;
   z-index: 1;
@@ -1322,6 +1332,31 @@
 
 .agent-card-button:hover {
   background-color: hsl(var(--primary) / 0.9);
+}
+
+.agent-card-contact-button {
+  padding: 0.75rem;
+  background-color: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  font-weight: 500;
+  text-align: center;
+  transition: background-color 0.2s, color 0.2s;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.agent-card-contact-button:hover {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.agent-card-contact-button.added {
+  background-color: hsla(var(--featured), 0.08);
+  color: hsl(var(--featured));
+}
+
+.agent-card-contact-button.added:hover {
+  background-color: hsla(var(--destructive), 0.1);
+  color: hsl(var(--destructive));
 }
 
 .discover-empty {
@@ -1529,7 +1564,7 @@
   align-items: center;
   gap: 1rem;
   padding: 1rem;
-  border-radius: 1rem;
+  border-radius: 2rem;
   background-color: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   transition: transform 0.2s, box-shadow 0.2s;
@@ -1561,7 +1596,7 @@
   display: inline-block;
   padding: 0.25rem 0.5rem;
   background-color: hsla(var(--muted), 0.5);
-  border-radius: 1rem;
+  border-radius: 2rem;
   font-size: 0.75rem;
   color: hsl(var(--foreground));
   margin-top: 0.5rem;
@@ -1697,8 +1732,6 @@
 /* Mobile-specific improvements for chat input */
 @media (max-width: 640px) {
   .chat-input-container {
-    position: sticky;
-    bottom: 0;
     background-color: hsl(var(--background));
     border-top: 1px solid hsl(var(--border));
     z-index: 10;
@@ -1706,8 +1739,6 @@
   
   /* Ensure proper mobile viewport handling */
   .chat-input-container.sticky {
-    position: sticky;
-    bottom: 0;
     background-color: hsl(var(--background));
     backdrop-filter: blur(8px);
   }

@@ -29,11 +29,13 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
   const audioChunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const cancelledRef = useRef(false)
 
   // Start recording
   const startRecording = useCallback(async () => {
     try {
       setError(null)
+      cancelledRef.current = false
       
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -70,6 +72,14 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
 
       // Handle recording stop
       mediaRecorder.onstop = () => {
+        if (cancelledRef.current) {
+          // Discard anything recorded during a cancelled capture.
+          audioChunksRef.current = []
+          setAudioBlob(null)
+          setAudioUrl(null)
+          cancelledRef.current = false
+          return
+        }
         // Create blob with the actual recorded format
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         const url = URL.createObjectURL(audioBlob)
@@ -102,6 +112,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
   // Stop recording
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
+      cancelledRef.current = false
       mediaRecorderRef.current.stop()
       setIsRecording(false)
       setIsPaused(false)
@@ -141,6 +152,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
   // Cancel recording
   const cancelRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
+      cancelledRef.current = true
       mediaRecorderRef.current.stop()
       setIsRecording(false)
       setIsPaused(false)
@@ -162,6 +174,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
 
   // Reset recording
   const resetRecording = useCallback(() => {
+    cancelledRef.current = false
     setIsRecording(false)
     setIsPaused(false)
     setRecordingTime(0)

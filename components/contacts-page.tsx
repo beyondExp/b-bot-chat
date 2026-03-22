@@ -4,24 +4,30 @@ import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
-import { ArrowLeft, Users, Sparkles, MessageSquare, Plus, Search, X } from 'lucide-react'
+import { ArrowLeft, Users, Sparkles, MessageSquare, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Image from "next/image"
 import { ChatHistoryManager, type ChatSession } from '@/lib/chat-history'
+import { useI18n } from "@/lib/i18n"
+import { ThreadService, type Thread } from "@/lib/thread-service"
+import { isLocallyAuthenticated, getAuthToken, LANGGRAPH_AUDIENCE } from "@/lib/api"
+import { useAppAuth } from "@/lib/app-auth"
 
 interface ContactsPageProps {
-  agents: any[]
+  contacts: any[]
+  allAgents: any[]
   onSelectAgent: (agentId: string) => void
   onSelectConversation?: (session: ChatSession) => void
   onDiscoverAgents: () => void
   onBack: () => void
   currentAgentId?: string
+  onRemoveContact?: (agentId: string) => void
 }
 
 // Helper function to get agent profile image
 const getAgentProfileImage = (agentId: string, agents: any[]): string => {
   if (agentId === 'bbot' || agentId === 'b-bot') {
-    return 'https://beyond-bot.ai/logo-schwarz.svg'
+    return agents.find(a => a.id === agentId)?.profileImage || 'https://beyond-bot.ai/logo-schwarz.svg'
   }
   
   const agent = agents.find(a => a.id === agentId)
@@ -29,23 +35,83 @@ const getAgentProfileImage = (agentId: string, agents: any[]): string => {
 }
 
 export function ContactsPage({
-  agents,
+  contacts,
+  allAgents,
   onSelectAgent,
   onSelectConversation,
   onDiscoverAgents,
   onBack,
-  currentAgentId
+  currentAgentId,
+  onRemoveContact
 }: ContactsPageProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [allConversations, setAllConversations] = useState<ChatSession[]>([])
-  const [filteredAgents, setFilteredAgents] = useState(agents)
+  const [filteredContacts, setFilteredContacts] = useState(contacts)
   const [filteredConversations, setFilteredConversations] = useState<ChatSession[]>([])
+  const { t } = useI18n()
+  const { isAuthenticated, getAccessTokenSilently, user } = useAppAuth()
+
+  const getAuthTokenForService = async (): Promise<string | null> => {
+    try {
+      if (isAuthenticated) {
+        return await getAccessTokenSilently({
+          authorizationParams: {
+            audience: LANGGRAPH_AUDIENCE,
+          },
+        })
+      }
+      if (isLocallyAuthenticated()) {
+        return getAuthToken()
+      }
+      return null
+    } catch (error) {
+      console.error("Failed to get auth token:", error)
+      return null
+    }
+  }
+
+  const threadService = new ThreadService(getAuthTokenForService)
+
+  const convertThreadToChatSession = (thread: Thread): ChatSession => {
+    const agentId = (thread.metadata as any)?.assistant_id || thread.config?.configurable?.agent_id || "bbot"
+    const threadUserId = (thread.metadata as any)?.owner || thread.config?.configurable?.user_id || user?.sub
+    const title = (thread.metadata as any)?.title || `Chat ${String(thread.thread_id).slice(-8)}`
+    return {
+      id: thread.thread_id,
+      threadId: thread.thread_id,
+      agentId,
+      userId: threadUserId,
+      title,
+      lastMessage: (thread.metadata as any)?.lastMessage || t("contacts.noMessages"),
+      timestamp: new Date(thread.updated_at).getTime(),
+    }
+  }
   
   // Load all conversations on mount
   useEffect(() => {
-    const sessions = ChatHistoryManager.getAllSessions()
-    setAllConversations(sessions)
-  }, [])
+    let mounted = true
+    ;(async () => {
+      try {
+        // Prefer server threads for authenticated/local-auth users so history survives storage clearing.
+        const hasUser = Boolean(user?.sub) || isLocallyAuthenticated()
+        if (hasUser) {
+          const threads = await threadService.getThreads()
+          if (mounted && Array.isArray(threads) && threads.length > 0) {
+            setAllConversations(threads.map(convertThreadToChatSession))
+            return
+          }
+        }
+      } catch (e) {
+        console.warn("[ContactsPage] Failed to load threads from server; falling back to local history", e)
+      }
+      if (mounted) {
+        setAllConversations(ChatHistoryManager.getAllSessions())
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [user?.sub])
   
   // Helper function to sort agents with B-Bot at the top
   const sortAgentsWithBBotFirst = (agentList: any[]) => {
@@ -65,7 +131,7 @@ export function ContactsPage({
   useEffect(() => {
     if (!searchQuery.trim()) {
       // No search query - show all agents sorted with B-Bot first
-      setFilteredAgents(sortAgentsWithBBotFirst(agents))
+      setFilteredContacts(sortAgentsWithBBotFirst(contacts))
       setFilteredConversations([])
       return
     }
@@ -73,7 +139,7 @@ export function ContactsPage({
     const query = searchQuery.toLowerCase()
     
     // Filter agents by name, description, or role
-    const matchingAgents = agents.filter(agent => 
+    const matchingAgents = contacts.filter(agent => 
       agent.name?.toLowerCase().includes(query) ||
       agent.description?.toLowerCase().includes(query) ||
       agent.role?.toLowerCase().includes(query)
@@ -86,9 +152,9 @@ export function ContactsPage({
     )
     
     // Sort matching agents with B-Bot first
-    setFilteredAgents(sortAgentsWithBBotFirst(matchingAgents))
+    setFilteredContacts(sortAgentsWithBBotFirst(matchingAgents))
     setFilteredConversations(matchingConversations)
-  }, [searchQuery, agents, allConversations])
+  }, [searchQuery, contacts, allConversations])
   
   const handleSelectAgent = (agentId: string) => {
     onSelectAgent(agentId)
@@ -109,9 +175,11 @@ export function ContactsPage({
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="text-xl font-semibold">Contacts</h1>
+            <h1 className="text-xl font-semibold">{t("contacts.title")}</h1>
             <p className="text-sm text-muted-foreground">
-              {agents.length} contact{agents.length !== 1 ? 's' : ''}
+              {t("contacts.count")
+                .replace("{count}", String(contacts.length))
+                .replace("{plural}", contacts.length === 1 ? "" : "s")}
             </p>
           </div>
         </div>
@@ -120,7 +188,7 @@ export function ContactsPage({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search contacts and conversations..."
+            placeholder={t("contacts.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9 pr-9"
@@ -129,7 +197,7 @@ export function ContactsPage({
             <button
               onClick={() => setSearchQuery('')}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              aria-label="Clear search"
+              aria-label={t("contacts.clearSearch")}
             >
               <X className="h-4 w-4" />
             </button>
@@ -140,37 +208,37 @@ export function ContactsPage({
       {/* Contacts List */}
       <ScrollArea className="flex-1">
         <div className="p-2">
-          {agents.length === 0 ? (
+          {contacts.length === 0 ? (
             <div className="text-center text-muted-foreground py-12">
               <Users className="h-16 w-16 mx-auto mb-4 opacity-50" />
-              <p className="text-lg mb-2">No contacts yet</p>
-              <p className="text-sm mb-6">Discover agents to start chatting</p>
+              <p className="text-lg mb-2">{t("contacts.noContactsYet")}</p>
+              <p className="text-sm mb-6">{t("contacts.discoverToStart")}</p>
               <Button
                 onClick={onDiscoverAgents}
                 className="mx-auto"
               >
                 <Sparkles className="h-4 w-4 mr-2" />
-                Discover Agents
+                {t("contacts.discoverAgents")}
               </Button>
             </div>
-          ) : searchQuery && filteredAgents.length === 0 && filteredConversations.length === 0 ? (
+          ) : searchQuery && filteredContacts.length === 0 && filteredConversations.length === 0 ? (
             <div className="text-center text-muted-foreground py-12">
               <Search className="h-16 w-16 mx-auto mb-4 opacity-50" />
-              <p className="text-lg mb-2">No results found</p>
-              <p className="text-sm">Try a different search term</p>
+              <p className="text-lg mb-2">{t("contacts.noResultsFound")}</p>
+              <p className="text-sm">{t("contacts.tryDifferentSearch")}</p>
             </div>
           ) : (
             <div className="space-y-4">
               {/* Contacts Section */}
-              {filteredAgents.length > 0 && (
+              {filteredContacts.length > 0 && (
                 <div>
                   {searchQuery && (
                     <h2 className="text-sm font-semibold text-muted-foreground px-2 py-1">
-                      CONTACTS ({filteredAgents.length})
+                      {t("contacts.section.contacts").replace("{count}", String(filteredContacts.length))}
                     </h2>
                   )}
                   <div className="space-y-1">
-                    {filteredAgents.map((agent) => (
+                    {filteredContacts.map((agent) => (
                       <div
                         key={agent.id}
                         className={cn(
@@ -179,9 +247,9 @@ export function ContactsPage({
                         )}
                         onClick={() => handleSelectAgent(agent.id)}
                       >
-                        <div className="relative w-14 h-14 rounded-full overflow-hidden bg-muted flex-shrink-0">
+                        <div className="relative w-14 h-14 rounded-[1rem] overflow-hidden bg-muted flex-shrink-0">
                           <Image
-                            src={getAgentProfileImage(agent.id, agents)}
+                            src={getAgentProfileImage(agent.id, allAgents)}
                             alt={agent.name}
                             fill
                             className="object-cover"
@@ -206,7 +274,24 @@ export function ContactsPage({
                             </p>
                           )}
                         </div>
-                        <MessageSquare className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                        {onRemoveContact ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="flex-shrink-0"
+                            aria-label={t("contacts.removeFromContacts")}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              onRemoveContact(agent.id)
+                            }}
+                          >
+                            <X className="h-5 w-5 text-muted-foreground" />
+                          </Button>
+                        ) : (
+                          <MessageSquare className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -217,11 +302,11 @@ export function ContactsPage({
               {searchQuery && filteredConversations.length > 0 && (
                 <div>
                   <h2 className="text-sm font-semibold text-muted-foreground px-2 py-1">
-                    CONVERSATIONS ({filteredConversations.length})
+                    {t("contacts.section.conversations").replace("{count}", String(filteredConversations.length))}
                   </h2>
                   <div className="space-y-1">
                     {filteredConversations.map((session) => {
-                      const agent = agents.find(a => a.id === session.agentId)
+                      const agent = allAgents.find(a => a.id === session.agentId)
                       return (
                         <div
                           key={session.id}
@@ -234,9 +319,9 @@ export function ContactsPage({
                             }
                           }}
                         >
-                          <div className="relative w-14 h-14 rounded-full overflow-hidden bg-muted flex-shrink-0">
+                          <div className="relative w-14 h-14 rounded-[1rem] overflow-hidden bg-muted flex-shrink-0">
                             <Image
-                              src={getAgentProfileImage(session.agentId, agents)}
+                              src={getAgentProfileImage(session.agentId, allAgents)}
                               alt={agent?.name || 'Agent'}
                               fill
                               className="object-cover"
@@ -248,13 +333,13 @@ export function ContactsPage({
                           </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="text-base font-semibold truncate">
-                              {session.title || 'Untitled Chat'}
+                              {session.title || t("contacts.untitledChat")}
                             </h3>
                             <p className="text-sm text-muted-foreground truncate">
-                              {session.lastMessage || 'No messages'}
+                              {session.lastMessage || t("contacts.noMessages")}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              with {agent?.name || session.agentId}
+                              {t("contacts.with").replace("{name}", agent?.name || session.agentId)}
                             </p>
                           </div>
                           <MessageSquare className="h-5 w-5 text-muted-foreground flex-shrink-0" />
@@ -277,7 +362,7 @@ export function ContactsPage({
           variant="default"
         >
           <Sparkles className="h-4 w-4" />
-          Discover Agents
+          {t("contacts.discoverAgents")}
         </Button>
       </div>
     </div>

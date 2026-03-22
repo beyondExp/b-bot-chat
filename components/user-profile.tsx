@@ -1,27 +1,30 @@
 "use client"
 
-import { useAuth0 } from "@auth0/auth0-react"
-import { LogOut, Settings, User, LogIn } from "lucide-react"
+import { LogOut, Settings, User, LogIn, Languages, Sparkles } from "lucide-react"
 import Image from "next/image"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { useAppAuth } from "@/lib/app-auth"
+import { clearAuthData, isLocallyAuthenticated } from "@/lib/api"
+import { flagForLocale, SUPPORTED_LOCALES, useI18n, type Locale } from "@/lib/i18n"
 
 export function UserProfile() {
-  const { user, logout, isAuthenticated, loginWithRedirect, isLoading } = useAuth0()
+  const { user, logout, isAuthenticated, loginWithRedirect, isLoading } = useAppAuth()
   const [showDropdown, setShowDropdown] = useState(false)
   const [localAuthState, setLocalAuthState] = useState(false)
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false)
   const router = useRouter()
+  const { t, locale, setLocale } = useI18n()
 
   // Check for local storage auth state on mount
   useEffect(() => {
-    const localAuth = localStorage.getItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated") === "true"
-    setLocalAuthState(localAuth)
+    setLocalAuthState(isLocallyAuthenticated())
 
     // Log auth state for debugging
     console.log("Auth state:", {
       isAuthenticated,
       isLoading,
-      localAuth,
+      localAuth: isLocallyAuthenticated(),
       hasUser: !!user,
     })
   }, [isAuthenticated, isLoading, user])
@@ -41,7 +44,7 @@ export function UserProfile() {
       <button
         onClick={() => loginWithRedirect()}
         className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-muted transition-colors"
-        title="Sign In"
+        title={t("auth.signIn")}
       >
         <LogIn size={20} className="text-muted-foreground hover:text-primary" />
       </button>
@@ -49,13 +52,11 @@ export function UserProfile() {
   }
 
   const handleLogout = () => {
-    // Clear local storage auth state
-    localStorage.removeItem("auth0.RShGzaeQqPJwM850f6MwzyODEDD4wMwK.is.authenticated")
+    clearAuthData()
 
-    // Call Auth0 logout
     logout({
       logoutParams: {
-        returnTo: `${window.location.origin}/api/auth/logout`,
+        returnTo: window.location.origin,
       },
     })
   }
@@ -65,9 +66,9 @@ export function UserProfile() {
       <button
         className="flex items-center gap-2"
         onClick={() => setShowDropdown(!showDropdown)}
-        aria-label="User profile"
+        aria-label={t("auth.userProfile")}
       >
-        <div className="w-8 h-8 rounded-full overflow-hidden border border-border">
+        <div className="w-8 h-8 rounded-[1rem] overflow-hidden border border-border">
           {user?.picture ? (
             <Image
               src={user.picture || "/placeholder.svg"}
@@ -88,7 +89,7 @@ export function UserProfile() {
         <div className="absolute right-0 mt-2 w-64 bg-card rounded-lg shadow-lg border border-border z-50 overflow-hidden">
           <div className="p-4 border-b border-border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full overflow-hidden border border-border">
+              <div className="w-10 h-10 rounded-[1rem] overflow-hidden border border-border">
                 {user?.picture ? (
                   <Image
                     src={user.picture || "/placeholder.svg"}
@@ -112,20 +113,76 @@ export function UserProfile() {
           <div className="p-2">
             <button
               className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
+              onClick={() => setShowLanguagePicker((v) => !v)}
+              aria-label={t("settings.language")}
+            >
+              <Languages size={16} />
+              <span>{t("settings.language")}</span>
+              <span className="ml-auto text-lg leading-none">{flagForLocale(locale)}</span>
+            </button>
+
+            {showLanguagePicker && (
+              <div className="px-2 pb-2">
+                <div className="grid grid-cols-4 gap-1 rounded-md border border-border bg-background p-2">
+                  {(SUPPORTED_LOCALES as readonly Locale[]).map((l) => (
+                    <button
+                      key={l}
+                      type="button"
+                      className={[
+                        "flex items-center justify-center rounded-md p-2 text-xl leading-none hover:bg-muted",
+                        l === locale ? "bg-muted" : "",
+                      ].join(" ")}
+                      onClick={() => {
+                        setLocale(l)
+                        setShowLanguagePicker(false)
+                      }}
+                      aria-label={t(`lang.${l}`)}
+                      title={t(`lang.${l}`)}
+                    >
+                      {flagForLocale(l)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button
+              className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
+              onClick={() => {
+                router.push("/account?tab=chatProfile")
+                setShowDropdown(false)
+              }}
+            >
+              <Sparkles size={16} />
+              <span>{t("account.nav.chatProfile")}</span>
+            </button>
+
+            <button
+              className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
               onClick={() => {
                 router.push("/account")
                 setShowDropdown(false)
               }}
             >
               <Settings size={16} />
-              <span>Account & Billing</span>
+              <span>{t("auth.accountBilling")}</span>
+            </button>
+            <button
+              className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
+              onClick={() => {
+                router.push("/account?tab=chatProfile")
+                setShowDropdown(false)
+              }}
+            >
+              <User size={16} />
+              <span>{t("account.nav.chatProfile")}</span>
             </button>
             <button
               className="w-full flex items-center gap-2 p-2 text-sm text-destructive hover:bg-muted rounded-md transition-colors"
               onClick={handleLogout}
             >
               <LogOut size={16} />
-              <span>Sign out</span>
+              <span>{t("auth.signOut")}</span>
             </button>
           </div>
         </div>

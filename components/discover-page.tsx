@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
   Search,
   X,
@@ -20,13 +20,16 @@ import Image from "next/image"
 import type { Agent } from "@/types/agent"
 import { PublisherProfile } from "./publisher-profile"
 import { useAgents, anonymousPublisher } from "@/lib/agent-service"
-import { useAuth0 } from "@auth0/auth0-react"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
+import { useAppAuth } from "@/lib/app-auth"
+import { useI18n } from "@/lib/i18n"
 
 interface DiscoverPageProps {
   onSelectAgent: (agentId: string) => void
   onClose?: () => void
   recentAgents: string[]
+  contactAgentIds?: string[]
+  onToggleContact?: (agentId: string) => void
 }
 
 // Fallback data in case API fails
@@ -88,7 +91,13 @@ const fallbackAgents: Agent[] = [
   },
 ]
 
-export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: DiscoverPageProps) {
+export function DiscoverPage({
+  onSelectAgent,
+  onClose,
+  recentAgents = [],
+  contactAgentIds = [],
+  onToggleContact,
+}: DiscoverPageProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [filteredAgents, setFilteredAgents] = useState<Agent[]>([])
@@ -99,8 +108,10 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
   const [error, setError] = useState<string | null>(null)
   const [useFallback, setUseFallback] = useState(false)
   const [showMyAgents, setShowMyAgents] = useState(false)
+  const contactSet = useMemo(() => new Set((contactAgentIds || []).filter(Boolean)), [contactAgentIds])
+  const { t } = useI18n()
 
-  const { isAuthenticated, getAccessTokenSilently, user } = useAuth0()
+  const { isAuthenticated, getAccessTokenSilently, user } = useAppAuth()
   const { getAgents } = useAgents()
 
   // Fetch agents
@@ -122,7 +133,7 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
 
         // Fetch agents
         console.log("Fetching agents...")
-        const agentsResponse = await getAgents()
+        const agentsResponse: any = await getAgents()
         console.log("Agents response:", agentsResponse)
 
         // Check if the response is an array or has a results property
@@ -133,14 +144,20 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
             : []
 
         console.log(`Processed ${agents.length} agents`)
-        setAgents(agents)
+        setAgents(agents as Agent[])
 
         // Extract unique categories
-        const uniqueCategories = Array.from(new Set(agents.map((agent: Agent) => agent.category)))
+        const uniqueCategories: string[] = Array.from(
+          new Set(
+            (agents || [])
+              .map((agent: any) => String(agent?.category || "").trim())
+              .filter(Boolean),
+          ),
+        )
         setCategories(uniqueCategories)
 
         // All agents already have the anonymous publisher set in transformApiAssistantToAgent
-        setFilteredAgents(agents)
+        setFilteredAgents(agents as Agent[])
         setUseFallback(false)
       } catch (err) {
         console.error("Error fetching data:", err)
@@ -151,7 +168,7 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
         setAgents(fallbackAgents)
 
         // Extract unique categories from fallback data
-        const uniqueCategories = Array.from(new Set(fallbackAgents.map((agent) => agent.category)))
+        const uniqueCategories: string[] = Array.from(new Set(fallbackAgents.map((agent) => agent.category)))
         setCategories(uniqueCategories)
 
         setFilteredAgents(fallbackAgents)
@@ -235,7 +252,7 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
     return (
       <div className="discover-page">
         <div className="flex items-center justify-center h-64">
-          <div className="animate-pulse text-lg">Loading agents...</div>
+          <div className="animate-pulse text-lg">{t("discover.loadingAgents")}</div>
         </div>
       </div>
     )
@@ -250,10 +267,10 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
   const userAgentsCount = agents.filter((agent) => agent.isPublishedByUser).length
 
   return (
-    <div className="discover-page">
+    <div className="discover-page discover-page-shell">
       {error && (
         <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
-          <p className="font-bold">Note</p>
+          <p className="font-bold">{t("discover.noteTitle")}</p>
           <p>{error}</p>
         </div>
       )}
@@ -264,29 +281,32 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
             <button
               onClick={onClose}
               className="p-2 rounded-full hover:bg-muted transition-colors"
-              aria-label="Go back"
+              aria-label={t("discover.goBack")}
             >
               <ArrowLeft size={20} />
             </button>
           )}
           <div className="flex-1">
-            <h1 className="discover-title">Discover AI Agents</h1>
+            <h1 className="discover-title">{t("discover.title")}</h1>
           </div>
         </div>
-        <p className="discover-description">Find the perfect AI agent for your needs from our growing collection</p>
 
         {/* Search bar */}
         <div className="discover-search-container">
           <Search className="discover-search-icon" size={18} />
           <input
             type="text"
-            placeholder="Search agents by name, description, category, or publisher..."
+            placeholder={t("discover.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="discover-search-input"
           />
           {searchQuery && (
-            <button className="discover-search-clear" onClick={() => setSearchQuery("")} aria-label="Clear search">
+            <button
+              className="discover-search-clear"
+              onClick={() => setSearchQuery("")}
+              aria-label={t("discover.clearSearch")}
+            >
               <X size={16} />
             </button>
           )}
@@ -301,7 +321,7 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
               setShowMyAgents(false)
             }}
           >
-            All
+            {t("discover.all")}
           </button>
 
           {/* My Agents filter - only show if user has published agents */}
@@ -317,7 +337,7 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
             >
               <div className="flex items-center gap-1">
                 <UserIcon size={14} />
-                <span>My Agents ({userAgentsCount})</span>
+                <span>{t("discover.myAgents").replace("{count}", String(userAgentsCount))}</span>
               </div>
             </button>
           )}
@@ -335,30 +355,18 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
             </button>
           ))}
         </div>
-
-        <div className="discover-hub-banner">
-          <div className="discover-hub-content">
-            <h3 className="discover-hub-title">Want to create your own AI agents?</h3>
-            <p className="discover-hub-description">
-              Visit the Beyond-Bot.ai Hub to create, publish, and monetize custom AI agents.
-            </p>
-          </div>
-          <a href="https://hub.b-bot.space" target="_blank" rel="noopener noreferrer" className="discover-hub-button">
-            <span>Go to Creator Hub</span>
-            <ExternalLink size={16} />
-          </a>
-        </div>
       </div>
 
-      {/* My Agents section */}
-      {showMyAgents && (
-        <div className="discover-section">
-          <h2 className="discover-section-title">My Published Agents</h2>
+      <div className="discover-content">
+        {/* My Agents section */}
+        {showMyAgents && (
+          <div className="discover-section">
+          <h2 className="discover-section-title">{t("discover.myPublishedAgents")}</h2>
           <div className="discover-grid">
             {filteredAgents.length > 0 ? (
               filteredAgents.map((agent) => (
                 <div key={agent.id} className="agent-card">
-                  <div className="agent-card-badge featured">My Agent</div>
+                  <div className="agent-card-badge featured">{t("discover.badge.myAgent")}</div>
                   <div className="agent-card-image-container">
                     <Image
                       src={agent.profileImage || "/placeholder.svg?height=80&width=80"}
@@ -378,31 +386,46 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                       <span>{agent.category}</span>
                     </div>
                   </div>
+                  {onToggleContact && (
+                    <button
+                      type="button"
+                      className={`agent-card-contact-button ${contactSet.has(agent.id) ? "added" : ""}`}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onToggleContact(agent.id)
+                      }}
+                    >
+                      {contactSet.has(agent.id) ? t("discover.removeFromContacts") : t("discover.addToContacts")}
+                    </button>
+                  )}
                   <button className="agent-card-button" onClick={() => onSelectAgent(agent.id)}>
-                    Chat Now
+                    {t("discover.chatNow")}
                   </button>
                 </div>
               ))
             ) : (
               <div className="col-span-full text-center py-8 text-muted-foreground">
-                You haven't published any agents yet.
+                {t("discover.noPublishedAgents")}
               </div>
             )}
           </div>
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Featured agents section */}
-      {!searchQuery && !selectedCategory && !showMyAgents && (
-        <div className="discover-section">
-          <h2 className="discover-section-title">Featured Agents</h2>
+        {/* Featured agents section */}
+        {!searchQuery && !selectedCategory && !showMyAgents && (
+          <div className="discover-section">
+          <h2 className="discover-section-title">{t("discover.featuredAgents")}</h2>
           <div className="discover-grid">
             {filteredAgents
               .filter((agent) => agent.featured || agent.metadata?.distributionChannel?.config?.public)
               .slice(0, 4)
               .map((agent) => (
                 <div key={agent.id} className="agent-card featured">
-                  <div className="agent-card-badge featured">{agent.isPublishedByUser ? "My Agent" : "Featured"}</div>
+                  <div className="agent-card-badge featured">
+                    {agent.isPublishedByUser ? t("discover.badge.myAgent") : t("discover.badge.featured")}
+                  </div>
                   <div className="agent-card-image-container">
                     <Image
                       src={agent.profileImage || "/placeholder.svg?height=80&width=80"}
@@ -427,12 +450,12 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                       <div className="publisher-avatar">
                         <Image
                           src="/placeholder.svg?height=20&width=20"
-                          alt="Anonymous Publisher"
+                          alt={t("discover.anonymousPublisher")}
                           width={20}
                           height={20}
                         />
                       </div>
-                      <span className="publisher-name">Anonymous Publisher</span>
+                      <span className="publisher-name">{t("discover.anonymousPublisher")}</span>
                     </div>
 
                     {/* Agent abilities */}
@@ -445,7 +468,9 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                           </div>
                         ))}
                         {agent.abilities.length > 2 && (
-                          <div className="agent-card-ability more">+{agent.abilities.length - 2} more</div>
+                          <div className="agent-card-ability more">
+                            {t("discover.more").replace("{count}", String(agent.abilities.length - 2))}
+                          </div>
                         )}
                       </div>
                     )}
@@ -460,30 +485,47 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                           </div>
                         ))}
                         {agent.apps.length > 2 && (
-                          <div className="agent-card-app more">+{agent.apps.length - 2} more</div>
+                          <div className="agent-card-app more">
+                            {t("discover.more").replace("{count}", String(agent.apps.length - 2))}
+                          </div>
                         )}
                       </div>
                     )}
                   </div>
+                  {onToggleContact && (
+                    <button
+                      type="button"
+                      className={`agent-card-contact-button ${contactSet.has(agent.id) ? "added" : ""}`}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onToggleContact(agent.id)
+                      }}
+                    >
+                      {contactSet.has(agent.id) ? t("discover.removeFromContacts") : t("discover.addToContacts")}
+                    </button>
+                  )}
                   <button className="agent-card-button" onClick={() => onSelectAgent(agent.id)}>
-                    Chat Now
+                    {t("discover.chatNow")}
                   </button>
                 </div>
               ))}
           </div>
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Recently chatted agents section */}
-      {!searchQuery && !selectedCategory && !showMyAgents && recentAgents && recentAgents.length > 0 && (
-        <div className="discover-section">
-          <h2 className="discover-section-title">Recently Chatted</h2>
+        {/* Recently chatted agents section */}
+        {!searchQuery && !selectedCategory && !showMyAgents && recentAgents && recentAgents.length > 0 && (
+          <div className="discover-section">
+          <h2 className="discover-section-title">{t("discover.recentlyChatted")}</h2>
           <div className="discover-grid">
             {filteredAgents
               .filter((agent) => recentAgents.includes(agent.id))
               .map((agent) => (
                 <div key={agent.id} className="agent-card">
-                  {agent.isPublishedByUser && <div className="agent-card-badge featured">My Agent</div>}
+                  {agent.isPublishedByUser && (
+                    <div className="agent-card-badge featured">{t("discover.badge.myAgent")}</div>
+                  )}
                   <div className="agent-card-image-container">
                     <Image
                       src={agent.profileImage || "/placeholder.svg?height=80&width=80"}
@@ -508,12 +550,12 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                       <div className="publisher-avatar">
                         <Image
                           src="/placeholder.svg?height=20&width=20"
-                          alt="Anonymous Publisher"
+                          alt={t("discover.anonymousPublisher")}
                           width={20}
                           height={20}
                         />
                       </div>
-                      <span className="publisher-name">Anonymous Publisher</span>
+                      <span className="publisher-name">{t("discover.anonymousPublisher")}</span>
                     </div>
 
                     {/* Agent abilities */}
@@ -526,39 +568,58 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                           </div>
                         ))}
                         {agent.abilities.length > 2 && (
-                          <div className="agent-card-ability more">+{agent.abilities.length - 2} more</div>
+                          <div className="agent-card-ability more">
+                            {t("discover.more").replace("{count}", String(agent.abilities.length - 2))}
+                          </div>
                         )}
                       </div>
                     )}
                   </div>
+                  {onToggleContact && (
+                    <button
+                      type="button"
+                      className={`agent-card-contact-button ${contactSet.has(agent.id) ? "added" : ""}`}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onToggleContact(agent.id)
+                      }}
+                    >
+                      {contactSet.has(agent.id) ? t("discover.removeFromContacts") : t("discover.addToContacts")}
+                    </button>
+                  )}
                   <button className="agent-card-button" onClick={() => onSelectAgent(agent.id)}>
-                    Chat Now
+                    {t("discover.chatNow")}
                   </button>
                 </div>
               ))}
           </div>
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* All agents section (for search results) */}
-      {(searchQuery || selectedCategory) && (
-        <div className="discover-section">
+        {/* All agents section (for search results) */}
+        {(searchQuery || selectedCategory) && (
+          <div className="discover-section">
           <h2 className="discover-section-title">
-            {filteredAgents.length} {filteredAgents.length === 1 ? "Agent" : "Agents"} Found
+            {filteredAgents.length === 1
+              ? t("discover.agentFound.singular").replace("{count}", String(filteredAgents.length))
+              : t("discover.agentFound.plural").replace("{count}", String(filteredAgents.length))}
           </h2>
           {filteredAgents.length > 0 ? (
             <div className="discover-grid">
               {filteredAgents.map((agent) => (
                 <div key={agent.id} className="agent-card">
-                  {agent.isPublishedByUser && <div className="agent-card-badge featured">My Agent</div>}
+                  {agent.isPublishedByUser && (
+                    <div className="agent-card-badge featured">{t("discover.badge.myAgent")}</div>
+                  )}
                   {agent.featured && !agent.isPublishedByUser && (
-                    <div className="agent-card-badge featured">Featured</div>
+                    <div className="agent-card-badge featured">{t("discover.badge.featured")}</div>
                   )}
                   {agent.new && !agent.featured && !agent.isPublishedByUser && (
-                    <div className="agent-card-badge new">New</div>
+                    <div className="agent-card-badge new">{t("discover.badge.new")}</div>
                   )}
                   {agent.popular && !agent.featured && !agent.new && !agent.isPublishedByUser && (
-                    <div className="agent-card-badge popular">Popular</div>
+                    <div className="agent-card-badge popular">{t("discover.badge.popular")}</div>
                   )}
                   <div className="agent-card-image-container">
                     <Image
@@ -588,12 +649,12 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                       <div className="publisher-avatar">
                         <Image
                           src="/placeholder.svg?height=20&width=20"
-                          alt="Anonymous Publisher"
+                          alt={t("discover.anonymousPublisher")}
                           width={20}
                           height={20}
                         />
                       </div>
-                      <span className="publisher-name">Anonymous Publisher</span>
+                      <span className="publisher-name">{t("discover.anonymousPublisher")}</span>
                     </div>
 
                     {/* Agent abilities */}
@@ -606,7 +667,9 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                           </div>
                         ))}
                         {agent.abilities.length > 2 && (
-                          <div className="agent-card-ability more">+{agent.abilities.length - 2} more</div>
+                          <div className="agent-card-ability more">
+                            {t("discover.more").replace("{count}", String(agent.abilities.length - 2))}
+                          </div>
                         )}
                       </div>
                     )}
@@ -621,20 +684,35 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                           </div>
                         ))}
                         {agent.apps.length > 2 && (
-                          <div className="agent-card-app more">+{agent.apps.length - 2} more</div>
+                          <div className="agent-card-app more">
+                            {t("discover.more").replace("{count}", String(agent.apps.length - 2))}
+                          </div>
                         )}
                       </div>
                     )}
                   </div>
+                  {onToggleContact && (
+                    <button
+                      type="button"
+                      className={`agent-card-contact-button ${contactSet.has(agent.id) ? "added" : ""}`}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onToggleContact(agent.id)
+                      }}
+                    >
+                      {contactSet.has(agent.id) ? t("discover.removeFromContacts") : t("discover.addToContacts")}
+                    </button>
+                  )}
                   <button className="agent-card-button" onClick={() => onSelectAgent(agent.id)}>
-                    Chat Now
+                    {t("discover.chatNow")}
                   </button>
                 </div>
               ))}
             </div>
           ) : (
             <div className="discover-empty">
-              <p>No agents found matching your search criteria.</p>
+              <p>{t("discover.noAgentsFound")}</p>
               <button
                 className="discover-reset-button"
                 onClick={() => {
@@ -643,21 +721,23 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                   setShowMyAgents(false)
                 }}
               >
-                Reset Filters
+                {t("discover.resetFilters")}
               </button>
             </div>
           )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* All public agents section */}
-      {!searchQuery && !selectedCategory && !showMyAgents && (
-        <div className="discover-section">
-          <h2 className="discover-section-title">All Public Agents</h2>
+        {/* All public agents section */}
+        {!searchQuery && !selectedCategory && !showMyAgents && (
+          <div className="discover-section">
+          <h2 className="discover-section-title">{t("discover.allPublicAgents")}</h2>
           <div className="discover-grid">
             {filteredAgents.map((agent) => (
               <div key={agent.id} className="agent-card">
-                {agent.isPublishedByUser && <div className="agent-card-badge featured">My Agent</div>}
+                {agent.isPublishedByUser && (
+                  <div className="agent-card-badge featured">{t("discover.badge.myAgent")}</div>
+                )}
                 <div className="agent-card-image-container">
                   <Image
                     src={agent.profileImage || "/placeholder.svg?height=80&width=80"}
@@ -686,22 +766,36 @@ export function DiscoverPage({ onSelectAgent, onClose, recentAgents = [] }: Disc
                     <div className="publisher-avatar">
                       <Image
                         src="/placeholder.svg?height=20&width=20"
-                        alt="Anonymous Publisher"
+                        alt={t("discover.anonymousPublisher")}
                         width={20}
                         height={20}
                       />
                     </div>
-                    <span className="publisher-name">Anonymous Publisher</span>
+                    <span className="publisher-name">{t("discover.anonymousPublisher")}</span>
                   </div>
                 </div>
+                {onToggleContact && (
+                  <button
+                    type="button"
+                    className={`agent-card-contact-button ${contactSet.has(agent.id) ? "added" : ""}`}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      onToggleContact(agent.id)
+                    }}
+                  >
+                    {contactSet.has(agent.id) ? t("discover.removeFromContacts") : t("discover.addToContacts")}
+                  </button>
+                )}
                 <button className="agent-card-button" onClick={() => onSelectAgent(agent.id)}>
-                  Chat Now
+                  {t("discover.chatNow")}
                 </button>
               </div>
             ))}
           </div>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

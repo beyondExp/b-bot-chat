@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { applyDefaultBbotModel } from "@/lib/bbot-default-model"
 
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
+const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
 
 export async function GET(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
@@ -27,6 +29,33 @@ export async function PATCH(request: NextRequest, contextPromise: Promise<{ para
   return handleProxyRequest(request, params.path, "PATCH");
 }
 
+function injectGeminiApiKey(body: any) {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return body
+
+  const configurable =
+    body?.config?.configurable ?? body?.configurable ?? body?.config?.configurable ?? body?.config?.configurable
+  const modalities = configurable?.output_modalities
+  if (!Array.isArray(modalities)) return body
+
+  configurable.output_modalities = modalities.map((m: any) => {
+    if (!m || m.type !== "tts") return m
+
+    const modelName = (typeof m.model === "string" ? m.model : m.model_name) as any
+    const isGoogle =
+      m.provider === "google" ||
+      (typeof modelName === "string" && modelName.startsWith("google/"))
+    if (!isGoogle) return m
+
+    if (!m.api_key) {
+      return { ...m, api_key: geminiKey }
+    }
+    return m
+  })
+
+  return body
+}
+
 async function handleProxyRequest(request: NextRequest, pathSegments: string[], method: string) {
   try {
     // Log the incoming headers for debugging
@@ -43,7 +72,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     }
 
     // Get the LangGraph API URL from environment variables
-    const langGraphApiUrl = process.env.SYNAPSE_URL || "http://localhost:2024"
+    const langGraphApiUrl = process.env.LANGGRAPH_API_URL || process.env.SYNAPSE_URL || "http://localhost:2024"
 
     // Get the API key from environment variables (server-side only)
     const apiKey = process.env.ADMIN_API_KEY
@@ -109,15 +138,36 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     if (method !== "GET" && method !== "HEAD") {
       try {
         body = await request.json()
+        // If the client accidentally sends a JSON-encoded string (e.g. "\"{...}\""),
+        // parse it back into an object so upstream receives a dictionary.
+        if (typeof body === "string") {
+          try {
+            const parsed = JSON.parse(body)
+            body = parsed
+          } catch {
+            // keep as-is
+          }
+        }
+        body = applyDefaultBbotModel(body)
+        body = injectGeminiApiKey(body)
 
         // If this is a streaming request to /threads/{threadId}/runs/stream
         // Format the payload according to the expected structure
         if (targetPath.includes("/runs/stream")) {
           // Extract the input and config from the request body
           const { input, config } = body
-          headers.set("Content-Type", "text/event-stream");
+          // This is an SSE *response*; the request payload is still JSON.
           headers.set("Accept", "text/event-stream");
           console.log("[Proxy] Streaming request detected");
+          const assistantIdCandidate =
+            (typeof body?.assistant_id === "string" && body.assistant_id.trim() ? body.assistant_id.trim() : "") ||
+            (typeof body?.assistantId === "string" && body.assistantId.trim() ? body.assistantId.trim() : "") ||
+            (typeof config?.configurable?.assistant_id === "string" && config.configurable.assistant_id.trim()
+              ? config.configurable.assistant_id.trim()
+              : "") ||
+            (typeof config?.configurable?.agent_id === "string" && config.configurable.agent_id.trim()
+              ? config.configurable.agent_id.trim()
+              : "")
           // Create the properly formatted payload
           const formattedBody = {
             input,
@@ -126,7 +176,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
             stream_subgraphs: body.stream_subgraphs !== false,
             subgraphs: body.subgraphs !== false,
             on_disconnect: body.on_disconnect || "cancel",
-            assistant_id: config?.agent_id || body.assistant_id
+            assistant_id: assistantIdCandidate || undefined
           }
 
           body = formattedBody
@@ -141,10 +191,11 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     headers.delete("Content-Length");
 
     // Make the request to the LangGraph API
+    const upstreamBody = body == null ? null : typeof body === "string" ? body : JSON.stringify(body)
     const response = await fetch(url.toString(), {
       method,
       headers,
-      body: body ? JSON.stringify(body) : null,
+      body: upstreamBody,
     })
 
     // Handle streaming responses
@@ -154,35 +205,16 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
       if (!response.body) {
         return new Response("No stream", { status: 500 });
       }
-      
-      // Direct pass-through streaming without buffering
-      const transformStream = new TransformStream({
-        transform(chunk, controller) {
-          // Log chunk for debugging
-          try {
-            const chunkStr = new TextDecoder().decode(chunk);
-            console.log(`[Proxy][Stream][${new Date().toISOString()}] Passing through chunk:`, chunkStr.slice(0, 100));
-          } catch (e) {
-            console.log(`[Proxy][Stream][${new Date().toISOString()}] Passing through binary chunk:`, chunk.length, 'bytes');
-          }
-          
-          // Pass through immediately without any processing
-          controller.enqueue(chunk);
-        }
-      });
-
-      // Pipe the response body through our transform stream
-      const transformedStream = response.body.pipeThrough(transformStream);
 
       // Return the stream with comprehensive headers for real-time streaming
-      return new Response(transformedStream, {
+      if (STREAM_DEBUG) console.log("[Proxy] Streaming pass-through enabled");
+      return new Response(response.body, {
         status: response.status,
         headers: {
           "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Cache-Control": "no-cache, no-store, must-revalidate, no-transform",
           "Connection": "keep-alive",
           "X-Accel-Buffering": "no", // Disable Nginx buffering
-          "Transfer-Encoding": "chunked",
           // CORS headers
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Headers": "*",

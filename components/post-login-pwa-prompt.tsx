@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react"
 import { Download, X } from "lucide-react"
 import { PWAInstallGuide } from "./pwa-install-guide"
+import { useI18n } from "@/lib/i18n"
 
 export function PostLoginPWAPrompt() {
   const [showPrompt, setShowPrompt] = useState(false)
   const [showInstallGuide, setShowInstallGuide] = useState(false)
+  const { t } = useI18n()
 
   useEffect(() => {
     // Only run on client-side
@@ -80,27 +82,27 @@ export function PostLoginPWAPrompt() {
         </div>
         <div className="flex-1">
           <div className="flex justify-between items-start">
-            <h3 className="font-medium">Install Beyond-Bot.ai App</h3>
+            <h3 className="font-medium">{t("pwa.prompt.title")}</h3>
             <button onClick={handleDismiss} className="text-muted-foreground hover:text-foreground">
               <X size={16} />
             </button>
           </div>
           <p className="text-sm text-muted-foreground mt-1 mb-3">
-            Install our app for a better experience and offline access. It only takes a few seconds!
+            {t("pwa.prompt.body")}
           </p>
           <div className="flex gap-2">
             <button
               onClick={handleDismiss}
               className="flex-1 py-2 border border-border rounded-md hover:bg-muted transition-colors"
             >
-              Not now
+              {t("pwa.prompt.notNow")}
             </button>
             <button
               onClick={handleInstall}
               className="flex-1 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
             >
               <Download size={16} />
-              <span>Install</span>
+              <span>{t("pwa.prompt.install")}</span>
             </button>
           </div>
         </div>

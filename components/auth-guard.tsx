@@ -1,11 +1,12 @@
 "use client"
 
 import type React from "react"
-import { useAuth0 } from "@auth0/auth0-react"
 import { LandingPage } from "./landing-page"
 import { useEffect, useState } from "react"
 import { PostLoginPWAPrompt } from "./post-login-pwa-prompt"
 import { useRouter } from "next/navigation"
+import { useAppAuth } from "@/lib/app-auth"
+import { useI18n } from "@/lib/i18n"
 
 interface AuthGuardProps {
   children: React.ReactNode
@@ -13,10 +14,11 @@ interface AuthGuardProps {
 }
 
 export function AuthGuard({ children, initialAgent }: AuthGuardProps) {
-  const { isAuthenticated, isLoading, error, loginWithRedirect } = useAuth0()
+  const { isAuthenticated, isLoading, error, loginWithRedirect } = useAppAuth()
   const [loadingTimeout, setLoadingTimeout] = useState(false)
   const [showPWAPrompt, setShowPWAPrompt] = useState(false)
   const router = useRouter()
+  const { t } = useI18n()
 
   // Check if user is trying to access B-Bot specifically
   const isBBotAccess = initialAgent === "b-bot"
@@ -70,7 +72,7 @@ export function AuthGuard({ children, initialAgent }: AuthGuardProps) {
   if (isLoading && !loadingTimeout) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
-        <div className="animate-pulse text-lg mb-4">Loading...</div>
+        <div className="animate-pulse text-lg mb-4">{t("auth.loading")}</div>
       </div>
     )
   }
@@ -79,12 +81,12 @@ export function AuthGuard({ children, initialAgent }: AuthGuardProps) {
   if ((isLoading && loadingTimeout) || error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
-        <div className="text-lg mb-4">{error ? "Authentication error" : "Loading is taking longer than expected"}</div>
+        <div className="text-lg mb-4">{error ? t("auth.error") : t("auth.loadingSlow")}</div>
         <button onClick={() => window.location.reload()} className="px-4 py-2 bg-primary text-white rounded-md">
-          Retry
+          {t("auth.retry")}
         </button>
         <button onClick={() => loginWithRedirect()} className="px-4 py-2 mt-2 bg-gray-200 text-gray-800 rounded-md">
-          Sign in again
+          {t("auth.signInAgain")}
         </button>
       </div>
     )

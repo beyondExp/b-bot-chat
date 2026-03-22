@@ -5,13 +5,15 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/components/auth-provider"
 import { PWAInstaller } from "@/components/pwa-installer"
+import { I18nProvider } from "@/lib/i18n"
+import { LanguagePrompt } from "@/components/language-prompt"
 
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "Beyond-Bot.ai - Chat with AI Agents",
   description: "Chat with personalized AI agents powered by LangGraph",
-  manifest: "/manifest.json",
+  manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -19,11 +21,19 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/logo.svg", sizes: "any", type: "image/svg+xml" },
-      { url: "/icons/icon-192x192.png", sizes: "192x192" },
-      { url: "/icons/icon-512x512.png", sizes: "512x512" },
+      {
+        url: "/api/branding/icon.svg",
+        sizes: "any",
+        type: "image/svg+xml",
+      },
     ],
-    apple: [{ url: "/logo.svg", sizes: "any", type: "image/svg+xml" }],
+    apple: [
+      {
+        url: "/api/branding/icon.svg",
+        sizes: "any",
+        type: "image/svg+xml",
+      },
+    ],
   },
   other: {
     "mobile-web-app-capable": "yes",
@@ -47,8 +57,11 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          <AuthProvider>{children}</AuthProvider>
-          <PWAInstaller />
+          <I18nProvider>
+            <AuthProvider>{children}</AuthProvider>
+            <LanguagePrompt />
+            <PWAInstaller />
+          </I18nProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -6,6 +6,7 @@ import { useState } from "react"
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js"
 import { stripePromise, formatPrice, formatTokenCount, BBOT_TOKEN_RATE } from "@/lib/stripe"
 import { X, CreditCard, Coins, Info, Check, AlertCircle } from "lucide-react"
+import { useI18n } from "@/lib/i18n"
 
 interface PaymentFormProps {
   clientSecret: string
@@ -19,6 +20,7 @@ function PaymentForm({ clientSecret, onSuccess, onCancel }: PaymentFormProps) {
   const [isProcessing, setIsProcessing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [isSuccess, setIsSuccess] = useState(false)
+  const { t } = useI18n()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -38,16 +40,16 @@ function PaymentForm({ clientSecret, onSuccess, onCancel }: PaymentFormProps) {
     })
 
     if (error) {
-      setMessage(error.message || "An error occurred while processing your payment.")
+      setMessage(error.message || t("payment.error.processing"))
       setIsSuccess(false)
     } else if (paymentIntent && paymentIntent.status === "succeeded") {
-      setMessage("Payment successful!")
+      setMessage(t("payment.success"))
       setIsSuccess(true)
       setTimeout(() => {
         onSuccess()
       }, 2000)
     } else {
-      setMessage("Something went wrong.")
+      setMessage(t("payment.error.generic"))
       setIsSuccess(false)
     }
 
@@ -74,14 +76,14 @@ function PaymentForm({ clientSecret, onSuccess, onCancel }: PaymentFormProps) {
           className="flex-1 py-2 px-4 border border-border rounded-md hover:bg-muted transition-colors"
           disabled={isProcessing}
         >
-          Cancel
+          {t("payment.cancel")}
         </button>
         <button
           type="submit"
           disabled={!stripe || !elements || isProcessing}
           className="flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
         >
-          {isProcessing ? "Processing..." : "Add Funds"}
+          {isProcessing ? t("payment.processing") : t("payment.addFunds")}
         </button>
       </div>
     </form>
@@ -101,6 +103,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
   const [customAmount, setCustomAmount] = useState("10.00")
   const [isLoading, setIsLoading] = useState(false)
   const [step, setStep] = useState(1)
+  const { t } = useI18n()
 
   const predefinedAmounts = [
     { value: 500, label: "$5" },
@@ -164,7 +167,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-md overflow-hidden">
         <div className="flex justify-between items-center p-4 border-b border-border">
-          <h2 className="font-semibold text-lg">Your Wallet</h2>
+          <h2 className="font-semibold text-lg">{t("payment.walletTitle")}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X size={20} />
           </button>
@@ -177,7 +180,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                 <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
                   <div className="flex items-center gap-2">
                     <Coins size={18} className="text-primary" />
-                    <span className="font-medium">Current Balance</span>
+                    <span className="font-medium">{t("payment.currentBalance")}</span>
                   </div>
                   <span className="font-semibold">{formatPrice(currentBalance)}</span>
                 </div>
@@ -185,14 +188,14 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                 <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
                   <div className="flex items-center gap-2">
                     <Info size={18} className="text-primary" />
-                    <span className="font-medium">Tokens Used</span>
+                    <span className="font-medium">{t("payment.tokensUsed")}</span>
                   </div>
                   <span className="font-semibold">{formatTokenCount(tokensUsed)}</span>
                 </div>
               </div>
 
               <div className="mb-6">
-                <h3 className="font-medium mb-2">Add Funds</h3>
+                <h3 className="font-medium mb-2">{t("payment.addFunds")}</h3>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {predefinedAmounts.map((amount) => (
                     <button
@@ -219,7 +222,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                       className="mr-2"
                     />
                     <label htmlFor="custom-amount" className="text-sm">
-                      Custom amount
+                      {t("payment.customAmount")}
                     </label>
                   </div>
 
@@ -231,7 +234,7 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                         value={customAmount}
                         onChange={handleCustomAmountChange}
                         className="w-full p-2 border border-border rounded-md"
-                        placeholder="Enter amount"
+                        placeholder={t("payment.enterAmount")}
                         autoFocus
                       />
                     </div>
@@ -240,10 +243,12 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
 
                 <div className="p-3 bg-muted/50 rounded-lg mb-4">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm">Estimated tokens</span>
+                    <span className="text-sm">{t("payment.estimatedTokens")}</span>
                     <span className="font-medium">{formatTokenCount(estimatedTokens)}</span>
                   </div>
-                  <div className="text-xs text-muted-foreground">At a rate of ${BBOT_TOKEN_RATE} per B-Bot Token</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("payment.rateNote").replace("{rate}", `$${BBOT_TOKEN_RATE}`)}
+                  </div>
                 </div>
 
                 <button
@@ -252,11 +257,11 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                   className="w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isLoading ? (
-                    "Processing..."
+                    t("payment.processing")
                   ) : (
                     <>
                       <CreditCard size={16} />
-                      <span>Continue to Payment</span>
+                      <span>{t("payment.continueToPayment")}</span>
                     </>
                   )}
                 </button>
@@ -266,14 +271,13 @@ export function PaymentModal({ onClose, currentBalance, tokensUsed }: PaymentMod
                 <p className="flex items-start gap-2">
                   <Info size={16} className="flex-shrink-0 mt-0.5" />
                   <span>
-                    Pay only for what you use. Charges are based on token usage at a rate of ${BBOT_TOKEN_RATE} per B-Bot Token.
+                    {t("payment.disclaimer.payPerUse").replace("{rate}", `$${BBOT_TOKEN_RATE}`)}
                   </span>
                 </p>
                 <p className="flex items-start gap-2">
                   <Info size={16} className="flex-shrink-0 mt-0.5" />
                   <span>
-                    30% of all revenue is distributed to AI Agent creators, supporting a fair and decentralized AI
-                    ecosystem.
+                    {t("payment.disclaimer.creators").replace("{creatorShare}", "30")}
                   </span>
                 </p>
               </div>

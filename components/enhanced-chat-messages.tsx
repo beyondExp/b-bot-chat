@@ -10,6 +10,7 @@ import { HumanMessage } from "./messages/human-message"
 import { AIMessage } from "./messages/ai-message"
 import { ensureToolCallsHaveResponses, DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses"
 import ReactMarkdown from "react-markdown"
+import { useI18n } from "@/lib/i18n"
 
 import { StreamingAudioPlayer } from "./streaming-audio-player"
 
@@ -235,8 +236,13 @@ interface EnhancedChatMessagesProps {
   onBranchSelect?: (messageId: string, direction: 'prev' | 'next') => void
   getMessageMetadata?: (message: ChatMessage) => MessageMetadata | undefined
   toolEvents?: any[] // Tool events like B-Bot Hub
+  followUpSuggestions?: any[] // Hub-style follow-ups at end of stream
+  followUpSuggestionsLoading?: boolean
+  onFollowupClick?: (value: string) => void
   shouldAutoPlayAudio?: boolean // Whether to auto-play audio (false for old conversations)
   playedMessageIds?: Set<string> // Message IDs that were already played (e.g., during a call)
+  welcomeTitle?: string
+  welcomeSubtitle?: string
 }
 
 // Helper to determine readable text color
@@ -267,14 +273,40 @@ export function EnhancedChatMessages({
   onBranchSelect,
   getMessageMetadata,
   toolEvents,
+  followUpSuggestions = [],
+  followUpSuggestionsLoading = false,
+  onFollowupClick,
   audioMap = {}, // 🔊 TTS audio chunks map
   shouldAutoPlayAudio = true, // Auto-play audio by default (false for old conversations)
   playedMessageIds = new Set(), // Message IDs already played during call
+  welcomeTitle,
+  welcomeSubtitle,
 }: EnhancedChatMessagesProps) {
+  const { t } = useI18n()
+  const normalizedFollowups = (Array.isArray(followUpSuggestions) ? followUpSuggestions : [])
+    .map((s: any) => {
+      if (!s) return null
+      if (typeof s === "string") {
+        const text = s.trim()
+        return text ? { label: text, value: text, action: "send_message" } : null
+      }
+      if (typeof s === "object") {
+        const label = String(s.label || s.text || s.value || "").trim()
+        const value = String(s.value || s.text || label || "").trim()
+        const action = String(s.action || "send_message").trim() || "send_message"
+        if (!label || !value) return null
+        return { label, value, action }
+      }
+      return null
+    })
+    .filter(Boolean) as Array<{ label: string; value: string; action: string }>
+
+  const showFollowups = !isLoading && normalizedFollowups.length > 0
+  const showFollowupsLoading = !isLoading && !!followUpSuggestionsLoading && normalizedFollowups.length === 0
   // Get agent avatar
   const getAgentAvatar = () => {
     if (selectedAgent === "bbot" || selectedAgent === "b-bot" || !selectedAgent) {
-      return "https://beyond-bot.ai/logo-schwarz.svg";
+      return "/api/branding/main-agent.svg";
     }
     const agent = agents.find(a => a.id === selectedAgent);
     if (agent && agent.profileImage) {
@@ -317,22 +349,65 @@ export function EnhancedChatMessages({
   };
 
   // Welcome message suggestions
-  const welcomeSuggestions = suggestions && suggestions.length > 0 ? suggestions : ["Hello! How can you help me?", "What can you do?", "Tell me about yourself"];
+  const welcomeSuggestions =
+    suggestions && suggestions.length > 0
+      ? suggestions
+      : [t("welcome.fallbackSuggestion1"), t("welcome.fallbackSuggestion2"), t("welcome.fallbackSuggestion3")];
+
+  const visibleMessages = messages
+    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
+    .filter((m) => {
+      // Handle both string and array content
+      let contentIsEmpty = false
+
+      const content = m.content as any
+
+      if (typeof content === "string") {
+        contentIsEmpty = !content || content.trim() === ""
+      } else if (Array.isArray(content)) {
+        // Array content (multimodal) - check if it has any content
+        contentIsEmpty = content.length === 0
+      } else {
+        contentIsEmpty = !content
+      }
+
+      // Filter out empty AI messages that only contain tool_calls (trigger messages)
+      if (m.type === "ai" && contentIsEmpty && m.tool_calls && m.tool_calls.length > 0) {
+        return false
+      }
+      // Filter out tool messages since they're displayed separately as tool events
+      if (m.type === "tool") {
+        return false
+      }
+
+      return true
+    })
+
+  const lastAiIndex = (() => {
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i] as any
+      const type = String(m.type || m.role || "").toLowerCase()
+      if (type === "ai" || type === "assistant") return i
+    }
+    return -1
+  })()
 
   return (
-    <div className="chat-messages h-full overflow-y-auto p-4 space-y-2">
+    <div className="chat-messages p-4 space-y-2">
       {messages.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[400px]">
           <Avatar className="h-20 w-20 mb-4">
             <AvatarImage src={getAgentAvatar() || "/placeholder.svg"} alt={getAgentName()} />
             <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
           </Avatar>
-          <h2 className="text-2xl font-bold mb-2">Hello I am {getAgentName()}</h2>
+          <h2 className="text-2xl font-bold mb-2">
+            {welcomeTitle || t("welcome.fallbackTitle").replace("{name}", getAgentName())}
+          </h2>
           <p className="text-gray-500 mb-6 text-center max-w-md">
-            Start a conversation by sending a message or try one of these suggestions:
+            {welcomeSubtitle || t("welcome.fallbackSubtitle")}
           </p>
           <div className="flex flex-col gap-2 items-center w-full max-w-md mx-auto px-2">
-            {welcomeSuggestions.map((suggestion) => (
+            {welcomeSuggestions.slice(0, 3).map((suggestion) => (
               <Button
                 key={suggestion}
                 variant="outline"
@@ -347,35 +422,7 @@ export function EnhancedChatMessages({
         </div>
       ) : (
         <>
-          {messages
-            .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-            .filter((m) => {
-              // Handle both string and array content
-              let contentIsEmpty = false;
-              
-              const content = m.content as any;
-              
-              if (typeof content === 'string') {
-                contentIsEmpty = !content || content.trim() === "";
-              } else if (Array.isArray(content)) {
-                // Array content (multimodal) - check if it has any content
-                contentIsEmpty = content.length === 0;
-              } else {
-                contentIsEmpty = !content;
-              }
-              
-              // Filter out empty AI messages that only contain tool_calls (trigger messages)
-              if (m.type === "ai" && contentIsEmpty && m.tool_calls && m.tool_calls.length > 0) {
-                return false;
-              }
-              // Filter out tool messages since they're displayed separately as tool events
-              if (m.type === "tool") {
-                return false;
-              }
-              
-              return true;
-            })
-            .map((message: ChatMessage, idx: number) => {
+          {visibleMessages.map((message: ChatMessage, idx: number) => {
             // Get metadata for this message
             const metadata = getMessageMetadata ? getMessageMetadata(message) : undefined;
 
@@ -458,6 +505,35 @@ export function EnhancedChatMessages({
                         </div>
                       )}
                     </>
+                  )}
+
+                  {idx === lastAiIndex && (showFollowups || showFollowupsLoading) && (
+                    <div className="mt-2">
+                      <div className="text-xs font-semibold text-muted-foreground mb-2">{t("followups.title")}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {showFollowups
+                          ? normalizedFollowups.map((s, i) => (
+                              <Button
+                                key={`${s.value}-${i}`}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  if (s.action !== "send_message") return
+                                  onFollowupClick?.(s.value)
+                                }}
+                                className="h-auto whitespace-normal text-left"
+                              >
+                                {s.label}
+                              </Button>
+                            ))
+                          : Array.from({ length: 3 }).map((_, i) => (
+                              <Button key={`loading-${i}`} type="button" variant="outline" size="sm" disabled className="h-auto">
+                                {t("followups.loading")}
+                              </Button>
+                            ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
