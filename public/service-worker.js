@@ -1,4 +1,6 @@
-const CACHE_NAME = "beyond-bot-cache-v2" // Increment cache version to force refresh
+// IMPORTANT: avoid caching Next.js build artifacts (_next) to prevent stale JS after deployments.
+// Bump cache version to force clients onto the updated strategy.
+const CACHE_NAME = "beyond-bot-cache-v3"
 const urlsToCache = [
   "/",
   "/manifest.json",
@@ -52,6 +54,11 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
+  // Never cache Next.js build assets; always fetch fresh.
+  if (event.request.url.includes("/_next/")) {
+    return
+  }
+
   event.respondWith(
     caches
       .match(event.request)
@@ -63,6 +70,12 @@ self.addEventListener("fetch", (event) => {
         return fetch(event.request).then((response) => {
           // Check if we received a valid response
           if (!response || response.status !== 200 || response.type !== "basic") {
+            return response
+          }
+
+          // Avoid caching JS/CSS bundles (stale deployments).
+          const url = new URL(event.request.url)
+          if (url.pathname.endsWith(".js") || url.pathname.endsWith(".css")) {
             return response
           }
 

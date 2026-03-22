@@ -20,10 +20,10 @@ import {
   ExternalLink,
   Download,
 } from "lucide-react"
-import Image from "next/image"
 import { useState } from "react"
 import { PWAInstallGuide } from "./pwa-install-guide"
 import { useAppAuth } from "@/lib/app-auth"
+import { BrandLogo } from "./brand-logo"
 
 export function LandingPage() {
   const { loginWithRedirect, isLoading, error } = useAppAuth()
@@ -52,7 +52,7 @@ export function LandingPage() {
       <header className="container mx-auto py-6 px-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 relative flex items-center justify-center">
-            <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={40} height={40} className="dark:invert" />
+            <BrandLogo alt="App logo" size={40} className="dark:invert" />
           </div>
           <span className="font-bold text-xl">Beyond-Bot.ai</span>
         </div>
@@ -149,7 +149,7 @@ export function LandingPage() {
         <div className="lg:w-1/2 relative">
           <div className="bg-card border border-border rounded-xl shadow-xl overflow-hidden">
             <div className="border-b border-border p-4 flex items-center gap-3">
-              <div className="w-8 h-8 relative rounded-full overflow-hidden bg-primary flex items-center justify-center">
+              <div className="w-8 h-8 relative rounded-[1rem] overflow-hidden bg-primary flex items-center justify-center">
                 <Image src="/placeholder.svg?height=32&width=32" alt="Beyond Assistant" width={32} height={32} />
               </div>
               <div>
@@ -814,7 +814,7 @@ export function LandingPage() {
           <div className="flex flex-col md:flex-row justify-between items-center mb-8">
             <div className="flex items-center gap-2 mb-4 md:mb-0">
               <div className="w-8 h-8 relative flex items-center justify-center">
-                <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={32} height={32} className="dark:invert" />
+                <BrandLogo alt="App logo" size={32} className="dark:invert" />
               </div>
               <span className="font-bold">Beyond-Bot.ai</span>
             </div>

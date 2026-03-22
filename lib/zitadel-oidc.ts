@@ -27,6 +27,10 @@ export function getZitadelUserManagerSettings(): UserManagerSettings {
     automaticSilentRenew: true,
     loadUserInfo: true,
     userStore: new WebStorageStateStore({ store: window.localStorage }),
+    // Use localStorage for OIDC state so logins can complete even if the IdP returns
+    // to a different browser context/tab (sessionStorage is per-tab and can cause
+    // "No matching state found in storage").
+    stateStore: new WebStorageStateStore({ store: window.localStorage }),
   }
 
   if (resource) {

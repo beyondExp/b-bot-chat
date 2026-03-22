@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Search, X, ChevronUp, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useI18n } from "@/lib/i18n"
 
 interface MessageSearchProps {
   messages: any[]
@@ -16,6 +17,7 @@ export function MessageSearch({ messages, onClose, onSelectMessage }: MessageSea
   const [searchQuery, setSearchQuery] = useState('')
   const [matchingIndices, setMatchingIndices] = useState<number[]>([])
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0)
+  const { t } = useI18n()
 
   // Helper to extract text content from message
   const getMessageText = (content: any): string => {
@@ -74,7 +76,7 @@ export function MessageSearch({ messages, onClose, onSelectMessage }: MessageSea
       <div className="relative flex-1">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search in conversation..."
+          placeholder={t("search.conversationPlaceholder")}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-9 pr-4"
@@ -113,6 +115,7 @@ export function MessageSearch({ messages, onClose, onSelectMessage }: MessageSea
         size="icon"
         className="h-8 w-8"
         onClick={onClose}
+        aria-label={t("common.close")}
       >
         <X className="h-4 w-4" />
       </Button>

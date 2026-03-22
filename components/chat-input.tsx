@@ -3,11 +3,18 @@
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Loader2, Mic, Trash2 } from "lucide-react"
+import { Send, Loader2, Mic, Trash2, Plus, LayoutDashboard, Upload } from "lucide-react"
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder"
 import type React from "react"
 import type { FormEvent } from "react"
 import { toast } from "sonner"
+import { useI18n } from "@/lib/i18n"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 interface ChatInputProps {
   onSubmit: (e: React.FormEvent<HTMLFormElement>, input: string) => void
@@ -16,6 +23,10 @@ interface ChatInputProps {
   selectedAgent: string | null
   agentName?: string
   userColor?: string
+  draft?: string
+  onDraftChange?: (next: string) => void
+  onOpenWorkdesk?: () => void
+  onAddWorkdeskFiles?: () => void
 }
 
 interface Ability {
@@ -35,10 +46,33 @@ interface App {
   isConnected: boolean
 }
 
-export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, agentName, userColor = '#2563eb' }: ChatInputProps) {
-  const [input, setInput] = useState("")
+export function ChatInput({
+  onSubmit,
+  onVoiceMessage,
+  isLoading,
+  selectedAgent,
+  agentName,
+  userColor = "#2563eb",
+  draft,
+  onDraftChange,
+  onOpenWorkdesk,
+  onAddWorkdeskFiles,
+}: ChatInputProps) {
+  const [uncontrolledInput, setUncontrolledInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const { t } = useI18n()
+  
+  const isControlled = typeof draft === "string" && typeof onDraftChange === "function"
+  const input = isControlled ? (draft as string) : uncontrolledInput
+  const setInput = isControlled ? (onDraftChange as (next: string) => void) : setUncontrolledInput
+
+  const [viewportWidth, setViewportWidth] = useState<number>(() => (typeof window !== "undefined" ? window.innerWidth : 1024))
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onResize = () => setViewportWidth(window.innerWidth)
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [])
   
   // Voice recording
   const {
@@ -123,6 +157,14 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
       textarea.style.height = "auto"
       textarea.style.height = input ? `${Math.min(textarea.scrollHeight, 200)}px` : "56px"
     }
+  }, [selectedAgent])
+
+  // If the user switches agent while recording, treat it as a cancel (do not send).
+  useEffect(() => {
+    if (isRecording) {
+      cancelRecording()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAgent])
 
   // Audio mode timer
@@ -269,13 +311,13 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
       // Call the voice message callback to send audio directly
       if (onVoiceMessage) {
         await onVoiceMessage(blob, '', duration) // No transcription needed
-        toast.success('Voice message sent!')
+        toast.success(t("toast.voiceMessageSent"))
       } else {
-        toast.error('Voice message handling not available')
+        toast.error(t("toast.voiceMessageUnavailable"))
       }
     } catch (error) {
       console.error('[ChatInput] Error sending voice message:', error)
-      toast.error('Failed to send voice message')
+      toast.error(t("toast.voiceMessageFailed"))
     } finally {
       setIsSendingVoice(false)
     }
@@ -287,7 +329,7 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
       await startRecording()
     } catch (err) {
       console.error('Failed to start recording:', err)
-      toast.error('Failed to start recording. Please check microphone permissions.')
+      toast.error(t("toast.startRecordingFailed"))
     }
   }
 
@@ -300,6 +342,17 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
   const handleCancelRecording = () => {
     cancelRecording()
   }
+
+  const waveformBars = viewportWidth < 360 ? 18 : viewportWidth < 480 ? 24 : 50
+
+  const waveformHeights = useRef<number[]>([])
+  useEffect(() => {
+    if (!isRecording) {
+      waveformHeights.current = []
+      return
+    }
+    waveformHeights.current = Array.from({ length: waveformBars }, () => Math.random() * 60 + 40)
+  }, [isRecording, waveformBars])
 
   // Format time as MM:SS
   const formatTime = (seconds: number) => {
@@ -315,7 +368,7 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
       <form onSubmit={handleSubmit} className="w-full max-w-4xl mx-auto">
         {isRecording ? (
           /* Full-width recording UI */
-          <div className="relative flex items-center bg-red-50 dark:bg-red-950/20 rounded-3xl border border-red-200 dark:border-red-900 px-4 py-3 min-h-[52px]">
+          <div className="relative flex items-center overflow-hidden bg-red-50 dark:bg-red-950/20 rounded-3xl border border-red-200 dark:border-red-900 px-4 py-3 min-h-[52px]">
             {/* Cancel Button */}
             <Button
               type="button"
@@ -329,7 +382,7 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
             </Button>
 
             {/* Recording Indicator & Waveform - Takes full space */}
-            <div className="flex items-center gap-3 flex-1 px-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0 px-3">
               <div className="flex items-center gap-2 flex-shrink-0">
                 <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
                 <span className="text-sm font-medium text-red-600 dark:text-red-400 min-w-[45px]">
@@ -338,13 +391,13 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
               </div>
               
               {/* Full-width waveform animation */}
-              <div className="flex items-center gap-[3px] h-10 flex-1">
-                {Array.from({ length: 50 }).map((_, i) => (
+              <div className="flex items-center gap-[2px] sm:gap-[3px] h-10 flex-1 min-w-0 overflow-hidden">
+                {Array.from({ length: waveformBars }).map((_, i) => (
                   <div
                     key={i}
-                    className="flex-1 bg-red-400 dark:bg-red-500 rounded-full animate-pulse min-w-[2px]"
+                    className="flex-1 bg-red-400 dark:bg-red-500 rounded-full animate-pulse min-w-0"
                     style={{
-                      height: `${Math.random() * 60 + 40}%`,
+                      height: `${waveformHeights.current[i] ?? (Math.random() * 60 + 40)}%`,
                       animationDelay: `${i * 0.02}s`,
                       animationDuration: '0.8s'
                     }}
@@ -371,6 +424,42 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
         ) : (
           /* Normal input UI */
           <div className="relative flex items-center bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 focus-within:shadow-lg">
+            {/* Left "+" menu (ChatGPT-style) */}
+            <div className="absolute left-2 top-1/2 -translate-y-1/2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-10 w-10 rounded-full hover:bg-primary/10"
+                    aria-label={t("input.more")}
+                    title={t("input.more")}
+                  >
+                    <Plus className="h-5 w-5 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-56">
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      onAddWorkdeskFiles?.()
+                    }}
+                  >
+                    <Upload className="h-4 w-4" />
+                    {t("workdesk.addDocuments")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      onOpenWorkdesk?.()
+                    }}
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                    {t("workdesk.open")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
             {/* Main input area */}
             <div className="flex-1 min-w-0">
               <Textarea
@@ -378,8 +467,8 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message ${placeholderName}`}
-                className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent px-4 py-3 text-base placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                placeholder={t("input.messagePlaceholder").replace("{name}", placeholderName)}
+                className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent pl-14 pr-4 py-3 text-base placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 disabled={isLoading}
                 style={{ 
                   lineHeight: '1.5',
@@ -399,7 +488,7 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
                   onClick={handleStartRecording}
                   disabled={isLoading}
                   className="h-10 w-10 rounded-full hover:bg-primary/10 flex-shrink-0"
-                  title="Send voice message"
+                  title={t("input.sendVoiceMessage")}
                 >
                   <Mic className="h-5 w-5 text-primary" />
                 </Button>
@@ -426,7 +515,7 @@ export function ChatInput({ onSubmit, onVoiceMessage, isLoading, selectedAgent, 
         {isLoading && (
           <div className="flex items-center justify-center mt-3 text-sm text-gray-500">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            Generating response...
+            {t("input.generatingResponse")}
           </div>
         )}
       </form>

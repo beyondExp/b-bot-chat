@@ -1,6 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
+import crypto from "crypto"
+import { applyDefaultBbotModel, isBBotAssistantId } from "@/lib/bbot-default-model"
 
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
+const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
 
 function injectGeminiApiKey(body: any) {
   const geminiKey = process.env.GEMINI_API_KEY
@@ -14,7 +17,10 @@ function injectGeminiApiKey(body: any) {
   configurable.output_modalities = modalities.map((m: any) => {
     if (!m || m.type !== "tts") return m
 
-    const isGoogle = m.provider === "google" || (typeof m.model_name === "string" && m.model_name.startsWith("google/"))
+    const modelName = (typeof m.model === "string" ? m.model : m.model_name) as any
+    const isGoogle =
+      m.provider === "google" ||
+      (typeof modelName === "string" && modelName.startsWith("google/"))
     if (!isGoogle) return m
 
     if (!m.api_key) {
@@ -76,6 +82,9 @@ async function handleAnonymousThreadCreation(request: NextRequest) {
 
     // Enrich metadata when available so Hub can later filter by expert_id
     if (agentId) {
+      // Enforce password protection (if configured) before creating threads.
+      const pwErr = await _requireEmbedPasswordIfConfigured(request, agentId)
+      if (pwErr) return pwErr
       threadPayload.metadata.assistant_id = agentId;
       threadPayload.metadata.agent_id = agentId;
       threadPayload.metadata.entity_id = `anonymoususer_${agentId}`;
@@ -173,9 +182,90 @@ export async function PATCH(request: NextRequest, contextPromise: Promise<{ para
   return handleEmbedProxyRequest(request, params.path, "PATCH");
 }
 
-const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app";
-const MAIN_API_URL = process.env.MAIN_API_URL || "https://api.b-bot.space/api";
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || ""
+const MAIN_API_URL = process.env.MAIN_API_URL || process.env.MAIN_API_PUBLIC_URL || ""
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || ""
+
+function _sha256Hex(s: string): string {
+  return crypto.createHash("sha256").update(String(s || ""), "utf8").digest("hex")
+}
+
+function _getEmbedPasswordFromRequest(req: NextRequest): string | null {
+  const h = req.headers.get("x-embed-password") || req.headers.get("X-Embed-Password")
+  const pw = (h || "").trim()
+  return pw ? pw : null
+}
+
+async function _fetchAssistantForEmbedCheck(assistantId: string) {
+  const langGraphApiUrl = LANGGRAPH_API_URL
+  const apiKey = ADMIN_API_KEY
+  const url = new URL(`${langGraphApiUrl}/assistants/${assistantId}`)
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-ID": "admin",
+      "Admin-API-Key": apiKey,
+    },
+  })
+  if (!res.ok) return null
+  return (await res.json().catch(() => null)) as any
+}
+
+function _extractEmbedPasswordConfig(assistant: any): { protected: boolean; salt?: string; hash?: string } {
+  try {
+    const meta = assistant?.metadata
+    const dc = meta?.distributionChannel
+    const cfg = dc?.config
+    const salt = typeof cfg?.embed_password_salt === "string" ? cfg.embed_password_salt : ""
+    const hash = typeof cfg?.embed_password_hash === "string" ? cfg.embed_password_hash : ""
+    const protFlag = cfg?.password_protected === true || Boolean(salt && hash)
+    if (protFlag && salt && hash) return { protected: true, salt, hash }
+    if (protFlag) return { protected: true }
+    return { protected: false }
+  } catch {
+    return { protected: false }
+  }
+}
+
+function _stripEmbedPasswordSecrets(assistant: any) {
+  try {
+    const clone = assistant && typeof assistant === "object" ? JSON.parse(JSON.stringify(assistant)) : assistant
+    const cfg = clone?.metadata?.distributionChannel?.config
+    if (cfg && typeof cfg === "object") {
+      delete cfg.embed_password_salt
+      delete cfg.embed_password_hash
+    }
+    // expose only a boolean
+    if (cfg && typeof cfg === "object") {
+      cfg.password_protected = Boolean(cfg?.password_protected || false)
+    }
+    clone.password_protected = Boolean(cfg?.password_protected || false)
+    return clone
+  } catch {
+    return assistant
+  }
+}
+
+async function _requireEmbedPasswordIfConfigured(req: NextRequest, assistantId: string): Promise<Response | null> {
+  try {
+    const assistant = await _fetchAssistantForEmbedCheck(assistantId)
+    if (!assistant) return null
+    const cfg = _extractEmbedPasswordConfig(assistant)
+    if (!cfg.protected) return null
+    const pw = _getEmbedPasswordFromRequest(req)
+    if (!pw || !cfg.salt || !cfg.hash) {
+      return NextResponse.json({ error: "embed_password_required" }, { status: 401 })
+    }
+    const got = _sha256Hex(String(cfg.salt) + pw)
+    if (got !== cfg.hash) {
+      return NextResponse.json({ error: "embed_password_invalid" }, { status: 401 })
+    }
+    return null
+  } catch {
+    return NextResponse.json({ error: "embed_password_check_failed" }, { status: 401 })
+  }
+}
 
 // Helper to check for valid UUID
 function isValidUUID(uuid: string) {
@@ -187,16 +277,21 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
   try {
     console.log("[EmbedProxy] Processing embed request");
 
-    // Add detailed logging to check for the environment variable
-    console.log(`[EmbedProxy] Checking for ADMIN_API_KEY. Is it set? ${!!process.env.ADMIN_API_KEY}`);
-    const adminApiKey = process.env.ADMIN_API_KEY;
-    console.log(`[EmbedProxy] ADMIN_API_KEY value (first 5 chars): ${adminApiKey?.substring(0, 5)}`);
+    if (!MAIN_API_URL) {
+      return NextResponse.json({ error: "MAIN_API_URL not configured" }, { status: 500 })
+    }
+    if (!LANGGRAPH_API_URL) {
+      return NextResponse.json({ error: "LANGGRAPH_API_URL not configured" }, { status: 500 })
+    }
 
     // Get the API key from environment variables (server-side only)
     // Use the same default as MainAPI if not configured
-    const apiKey = adminApiKey || "your-super-secret-admin-key"
+    const apiKey = ADMIN_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: "ADMIN_API_KEY not configured" }, { status: 500 })
+    }
 
-    console.log("[EmbedProxy] Using API key:", apiKey === "your-super-secret-admin-key" ? "default key" : "custom key");
+    console.log("[EmbedProxy] Using API key:", "***PRESENT***")
 
     // Construct the target path
     const targetPath = pathSegments.join("/")
@@ -250,33 +345,56 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       console.log("[EmbedProxy] Handling stream request for embed mode");
       // Route directly to LangGraph API, bypassing MainAPI user authentication
       const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app"
-      const url = new URL(`${langGraphApiUrl}/${targetPath}`)
-      console.log("[EmbedProxy] Routing stream directly to LangGraph:", url);
+      let streamTargetPath = targetPath
       
-      // Copy query parameters
-      const searchParams = new URLSearchParams(request.nextUrl.search)
-      for (const [key, value] of searchParams.entries()) {
-        url.searchParams.append(key, value)
-      }
-      
-      // Set up headers for direct LangGraph access
-      const headers = new Headers(request.headers);
+      // Use a minimal header set for upstream streaming.
+      // Forwarding browser hop-by-hop headers can destabilize the SSE transport.
+      const headers = new Headers();
       headers.set("Content-Type", "application/json");
-      
-      // Use a system/admin token for anonymous embed requests
-      // This bypasses individual user authentication
       headers.set("X-User-ID", "anonymous-embed-user");
       headers.set("Admin-API-Key", apiKey);
+      const requestId = request.headers.get("x-request-id") || request.headers.get("x-requestid")
+      if (requestId) headers.set("X-Request-ID", requestId);
       
       // Get request body for streaming
       let body = null
       try {
         body = await request.json()
-        console.log("[EmbedProxy] Stream request body:", JSON.stringify(body, null, 2));
+        body = applyDefaultBbotModel(body)
+        body = injectGeminiApiKey(body)
+        if (STREAM_DEBUG) console.log("[EmbedProxy] Stream request body:", JSON.stringify(body, null, 2));
       } catch (error) {
         console.log("[EmbedProxy] Error parsing stream request body:", error);
         return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
       }
+
+      // Enforce password protection for the target assistant
+      const assistantId =
+        (typeof (body as any)?.assistant_id === "string" && (body as any).assistant_id.trim() ? (body as any).assistant_id.trim() : "") ||
+        (typeof (body as any)?.assistantId === "string" && (body as any).assistantId.trim() ? (body as any).assistantId.trim() : "") ||
+        (typeof (body as any)?.config?.configurable?.assistant_id === "string" && (body as any).config.configurable.assistant_id.trim()
+          ? (body as any).config.configurable.assistant_id.trim()
+          : "") ||
+        (typeof (body as any)?.config?.configurable?.agent_id === "string" && (body as any).config.configurable.agent_id.trim()
+          ? (body as any).config.configurable.agent_id.trim()
+          : "")
+      if (assistantId) {
+        const pwErr = await _requireEmbedPasswordIfConfigured(request, assistantId)
+        if (pwErr) return pwErr
+      }
+
+      // B-Bot has a dedicated stream proxy in Synapse that is more stable than
+      // the raw /threads/{id}/runs/stream path for browser streaming.
+      if (isBBotAssistantId(assistantId) && pathSegments.length >= 4) {
+        streamTargetPath = `bbot/threads/${pathSegments[1]}/runs/stream`
+      }
+
+      const url = new URL(`${langGraphApiUrl}/${streamTargetPath}`)
+      const searchParams = new URLSearchParams(request.nextUrl.search)
+      for (const [key, value] of searchParams.entries()) {
+        url.searchParams.append(key, value)
+      }
+      console.log("[EmbedProxy] Routing stream directly to LangGraph:", url);
       
       // Make the streaming request directly to LangGraph
       const response = await fetch(url.toString(), {
@@ -295,34 +413,14 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
           return new Response("No stream", { status: 500 });
         }
         
-        // Direct pass-through streaming without buffering
-        const transformStream = new TransformStream({
-          transform(chunk, controller) {
-            // Log chunk for debugging
-            try {
-              const chunkStr = new TextDecoder().decode(chunk);
-              console.log(`[EmbedProxy][Stream][${new Date().toISOString()}] Passing through chunk:`, chunkStr.slice(0, 100));
-            } catch (e) {
-              console.log(`[EmbedProxy][Stream][${new Date().toISOString()}] Passing through binary chunk:`, chunk.length, 'bytes');
-            }
-            
-            // Pass through immediately without any processing
-            controller.enqueue(chunk);
-          }
-        });
-
-        // Pipe the response body through our transform stream
-        const transformedStream = response.body.pipeThrough(transformStream);
-
-        // Return the stream with comprehensive headers for real-time streaming
-        return new Response(transformedStream, {
+        // Return the stream directly (no per-chunk logging/decoding which slows streaming a lot)
+        return new Response(response.body, {
           status: response.status,
           headers: {
             "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Cache-Control": "no-cache, no-store, must-revalidate, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no", // Disable Nginx buffering
-            "Transfer-Encoding": "chunked",
             // CORS headers
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "*",
@@ -343,6 +441,31 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app"
       const url = new URL(`${langGraphApiUrl}/${targetPath}`)
       console.log("[EmbedProxy] Routing history directly to LangGraph:", url);
+
+      // Enforce password based on thread metadata assistant_id (best-effort).
+      try {
+        const threadId = pathSegments[1]
+        if (threadId) {
+          const tRes = await fetch(`${langGraphApiUrl}/threads/${encodeURIComponent(threadId)}`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-ID": "admin",
+              "Admin-API-Key": apiKey,
+            },
+          })
+          if (tRes.ok) {
+            const tData: any = await tRes.json().catch(() => null)
+            const assistantId = String(tData?.metadata?.assistant_id || tData?.metadata?.agent_id || "").trim()
+            if (assistantId) {
+              const pwErr = await _requireEmbedPasswordIfConfigured(request, assistantId)
+              if (pwErr) return pwErr
+            }
+          }
+        }
+      } catch {
+        // ignore and continue
+      }
       
       // Copy query parameters
       const searchParams = new URLSearchParams(request.nextUrl.search)
@@ -362,7 +485,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       let body = null
       try {
         body = await request.json()
-        console.log("[EmbedProxy] History request body:", JSON.stringify(body, null, 2));
+        if (STREAM_DEBUG) console.log("[EmbedProxy] History request body:", JSON.stringify(body, null, 2));
       } catch (error) {
         console.log("[EmbedProxy] Error parsing history request body:", error);
         return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
@@ -392,7 +515,28 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     // For other requests, set up the target URL
     let url: URL
     if (isAssistantByIdRequest) {
-      // For individual assistant requests, use the distribution channels endpoint
+      // For individual assistant requests, fetch directly from LangGraph to also reveal password protection
+      // (but never expose password hash/salt).
+      try {
+        const assistantId = String(pathSegments[1] || "").trim()
+        if (assistantId) {
+          const assistant = await _fetchAssistantForEmbedCheck(assistantId)
+          if (assistant) {
+            const cfg = _extractEmbedPasswordConfig(assistant)
+            if (cfg.protected) {
+              try {
+                assistant.metadata = assistant.metadata || {}
+                assistant.metadata.distributionChannel = assistant.metadata.distributionChannel || {}
+                assistant.metadata.distributionChannel.config = assistant.metadata.distributionChannel.config || {}
+                assistant.metadata.distributionChannel.config.password_protected = true
+              } catch {}
+            }
+            return NextResponse.json(_stripEmbedPasswordSecrets(assistant), { status: 200 })
+          }
+        }
+      } catch {
+        // fall back below
+      }
       url = new URL(`${MAIN_API_URL}/v3/public/distribution-channels/${pathSegments[1]}`)
       console.log("[EmbedProxy] Routing assistant by ID request to distribution channels endpoint:", url);
     } else {
@@ -442,6 +586,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     if (method !== "GET" && method !== "HEAD") {
       try {
         body = await request.json()
+        body = applyDefaultBbotModel(body)
         body = injectGeminiApiKey(body)
 
         // If this is a streaming request to /threads/{threadId}/runs/stream
@@ -449,9 +594,18 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         if (targetPath.includes("/runs/stream")) {
           // Extract the input and config from the request body
           const { input, config } = body
-          headers.set("Content-Type", "text/event-stream");
+          // This is an SSE response; request payload is still JSON.
           headers.set("Accept", "text/event-stream");
           console.log("[EmbedProxy] Streaming request detected");
+          const assistantIdCandidate =
+            (typeof body?.assistant_id === "string" && body.assistant_id.trim() ? body.assistant_id.trim() : "") ||
+            (typeof body?.assistantId === "string" && body.assistantId.trim() ? body.assistantId.trim() : "") ||
+            (typeof config?.configurable?.assistant_id === "string" && config.configurable.assistant_id.trim()
+              ? config.configurable.assistant_id.trim()
+              : "") ||
+            (typeof config?.configurable?.agent_id === "string" && config.configurable.agent_id.trim()
+              ? config.configurable.agent_id.trim()
+              : "")
           // Create the properly formatted payload
           const formattedBody = {
             input,
@@ -461,7 +615,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
             stream_subgraphs: true,
             subgraphs: true,
             on_disconnect: body.on_disconnect || "cancel",
-            assistant_id: config?.agent_id || body.assistant_id
+            assistant_id: assistantIdCandidate || undefined
           }
 
           body = formattedBody
@@ -490,34 +644,14 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         return new Response("No stream", { status: 500 });
       }
       
-      // Direct pass-through streaming without buffering
-      const transformStream = new TransformStream({
-        transform(chunk, controller) {
-          // Log chunk for debugging
-          try {
-            const chunkStr = new TextDecoder().decode(chunk);
-            console.log(`[EmbedProxy][Stream][${new Date().toISOString()}] Passing through chunk:`, chunkStr.slice(0, 100));
-          } catch (e) {
-            console.log(`[EmbedProxy][Stream][${new Date().toISOString()}] Passing through binary chunk:`, chunk.length, 'bytes');
-          }
-          
-          // Pass through immediately without any processing
-          controller.enqueue(chunk);
-        }
-      });
-
-      // Pipe the response body through our transform stream
-      const transformedStream = response.body.pipeThrough(transformStream);
-
       // Return the stream with comprehensive headers for real-time streaming
-      return new Response(transformedStream, {
+      return new Response(response.body, {
         status: response.status,
         headers: {
           "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Cache-Control": "no-cache, no-store, must-revalidate, no-transform",
           "Connection": "keep-alive",
           "X-Accel-Buffering": "no", // Disable Nginx buffering
-          "Transfer-Encoding": "chunked",
           // CORS headers
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Headers": "*",

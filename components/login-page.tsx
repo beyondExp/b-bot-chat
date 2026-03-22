@@ -4,11 +4,14 @@ import { Sparkles } from "lucide-react"
 import Image from "next/image"
 import { useState } from "react"
 import { useAppAuth } from "@/lib/app-auth"
+import { BrandLogo } from "./brand-logo"
+import { useI18n } from "@/lib/i18n"
 
 export function LoginPage() {
   const { loginWithRedirect, isLoading, error } = useAppAuth()
   const [loginError, setLoginError] = useState<string | null>(null)
   const [isAttemptingLogin, setIsAttemptingLogin] = useState(false)
+  const { t } = useI18n()
 
   const handleLogin = async () => {
     try {
@@ -20,7 +23,7 @@ export function LoginPage() {
       })
     } catch (err) {
       console.error("Login error:", err)
-      setLoginError("Failed to login. Please try again.")
+      setLoginError(t("login.failed"))
       setIsAttemptingLogin(false)
     }
   }
@@ -30,21 +33,21 @@ export function LoginPage() {
       <div className="w-full max-w-md p-6 space-y-6 bg-card rounded-xl shadow-lg">
         <div className="flex flex-col items-center text-center">
           <div className="w-16 h-16 relative flex items-center justify-center mb-4">
-            <Image src="/logo.svg" alt="Beyond-Bot.ai Logo" width={64} height={64} className="dark:invert" />
+            <BrandLogo alt="App logo" size={64} className="dark:invert" />
           </div>
-          <h1 className="text-2xl font-bold">Welcome to Beyond-Bot.ai</h1>
-          <p className="text-muted-foreground mt-2">Chat with AI agents powered by advanced language models</p>
+          <h1 className="text-2xl font-bold">{t("login.welcomeTitle")}</h1>
+          <p className="text-muted-foreground mt-2">{t("login.welcomeSubtitle")}</p>
         </div>
 
         <div className="space-y-4">
           <div className="flex items-center justify-center space-x-2 p-4 bg-muted rounded-lg">
             <Sparkles size={20} className="text-primary" />
-            <p className="text-sm">Access specialized AI agents for various domains</p>
+            <p className="text-sm">{t("login.featureLine")}</p>
           </div>
 
           {error && (
             <div className="p-3 bg-red-100 text-red-800 rounded-lg text-sm">
-              Authentication error. Please try again or contact support.
+              {t("login.authError")}
             </div>
           )}
 
@@ -57,16 +60,16 @@ export function LoginPage() {
           >
             {isLoading || isAttemptingLogin ? (
               <>
-                <span className="mr-2">Loading...</span>
+                <span className="mr-2">{t("auth.loading")}</span>
                 <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               </>
             ) : (
-              "Sign in to continue"
+              t("login.signInToContinue")
             )}
           </button>
 
           <p className="text-xs text-center text-muted-foreground">
-            By signing in, you agree to our Terms of Service and Privacy Policy
+            {t("login.terms")}
           </p>
         </div>
       </div>

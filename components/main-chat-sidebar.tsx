@@ -12,6 +12,7 @@ import { ThreadService, type Thread } from "@/lib/thread-service"
 import { isLocallyAuthenticated, getAuthToken, LANGGRAPH_AUDIENCE } from "@/lib/api"
 import Image from "next/image"
 import { useAppAuth } from "@/lib/app-auth"
+import { useI18n } from "@/lib/i18n"
 
 interface AgentWithChats {
   agentId: string
@@ -69,7 +70,7 @@ const getFirstUserMessage = (thread: any): string => {
 // Helper function to get agent profile image
 const getAgentProfileImage = (agentId: string, agents: any[]): string => {
   if (agentId === 'bbot' || agentId === 'b-bot') {
-    return 'https://beyond-bot.ai/logo-schwarz.svg'
+    return agents.find(a => a.id === agentId)?.profileImage || 'https://beyond-bot.ai/logo-schwarz.svg'
   }
   
   const agent = agents.find(a => a.id === agentId)
@@ -103,6 +104,7 @@ export function MainChatSidebar({
   const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const { isAuthenticated, getAccessTokenSilently } = useAppAuth()
+  const { t } = useI18n()
 
   // Initialize thread service with auth token getter
   const getAuthTokenForService = async (): Promise<string | null> => {
@@ -136,7 +138,10 @@ export function MainChatSidebar({
     
     // Get better title from first user message
     const firstUserMessage = getFirstUserMessage(thread)
-    const title = firstUserMessage || thread.metadata?.title || `Chat ${thread.thread_id.slice(-8)}`
+    const title =
+      firstUserMessage ||
+      thread.metadata?.title ||
+      t("sidebar.chatTitle").replace("{id}", thread.thread_id.slice(-8))
     
     console.log('[MainChatSidebar] Converting thread:', {
       threadId: thread.thread_id,
@@ -152,7 +157,7 @@ export function MainChatSidebar({
       agentId,
       userId: threadUserId,
       title,
-      lastMessage: thread.metadata?.lastMessage || 'New conversation',
+      lastMessage: thread.metadata?.lastMessage || t("common.newConversation"),
       timestamp: new Date(thread.updated_at).getTime()
     }
   }
@@ -358,14 +363,14 @@ export function MainChatSidebar({
             {currentAgentName}
           </SheetTitle>
           <SheetDescription>
-            Your conversations with this agent
+            {t("sidebar.description")}
           </SheetDescription>
           
           {/* Search Input */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search conversations..."
+              placeholder={t("sidebar.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9 pr-9"
@@ -374,7 +379,7 @@ export function MainChatSidebar({
               <button
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                aria-label="Clear search"
+                aria-label={t("sidebar.clearSearch")}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -389,21 +394,21 @@ export function MainChatSidebar({
                 <div className="flex items-center justify-center mb-4">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                 </div>
-                <p>Loading conversations...</p>
+                <p>{t("sidebar.loadingConversations")}</p>
               </div>
             ) : currentAgentSessions.length === 0 ? (
               <div className="text-center text-muted-foreground py-8">
                 {searchQuery ? (
                   <>
                     <Search className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>No conversations found</p>
-                    <p className="text-sm">Try a different search term</p>
+                    <p>{t("sidebar.noConversationsFound")}</p>
+                    <p className="text-sm">{t("sidebar.tryDifferentSearch")}</p>
                   </>
                 ) : (
                   <>
                     <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>No conversations yet</p>
-                    <p className="text-sm">Start a new chat to begin</p>
+                    <p>{t("sidebar.noConversationsYet")}</p>
+                    <p className="text-sm">{t("sidebar.startNewChatToBegin")}</p>
                   </>
                 )}
               </div>
@@ -465,7 +470,7 @@ export function MainChatSidebar({
             variant="default"
           >
             <Plus className="h-4 w-4" />
-            New Chat
+            {t("sidebar.newChat")}
           </Button>
         </div>
       </SheetContent>

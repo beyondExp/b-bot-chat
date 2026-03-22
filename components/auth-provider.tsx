@@ -5,6 +5,7 @@ import { Auth0Provider } from "@auth0/auth0-react"
 import { AuthProvider as OidcProvider, useAuth as useOidcAuth } from "react-oidc-context"
 import { useAuth0 } from "@auth0/auth0-react"
 import { useMemo, useState, useEffect } from "react"
+import { WebStorageStateStore } from "oidc-client-ts"
 import { AppAuthContext, type AppAuth } from "@/lib/app-auth"
 
 interface AuthProviderProps {
@@ -37,6 +38,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const zitadelResource = process.env.NEXT_PUBLIC_ZITADEL_RESOURCE || ""
   const isZitadelCallbackPath =
     window.location.pathname === "/auth/callback" || window.location.pathname === "/auth/silent-renew"
+  const zitadelUserStore = new WebStorageStateStore({ store: window.localStorage })
 
   if (provider === "zitadel") {
     return (
@@ -52,6 +54,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         loadUserInfo={true}
         extraQueryParams={zitadelResource ? { resource: zitadelResource } : undefined}
         skipSigninCallback={isZitadelCallbackPath}
+        userStore={zitadelUserStore}
+        stateStore={zitadelUserStore}
       >
         <ZitadelBridge>{children}</ZitadelBridge>
       </OidcProvider>

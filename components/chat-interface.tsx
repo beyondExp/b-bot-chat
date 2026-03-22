@@ -10,8 +10,10 @@ import { ChatInput } from "./chat-input"
 import { ChatHeader } from "./chat-header"
 import { EnhancedChatMessages } from "./enhanced-chat-messages"
 import { MessageSearch } from "./message-search"
+import { WorkdeskDrawer, type QueuedWorkdeskFile } from "./workdesk-drawer"
 // Temporarily remove tool response handling to avoid type conflicts
 // import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
+import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses"
 import { MainChatSidebar } from "./main-chat-sidebar"
 import { PaymentRequiredModal } from "./payment-required-modal"
 import { AutoRechargeNotification } from "./auto-recharge-notification"
@@ -24,6 +26,10 @@ import { useAuthenticatedFetch, isLocallyAuthenticated, getAuthToken } from "@/l
 import { ThreadService, type Thread } from "@/lib/thread-service"
 import { convertToWav } from "@/lib/audio-converter"
 import { useAppAuth } from "@/lib/app-auth"
+import { createContactsStore } from "@/lib/contacts-store"
+import { fetchBranding, type Branding } from "@/lib/branding"
+import { useI18n } from "@/lib/i18n"
+import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/chat-user-profile"
 
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
@@ -33,10 +39,15 @@ interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
-  const { user, isAuthenticated, getAccessTokenSilently } = useAppAuth()
+  const { user, isAuthenticated, getAccessTokenSilently, provider } = useAppAuth()
+  const { t, locale } = useI18n()
   const [agents, setAgents] = useState<any[]>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [agentsError, setAgentsError] = useState<string | null>(null)
+  const [branding, setBranding] = useState<Branding | null>(null)
+  const contactsStore = useMemo(() => createContactsStore(user?.sub), [user?.sub])
+  const [contactAgentIds, setContactAgentIds] = useState<string[]>([])
+  const [recentAgents, setRecentAgents] = useState<string[]>([])
 
   // Prevent page-level scrolling; the chat should scroll inside the messages pane only.
   // This avoids the "second scrollbar" + growing blank space below the sticky input.
@@ -84,12 +95,96 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [showContactsPage, setShowContactsPage] = useState(false)
   const [showVoiceCall, setShowVoiceCall] = useState(false)
   const [showMessageSearch, setShowMessageSearch] = useState(false)
+  const [workdeskOpen, setWorkdeskOpen] = useState(false)
+  const [workdeskAutoPick, setWorkdeskAutoPick] = useState(false)
+  const [queuedWorkdeskFiles, setQueuedWorkdeskFiles] = useState<QueuedWorkdeskFile[]>([])
+  const queuedWorkdeskFilesRef = useRef<Record<string, string>>({})
+  const localWorkspaceFilesRef = useRef<Record<string, string>>({})
+  const [localWorkspaceFilesVersion, setLocalWorkspaceFilesVersion] = useState(0)
+  const processedWorkspaceFileMessageIdsRef = useRef<Set<string>>(new Set())
+
+  const normalizeWorkspacePath = useCallback((p: string) => {
+    return (p || "").toString().replace(/^\/+/, "").trim()
+  }, [])
+
+  const mergeLocalWorkspaceFiles = useCallback(
+    (incoming: Record<string, string>) => {
+      const next = incoming && typeof incoming === "object" ? incoming : {}
+      let changed = false
+      for (const [rawPath, rawContent] of Object.entries(next)) {
+        const path = normalizeWorkspacePath(rawPath)
+        if (!path) continue
+        const content = typeof rawContent === "string" ? rawContent : String(rawContent ?? "")
+        if (localWorkspaceFilesRef.current[path] !== content) {
+          localWorkspaceFilesRef.current[path] = content
+          changed = true
+        }
+      }
+      if (changed) setLocalWorkspaceFilesVersion((v) => v + 1)
+    },
+    [normalizeWorkspacePath],
+  )
+
+  const localWorkspaceEntries = useMemo(() => {
+    const out: Array<{ name: string; path: string; size?: number | null; source?: string }> = []
+    const files = localWorkspaceFilesRef.current || {}
+    for (const [path, content] of Object.entries(files)) {
+      const p = normalizeWorkspacePath(path)
+      if (!p) continue
+      out.push({
+        name: p.split("/").filter(Boolean).pop() || p,
+        path: p,
+        size: typeof content === "string" ? content.length : null,
+        source: "workspace",
+      })
+    }
+    out.sort((a, b) => (a.path || "").localeCompare(b.path || ""))
+    return out
+  }, [localWorkspaceFilesVersion, normalizeWorkspacePath])
+
+  const queueWorkspaceFile = useCallback((name: string, content: string, size: number) => {
+    const key = String(name || "").trim()
+    if (!key) return
+    queuedWorkdeskFilesRef.current[key] = content
+    mergeLocalWorkspaceFiles({ [key]: content })
+    setQueuedWorkdeskFiles((prev) => {
+      const next = prev.filter((x) => x.name !== key)
+      next.push({ name: key, size })
+      return next
+    })
+  }, [mergeLocalWorkspaceFiles])
+
+  const removeQueuedWorkspaceFile = useCallback((name: string) => {
+    const key = String(name || "").trim()
+    if (!key) return
+    try {
+      delete queuedWorkdeskFilesRef.current[key]
+    } catch {}
+    try {
+      const p = normalizeWorkspacePath(key)
+      if (p && localWorkspaceFilesRef.current[p] !== undefined) {
+        delete localWorkspaceFilesRef.current[p]
+        setLocalWorkspaceFilesVersion((v) => v + 1)
+      }
+    } catch {}
+    setQueuedWorkdeskFiles((prev) => prev.filter((x) => x.name !== key))
+  }, [normalizeWorkspacePath])
+
+  const takeQueuedWorkspaceFiles = useCallback((): Record<string, string> => {
+    const out = queuedWorkdeskFilesRef.current
+    queuedWorkdeskFilesRef.current = {}
+    setQueuedWorkdeskFiles([])
+    return out
+  }, [])
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const [remainingCredits, setRemainingCredits] = useState(0)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
   const [autoRechargeAmount, setAutoRechargeAmount] = useState(0)
   const [toolEvents, setToolEvents] = useState<any[]>([])
+  const [followUpSuggestions, setFollowUpSuggestions] = useState<any[]>([])
+  const [followUpSuggestionsLoading, setFollowUpSuggestionsLoading] = useState(false)
+  const pendingFollowUpsRef = useRef<any[] | null>(null)
   const [audioMap, setAudioMap] = useState<Record<string, string[]>>({}) // Store TTS audio chunks mapped to message IDs
   const [isLoadingOldConversation, setIsLoadingOldConversation] = useState(false) // Track if loading old conversation
   const [playedDuringCall, setPlayedDuringCall] = useState<Set<string>>(new Set()) // Track message IDs played during call
@@ -107,6 +202,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [transcription, setTranscription] = useState("")
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [showSidebar, setShowSidebar] = useState(false)
+  const [draftInput, setDraftInput] = useState("")
   
   // Main chat identifier to separate from embed storage
   const MAIN_CHAT_ID = "main-chat"
@@ -147,6 +243,28 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }
   }
 
+  // Token for MainAPI calls (contacts persistence via proxy).
+  const getAuthTokenForMainApi = async (): Promise<string | null> => {
+    try {
+      if (isAuthenticated) {
+        // Zitadel: the OIDC client already mints the right access_token (no Auth0 audience param).
+        if (provider === "zitadel") {
+          return await getAccessTokenSilently()
+        }
+        // Auth0: request token for configured API audience (fallback to Synapse audience).
+        const audience = process.env.NEXT_PUBLIC_AUTH0_AUDIENCE || LANGGRAPH_AUDIENCE
+        return await getAccessTokenSilently({ authorizationParams: { audience } })
+      }
+      if (isLocallyAuthenticated()) {
+        return getAuthToken()
+      }
+      return null
+    } catch (error) {
+      console.error("Failed to get MainAPI auth token:", error)
+      return null
+    }
+  }
+
   // Tool events now handled directly through message stream as type: "tool"
 
   const threadService = new ThreadService(getAuthTokenForService)
@@ -168,6 +286,124 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     };
     loadAgents();
   }, [getAgents]);
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const b = await fetchBranding()
+      if (mounted) setBranding(b)
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    setContactAgentIds(contactsStore.getIds())
+  }, [contactsStore])
+
+  // Sync contacts from Datacenter (via MainAPI proxy) when authenticated.
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      // Anonymous users: keep local-only contacts
+      if (!user?.sub) return
+      try {
+        const token = await getAuthTokenForMainApi()
+        if (!token) return
+        const res = await fetch("/api/contacts", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        const ids = Array.isArray(data?.ids) ? data.ids.map(String).map((s: string) => s.trim()).filter(Boolean) : []
+        if (!mounted) return
+        setContactAgentIds(ids)
+        contactsStore.setIds(ids) // keep local cache in sync
+      } catch (e) {
+        console.warn("[Chat] Failed to sync contacts from server; using local cache", e)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [user?.sub, contactsStore])
+
+  const handleToggleContact = useCallback(
+    (agentId: string) => {
+      const { ids } = contactsStore.toggle(agentId)
+      setContactAgentIds(ids)
+      if (user?.sub) {
+        void (async () => {
+          const token = await getAuthTokenForMainApi()
+          if (!token) return
+          await fetch("/api/contacts", {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ids }),
+          })
+        })().catch(() => {})
+      }
+    },
+    [contactsStore, user?.sub],
+  )
+
+  const handleRemoveContact = useCallback(
+    (agentId: string) => {
+      const ids = contactsStore.remove(agentId)
+      setContactAgentIds(ids)
+      if (user?.sub) {
+        void (async () => {
+          const token = await getAuthTokenForMainApi()
+          if (!token) return
+          await fetch("/api/contacts", {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ids }),
+          })
+        })().catch(() => {})
+      }
+    },
+    [contactsStore, user?.sub],
+  )
+
+  const contactsAgents = useMemo(() => {
+    const byId = new Map<string, any>((agents || []).map((a: any) => [String(a.id), a]))
+    const out: any[] = []
+    for (const id of contactAgentIds || []) {
+      const a = byId.get(String(id))
+      if (a) out.push(a)
+      else if (id === "bbot" || id === "b-bot") {
+        out.push({ id, name: "B-Bot", profileImage: branding?.mainAgentLogoUrl })
+      }
+    }
+    return out
+  }, [agents, contactAgentIds, branding?.mainAgentLogoUrl])
+
+  const computedWelcomeTitle = useMemo(() => {
+    const appName = (branding?.appName || "Swiss Chat").toString()
+    const raw = (branding?.welcomeTitle || "").trim()
+    const defaultEn = `Welcome to ${appName}`
+    if (raw && !(locale !== "en" && raw === defaultEn)) return raw
+    return t("branding.welcomeTitle").replace("{appName}", appName)
+  }, [branding?.welcomeTitle, branding?.appName, t, locale])
+
+  const computedWelcomeSubtitle = useMemo(() => {
+    const raw = (branding?.welcomeSubtitle || "").trim()
+    const defaultEns = new Set([
+      "Start a conversation by sending a message or try one of these suggestions:",
+      "Start a conversation by sending a message or tap one of these suggestions:",
+    ])
+    if (raw && !(locale !== "en" && defaultEns.has(raw))) return raw
+    return t("branding.welcomeSubtitle")
+  }, [branding?.welcomeSubtitle, t, locale])
 
   // Get auth token for API calls
   const getApiKey = async () => {
@@ -243,7 +479,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const getApiUrl = () => {
     // For unauthenticated users, use embed proxy (which uses admin API key)
     // For authenticated users, use main proxy (which forwards user tokens)
-    const proxyEndpoint = (!isAuthenticated || selectedAgent === "bbot") ? '/api/embed-proxy' : '/api/proxy';
+    const proxyEndpoint = !isAuthenticated ? "/api/embed-proxy" : "/api/proxy"
     
     // Need to construct absolute URL for LangGraph client
     if (typeof window !== 'undefined') {
@@ -301,6 +537,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return currentSession?.threadId || ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID) || undefined
   }
 
+  const [activeThreadId, setActiveThreadId] = useState<string | undefined>(() => getCurrentThreadId())
+
+  const workdeskThreadId = useMemo(() => {
+    const tid = activeThreadId || getCurrentThreadId()
+    return tid && String(tid).trim() ? String(tid).trim() : null
+  }, [activeThreadId, currentSession?.threadId])
+
   // Initialize the useStream hook with Bearer token authentication via apiKey
   console.log('[Chat] Initializing useStream with apiKey:', apiKey ? 'present' : 'undefined');
   console.log('[Chat] Current thread ID for useStream:', getCurrentThreadId());
@@ -355,7 +598,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     apiUrl: getApiUrl(),
     apiKey: canInitializeStream && isAuthenticated ? apiKey : undefined, // Only pass API key for authenticated users
     assistantId: canInitializeStream ? getAssistantId() : "bbot", // Use default if not initializing
-    threadId: canInitializeStream ? getCurrentThreadId() : undefined, // Only load thread if initializing
+    threadId: canInitializeStream ? (activeThreadId || getCurrentThreadId()) : undefined, // Only load thread if initializing
     messagesKey: "messages",
     onError: (error: unknown) => {
       console.error("Stream error:", error);
@@ -364,12 +607,24 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     },
     onFinish: () => {
       console.log("Stream finished");
+      try {
+        const pending = pendingFollowUpsRef.current
+        if (Array.isArray(pending) && pending.length > 0) {
+          setFollowUpSuggestions(pending)
+        }
+      } catch {
+        // ignore
+      } finally {
+        pendingFollowUpsRef.current = null
+        setFollowUpSuggestionsLoading(false)
+      }
       saveCurrentSession();
     },
     onThreadId: (threadId: string) => {
       console.log("[Chat] Thread ID received from LangGraph:", threadId);
       console.log("[Chat] Saving thread ID to localStorage");
       ChatHistoryManager.setCurrentThreadId(threadId, MAIN_CHAT_ID);
+      setActiveThreadId(threadId)
       // Verify it was saved
       const savedId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID);
       console.log("[Chat] Verified saved thread ID:", savedId);
@@ -404,6 +659,55 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           }
         }
       }
+
+      // Workdesk / workspace files (Hub-style): merge any streamed virtual files into local list.
+      try {
+        const rawFiles =
+          event?.files ||
+          event?.data?.files ||
+          event?.event?.files ||
+          event?.payload?.files ||
+          null
+        if (rawFiles && typeof rawFiles === "object" && !Array.isArray(rawFiles)) {
+          const out: Record<string, string> = {}
+          for (const [k, v] of Object.entries(rawFiles as Record<string, unknown>)) {
+            if (!k) continue
+            if (typeof v === "string") out[k] = v
+          }
+          if (Object.keys(out).length) {
+            mergeLocalWorkspaceFiles(out)
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // Follow-up suggestions (post-response)
+      try {
+        const type = String(event?.type || event?.event?.type || "").trim()
+        const isFollowups = type === "bbot_followups" || type === "followups" || type === "follow_up_suggestions"
+        if (isFollowups) {
+          const suggestions =
+            (Array.isArray(event?.suggestions) && event.suggestions) ||
+            (Array.isArray(event?.followups) && event.followups) ||
+            (Array.isArray(event?.follow_up_suggestions) && event.follow_up_suggestions) ||
+            (Array.isArray(event?.data?.suggestions) && event.data.suggestions) ||
+            []
+          if (Array.isArray(suggestions) && suggestions.length > 0) {
+            // Buffer and only render after stream finishes (onFinish)
+            pendingFollowUpsRef.current = suggestions
+          }
+          setFollowUpSuggestionsLoading(false)
+        }
+
+        const isFollowupsLoading =
+          type === "bbot_followups_loading" || type === "followups_loading" || type === "follow_up_suggestions_loading"
+        if (isFollowupsLoading) {
+          setFollowUpSuggestionsLoading(true)
+        }
+      } catch {
+        // ignore
+      }
     },
     // TODO: LangGraph SDK useStream doesn't support onToolEvent directly
     // Tool events need to be extracted from the message stream based on metadata/namespace
@@ -434,6 +738,72 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       }
     }
   }, [thread.messages, toolEvents.length]);
+
+  useEffect(() => {
+    const msgs: any[] = Array.isArray(thread.messages) ? thread.messages : []
+    if (msgs.length === 0) return
+
+    const extractFilesFromUnknown = (v: unknown): Record<string, string> | null => {
+      if (!v || typeof v !== "object" || Array.isArray(v)) return null
+      const r = v as Record<string, unknown>
+      const files = r.files
+      if (!files || typeof files !== "object" || Array.isArray(files)) return null
+      const out: Record<string, string> = {}
+      for (const [k, val] of Object.entries(files as Record<string, unknown>)) {
+        if (!k) continue
+        if (typeof val === "string") out[k] = val
+      }
+      return Object.keys(out).length ? out : null
+    }
+
+    const tryExtractFiles = (msg: any): Record<string, string> | null => {
+      if (!msg || typeof msg !== "object") return null
+      const direct =
+        (msg.files && typeof msg.files === "object" ? msg.files : null) ||
+        msg.additional_kwargs?.files ||
+        msg.additional_kwargs?.kwargs?.files ||
+        msg.tool_output?.files ||
+        null
+
+      if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+        const out: Record<string, string> = {}
+        for (const [k, v] of Object.entries(direct as Record<string, unknown>)) {
+          if (!k) continue
+          if (typeof v === "string") out[k] = v
+        }
+        if (Object.keys(out).length) return out
+      }
+
+      const content = msg.content
+      if (content && typeof content === "object") {
+        const out = extractFilesFromUnknown(content)
+        if (out) return out
+      }
+
+      if (typeof content === "string" && content.length < 200000 && content.includes('"files"')) {
+        try {
+          const parsed = JSON.parse(content)
+          const out = extractFilesFromUnknown(parsed)
+          if (out) return out
+        } catch {
+          // ignore
+        }
+      }
+
+      return null
+    }
+
+    const slice = msgs.slice(Math.max(0, msgs.length - 25))
+    for (const m of slice) {
+      const id = m && (m.id || m.message_id) ? String(m.id || m.message_id) : ""
+      if (!id) continue
+      if (processedWorkspaceFileMessageIdsRef.current.has(id)) continue
+      processedWorkspaceFileMessageIdsRef.current.add(id)
+
+      const files = tryExtractFiles(m)
+      if (files) mergeLocalWorkspaceFiles(files)
+    }
+  }, [thread.messages, mergeLocalWorkspaceFiles])
 
   // 🔊 Extract audio chunks from AI messages (TTS streaming fallback & history)
   useEffect(() => {
@@ -568,6 +938,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Function to handle sending a message with streaming
   const handleSendMessage = async (messageContent: string) => {
     setToolEvents([]); // Clear previous tool events
+    setFollowUpSuggestions([])
+    setFollowUpSuggestionsLoading(false)
+    pendingFollowUpsRef.current = null
     console.log('[Chat] handleSendMessage called with:', messageContent)
     if (!messageContent.trim()) return
 
@@ -582,25 +955,21 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           const userApps = {};
           const mergedApps = { ...assistantApps, ...userApps };
           const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
+          const userProfile = loadChatUserProfile(user?.sub || "anonymous")
+          const baseSystemMessage =
+            (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
+              ? (config as any).system_message.trim()
+              : "") || "Be helpful and concise."
+          const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
           
           // Get output modalities directly from agent config
           const outputModalities = config.output_modalities || [];
 
-          // EXCEPTION: For the BBot Platform assistant ("bbot" or "b-bot"), we ALWAYS enable TTS by default
-          const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
-          const defaultBBotTTS = [{
-            type: "tts",
-            model_name: "tts-1",
-            voice: "alloy",
-            auto_play: true,
-            streaming: true,
-            provider: "openai",
-            speed: 1
-          }];
-          
-          const finalOutputModalities = (isBBot && outputModalities.length === 0) 
-            ? defaultBBotTTS 
-            : outputModalities;
+          // Normal chat should NOT request TTS, even if an agent is configured with TTS.
+          // TTS is reserved for Voice Call mode.
+          const finalOutputModalities = Array.isArray(outputModalities)
+            ? outputModalities.filter((m: any) => String(m?.type || "").toLowerCase() !== "tts")
+            : [];
 
           // Create the new message
           const newMessage = {
@@ -620,13 +989,17 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           console.log('[Chat] Current apiKey for submission:', apiKey ? 'present' : 'undefined')
           console.log('[Chat] Can initialize stream:', canInitializeStream)
 
+          const queuedFiles = queuedWorkdeskFilesRef.current || {}
+          const hasQueuedFiles = Object.keys(queuedFiles).length > 0
+
           // Submit using LangGraph's useStream (like agent-chat-ui)
           thread.submit(
             { 
               messages: allMessages,
               entity_id: entityId,
               user_id: userId,
-              agent_id: agentId
+              agent_id: agentId,
+              ...(hasQueuedFiles ? { files: queuedFiles } : {}),
             },
             {
               config: {
@@ -637,7 +1010,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   temperature: 0.7,
                   top_p: 1.0,
                   instructions: "Be helpful and concise.",
+                  system_message,
                   apps: mergedApps,
+                  distribution_channel: { type: "Chat" },
                   input_modalities: [],
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
                 }
@@ -656,6 +1031,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               }),
             }
           );
+
+          if (hasQueuedFiles) {
+            takeQueuedWorkspaceFiles()
+          }
 
       console.log('[Chat] Message submitted to stream');
     } catch (error) {
@@ -688,6 +1067,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Handle voice message submission with audio modality
   const handleVoiceMessage = async (audioBlob: Blob, transcription: string, duration: number) => {
     setToolEvents([]); // Clear previous tool events
+    setFollowUpSuggestions([])
+    setFollowUpSuggestionsLoading(false)
+    pendingFollowUpsRef.current = null
     console.log('[ChatInterface] Voice message received:', { 
       size: audioBlob.size, 
       type: audioBlob.type, 
@@ -705,25 +1087,30 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           const userApps = {};
           const mergedApps = { ...assistantApps, ...userApps };
           const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
+          const userProfile = loadChatUserProfile(user?.sub || "anonymous")
+          const baseSystemMessage =
+            (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
+              ? (config as any).system_message.trim()
+              : "") || "Be helpful and concise."
+          const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
           
           // Get output modalities directly from agent config
           const outputModalities = config.output_modalities || [];
 
-          // EXCEPTION: For the BBot Platform assistant ("bbot" or "b-bot"), we ALWAYS enable TTS by default
-          const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
-          const defaultBBotTTS = [{
-            type: "tts",
-            model_name: "tts-1",
-            voice: "alloy",
-            auto_play: true,
-            streaming: true,
-            provider: "openai",
-            speed: 1
-          }];
-          
-          const finalOutputModalities = (isBBot && outputModalities.length === 0) 
-            ? defaultBBotTTS 
-            : outputModalities;
+          // Voice messages should allow TTS so the agent can reply in text + voice.
+          // If BBot has no modalities configured, default to Gemini Flash TTS for low latency.
+          const isBBot = agentId === "bbot" || agentId === "b-bot"
+          const defaultBBotTTS = [
+            {
+              type: "tts",
+              model: "google/gemini-2.5-flash-preview-tts",
+              model_name: "google/gemini-2.5-flash-preview-tts",
+              voice: "Zephyr",
+              auto_play: true,
+            },
+          ]
+          const finalOutputModalities =
+            isBBot && Array.isArray(outputModalities) && outputModalities.length === 0 ? defaultBBotTTS : outputModalities
 
           // Convert blob to base64 data URL (keep as webm)
       const reader = new FileReader();
@@ -759,6 +1146,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         duration
       })
 
+      const queuedFiles = queuedWorkdeskFilesRef.current || {}
+      const hasQueuedFiles = Object.keys(queuedFiles).length > 0
+
           // Submit using LangGraph's useStream with audio modality
           // 🎤 Use audio-capable model for voice messages
           thread.submit(
@@ -766,7 +1156,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               messages: allMessages,
               entity_id: entityId,
               user_id: userId,
-              agent_id: agentId
+              agent_id: agentId,
+              ...(hasQueuedFiles ? { files: queuedFiles } : {}),
             },
             {
               config: {
@@ -774,11 +1165,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   agent_id: agentId,
                   user_id: userId,
                   entity_id: entityId,
-                  response_model: "openai/gpt-4o-mini", // Testing with gpt-4o-mini
                   temperature: 0.7,
                   top_p: 1.0,
                   instructions: "Be helpful and concise.",
+                  system_message,
                   apps: mergedApps,
+                  distribution_channel: { type: "Chat" },
                   input_modalities: [], // No special input modalities needed (audio is in content)
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
                 }
@@ -797,6 +1189,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           }),
         }
       );
+
+      if (hasQueuedFiles) {
+        takeQueuedWorkspaceFiles()
+      }
 
       console.log('[ChatInterface] Voice message submitted to stream');
     } catch (error) {
@@ -916,6 +1312,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Track if we just left a call (to prevent auto-playing audio that was already heard)
   const [justLeftCall, setJustLeftCall] = useState(false);
+  const callGreetingSentRef = useRef(false)
   
   // Callback when audio is played during call - mark message ID as played
   const handleAudioPlayedDuringCall = (messageIds: string[]) => {
@@ -931,8 +1328,100 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     // Mark that we just left a call - audio should not auto-play
     setJustLeftCall(true)
     setShowVoiceCall(false)
+    callGreetingSentRef.current = false
     // Messages will be shown in the chat view - don't auto-scroll so user sees full conversation
   }
+
+  const handleCallConnected = useCallback(() => {
+    // Trigger a one-time greeting run when the call is connected so the agent speaks first.
+    if (callGreetingSentRef.current) return
+    if (!selectedAgent) return
+
+    callGreetingSentRef.current = true
+    console.log("[Chat] Voice call connected; sending greeting run")
+
+    try {
+      const userId = user?.sub || "anonymous-user"
+      const agentId = selectedAgent || "bbot"
+      const entityId = userId.replace(/[|\-]/g, "") + "_" + agentId
+
+      const agentObj = agents.find((a: any) => a.id === selectedAgent)
+      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
+      const userProfile = loadChatUserProfile(user?.sub || "anonymous")
+      const baseSystemMessage =
+        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
+          ? (config as any).system_message.trim()
+          : "") || "You are speaking on a phone call. Keep it brief and natural."
+      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
+      const outputModalities = config.output_modalities || []
+
+      // If BBot has no modalities configured, default to Gemini Flash TTS for low latency.
+      const isBBot = selectedAgent === "bbot" || selectedAgent === "b-bot"
+      const defaultBBotTTS = [
+        {
+          type: "tts",
+          model: "google/gemini-2.5-flash-preview-tts",
+          model_name: "google/gemini-2.5-flash-preview-tts",
+          voice: "Zephyr",
+          auto_play: true,
+          streaming: true,
+          provider: "google",
+          speed: 1,
+        },
+      ]
+
+      const finalOutputModalities = isBBot && outputModalities.length === 0 ? defaultBBotTTS : outputModalities
+
+      const assistantApps = agentObj?.rawData?.config?.apps || {}
+      const userApps = {}
+      const mergedApps = { ...assistantApps, ...userApps }
+
+      const greetingMessage: any = {
+        id: `${DO_NOT_RENDER_ID_PREFIX}call-greeting-${Date.now()}`,
+        role: "user",
+        type: "human",
+        content: "Start the call with one short friendly greeting sentence and ask how you can help.",
+      }
+
+      thread.submit(
+        {
+          messages: [greetingMessage],
+          entity_id: entityId,
+          user_id: userId,
+          agent_id: agentId,
+        },
+        {
+          config: {
+            configurable: {
+              agent_id: agentId,
+              user_id: userId,
+              entity_id: entityId,
+              temperature: 0.4,
+              top_p: 1.0,
+              instructions: "You are speaking on a phone call. Keep it brief and natural.",
+              system_message,
+              apps: mergedApps,
+              distribution_channel: { type: "Chat" },
+              input_modalities: [],
+              output_modalities: finalOutputModalities,
+            },
+          },
+          streamMode: ["values", "messages", "updates", "custom"],
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [...(prev.messages ?? []), greetingMessage] as any,
+            entity_id: entityId,
+            user_id: userId,
+            agent_id: agentId,
+          }),
+        },
+      )
+    } catch (e) {
+      console.error("[Chat] Failed to send call greeting:", e)
+      // Allow retry if something threw before submit.
+      callGreetingSentRef.current = false
+    }
+  }, [agents, selectedAgent, thread, user?.sub])
 
   // Track if we're currently submitting audio to prevent double calls
   const isSubmittingAudioRef = useRef(false);
@@ -985,6 +1474,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       // Get agent configuration (same as handleSendMessage)
       const agentObj = agents.find((a: any) => a.id === selectedAgent)
       const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
+      const userProfile = loadChatUserProfile(user?.sub || "anonymous")
+      const baseSystemMessage =
+        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
+          ? (config as any).system_message.trim()
+          : "") || "Be helpful and concise."
+      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
 
       // Extract output modalities from agent config
       const outputModalities = config.output_modalities || []
@@ -993,7 +1488,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const isBBot = selectedAgent === 'bbot' || selectedAgent === 'b-bot';
       const defaultBBotTTS = [{
         type: "tts",
-        model_name: "google/gemini-2.5-pro-preview-tts",
+        // Send both keys for compatibility with Synapse (expects `model`) and UI (often uses `model_name`)
+        model: "google/gemini-2.5-flash-preview-tts",
+        model_name: "google/gemini-2.5-flash-preview-tts",
         voice: "Zephyr",
         auto_play: true,
         streaming: true,
@@ -1031,7 +1528,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               temperature: 0.7,
               top_p: 1.0,
               instructions: "Be helpful and concise.",
+              system_message,
               apps: mergedApps,
+              distribution_channel: { type: "Chat" },
               input_modalities: [],
               output_modalities: finalOutputModalities,
             }
@@ -1109,34 +1608,60 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return new Blob([buffer], { type: 'audio/wav' })
   }
 
-  // Get recent agents from chat history
-  const getRecentAgents = (): string[] => {
-    const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
-    const userId = user?.sub
-    
-    // Filter sessions for current user (including anonymous users)
-    const userSessions = allSessions.filter((session: ChatSession) => {
-      const matchesUser = userId ? session.userId === userId : (!session.userId || session.userId === "anonymous-user")
-      return matchesUser
-    })
-
-    // Get unique agent IDs sorted by most recent activity
-    const agentActivity = new Map<string, number>()
-    
-    userSessions.forEach((session: ChatSession) => {
-      const agentId = session.agentId
-      const currentLatest = agentActivity.get(agentId) || 0
-      if (session.timestamp > currentLatest) {
-        agentActivity.set(agentId, session.timestamp)
+  // Load recent agents (prefer Synapse threads; fallback to local history).
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const canUseServer = Boolean(user?.sub) && (isAuthenticated || isLocallyAuthenticated())
+        if (canUseServer) {
+          const threads = await threadService.getThreads(user?.sub)
+          if (mounted && Array.isArray(threads) && threads.length > 0) {
+            const activity = new Map<string, number>()
+            for (const th of threads) {
+              const agentId = (th as any)?.metadata?.assistant_id || (th as any)?.config?.configurable?.agent_id
+              if (!agentId) continue
+              const ts = new Date((th as any).updated_at).getTime()
+              const prev = activity.get(String(agentId)) || 0
+              if (ts > prev) activity.set(String(agentId), ts)
+            }
+            const ids = Array.from(activity.entries())
+              .sort(([, a], [, b]) => b - a)
+              .map(([id]) => id)
+              .slice(0, 5)
+            setRecentAgents(ids)
+            return
+          }
+        }
+      } catch (e) {
+        console.warn("[Chat] Failed to load recent agents from server; falling back to local history", e)
       }
-    })
 
-    // Sort by timestamp and return agent IDs
-    return Array.from(agentActivity.entries())
-      .sort(([,a], [,b]) => b - a)
-      .map(([agentId]) => agentId)
-      .slice(0, 5) // Return top 5 recent agents
-  }
+      // Fallback: local chat history
+      const allSessions = ChatHistoryManager.getChatSessions(MAIN_CHAT_ID)
+      const userId = user?.sub
+      const userSessions = allSessions.filter((session: ChatSession) => {
+        return userId ? session.userId === userId : (!session.userId || session.userId === "anonymous-user")
+      })
+      const agentActivity = new Map<string, number>()
+      userSessions.forEach((session: ChatSession) => {
+        const agentId = session.agentId
+        const currentLatest = agentActivity.get(agentId) || 0
+        if (session.timestamp > currentLatest) agentActivity.set(agentId, session.timestamp)
+      })
+      if (mounted) {
+        setRecentAgents(
+          Array.from(agentActivity.entries())
+            .sort(([, a], [, b]) => b - a)
+            .map(([agentId]) => agentId)
+            .slice(0, 5),
+        )
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [user?.sub, isAuthenticated])
 
   // Show voice call view
   if (showVoiceCall && selectedAgent) {
@@ -1144,9 +1669,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return (
       <VoiceCallView
         agentName={agentData?.name || "B-Bot"}
-        agentAvatar={agentData?.profileImage || (selectedAgent === 'bbot' || selectedAgent === 'b-bot' ? "https://beyond-bot.ai/logo-schwarz.svg" : "/helpful-robot.png")}
+        agentAvatar={
+          agentData?.profileImage ||
+          (selectedAgent === "bbot" || selectedAgent === "b-bot" ? branding?.mainAgentLogoUrl : undefined) ||
+          (selectedAgent === "bbot" || selectedAgent === "b-bot"
+            ? "https://beyond-bot.ai/logo-schwarz.svg"
+            : "/helpful-robot.png")
+        }
         onEndCall={handleEndCall}
         onAudioData={handleCallAudioData}
+        onCallConnected={handleCallConnected}
         onAudioPlayed={handleAudioPlayedDuringCall}
         messages={thread.messages || []}
         audioMap={audioMap}
@@ -1159,7 +1691,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   if (showContactsPage) {
     return (
       <ContactsPage
-        agents={agents}
+        contacts={contactsAgents}
+        allAgents={agents}
         onSelectAgent={handleSelectAgentFromContacts}
         onSelectConversation={(session) => {
           handleSelectChat(session)
@@ -1168,6 +1701,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         onDiscoverAgents={handleToggleDiscover}
         onBack={handleBackFromContacts}
         currentAgentId={selectedAgent || undefined}
+        onRemoveContact={handleRemoveContact}
       />
     )
   }
@@ -1178,7 +1712,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       <DiscoverPage
         onSelectAgent={setSelectedAgent}
         onClose={handleCloseDiscover}
-        recentAgents={getRecentAgents()}
+        recentAgents={recentAgents}
+        contactAgentIds={contactAgentIds}
+        onToggleContact={handleToggleContact}
       />
     )
   }
@@ -1281,6 +1817,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const supportsVoiceCalls = hasAudioInput() && hasAudioOutput()
   console.log('[Audio Check] Supports voice calls:', supportsVoiceCalls)
 
+  const effectiveAgentAvatar =
+    selectedAgentData?.profileImage ||
+    (selectedAgent === "bbot" || selectedAgent === "b-bot" ? branding?.mainAgentLogoUrl : undefined) ||
+    (selectedAgent === "bbot" || selectedAgent === "b-bot"
+      ? "https://beyond-bot.ai/logo-schwarz.svg"
+      : "/helpful-robot.png")
+
   return (
     <>
       <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
@@ -1290,10 +1833,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           onToggleDiscover={handleToggleDiscover}
           onViewContacts={handleViewContacts}
           onVoiceCall={supportsVoiceCalls ? handleVoiceCall : undefined}
-          onVideoCall={supportsVoiceCalls ? handleVideoCall : undefined}
           onSearchMessages={handleSearchMessages}
+          onOpenWorkdesk={() => setWorkdeskOpen(true)}
           agentName={selectedAgentData?.name || "B-Bot"}
-          agentAvatar={selectedAgentData?.profileImage || (selectedAgent === 'bbot' || selectedAgent === 'b-bot' ? "https://beyond-bot.ai/logo-schwarz.svg" : "/helpful-robot.png")}
+          agentAvatar={effectiveAgentAvatar}
           agentData={selectedAgentData}
           hasMessages={thread.messages && thread.messages.length > 0}
         />
@@ -1314,8 +1857,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                 <div className="flex items-center justify-center mb-4">
                   <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div>
                 </div>
-                <p className="text-lg font-semibold text-foreground mb-2">Loading conversation...</p>
-                <p className="text-sm text-muted-foreground">Please wait while we load your chat history</p>
+                <p className="text-lg font-semibold text-foreground mb-2">{t("chat.loadingConversationTitle")}</p>
+                <p className="text-sm text-muted-foreground">{t("chat.loadingConversationSubtitle")}</p>
               </div>
             </div>
           ) : (
@@ -1344,13 +1887,41 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               agents={agents}
               onSuggestionClick={handleSuggestionClick}
               suggestions={
-                agents.find((a: any) => a.id === selectedAgent)?.templates?.map((t: any) =>
-                  t.template_text || (t.attributes && t.attributes.template_text) || t.text || t
-                )
+                (() => {
+                  const brandingSuggestions = Array.isArray(branding?.welcomeSuggestions)
+                    ? branding!.welcomeSuggestions.map((x) => String(x ?? "").trim()).filter(Boolean)
+                    : []
+
+                  const isBBot =
+                    !selectedAgent ||
+                    selectedAgent === "bbot" ||
+                    selectedAgent === "b-bot" ||
+                    agents.find((a: any) => a.id === selectedAgent)?.name?.toLowerCase?.() === "b-bot" ||
+                    agents.find((a: any) => a.id === selectedAgent)?.name?.toLowerCase?.() === "bbot"
+
+                  const raw = agents
+                    .find((a: any) => a.id === selectedAgent)
+                    ?.templates?.map((t: any) => t.template_text || (t.attributes && t.attributes.template_text) || t.text || t)
+
+                  const agentTemplates = Array.isArray(raw)
+                    ? raw.map((x: any) => String(x ?? "").trim()).filter(Boolean)
+                    : []
+
+                  // For BBot, always prefer runtime welcome suggestions (Swiss) over any templates.
+                  if (isBBot && brandingSuggestions.length > 0) return brandingSuggestions
+
+                  // For other agents, prefer their templates when they exist; otherwise fall back to branding.
+                  return agentTemplates.length > 0 ? agentTemplates : brandingSuggestions
+                })()
               }
-              userColor="#2563eb"
+              userColor={branding?.accentColor || "#ff3131"}
+              welcomeTitle={computedWelcomeTitle}
+              welcomeSubtitle={computedWelcomeSubtitle}
               isLoading={thread.isLoading}
               toolEvents={toolEvents}
+              followUpSuggestions={followUpSuggestions}
+              followUpSuggestionsLoading={followUpSuggestionsLoading}
+              onFollowupClick={(s) => setDraftInput(s)}
               audioMap={audioMap}
             />
           )}
@@ -1363,6 +1934,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             isLoading={thread.isLoading}
             selectedAgent={selectedAgent}
             agentName={agents.find((a: any) => a.id === selectedAgent)?.name}
+            draft={draftInput}
+            onDraftChange={setDraftInput}
+            onOpenWorkdesk={() => {
+              setWorkdeskAutoPick(false)
+              setWorkdeskOpen(true)
+            }}
+            onAddWorkdeskFiles={() => {
+              setWorkdeskAutoPick(true)
+              setWorkdeskOpen(true)
+            }}
           />
         </div>
       </div>
@@ -1379,6 +1960,23 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         userId={user?.sub}
         agents={agents}
         embedId={MAIN_CHAT_ID}
+      />
+
+      <WorkdeskDrawer
+        isOpen={workdeskOpen}
+        onClose={() => {
+          setWorkdeskAutoPick(false)
+          setWorkdeskOpen(false)
+        }}
+        getToken={getAuthTokenForMainApi}
+        threadId={workdeskThreadId}
+        queuedFiles={queuedWorkdeskFiles}
+        localEntries={localWorkspaceEntries}
+        localContents={localWorkspaceFilesRef.current}
+        onQueueWorkspaceFile={queueWorkspaceFile}
+        onRemoveQueuedFile={removeQueuedWorkspaceFile}
+        autoPick={workdeskAutoPick}
+        onAutoPickConsumed={() => setWorkdeskAutoPick(false)}
       />
 
         <PaymentRequiredModal

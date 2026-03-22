@@ -12,7 +12,7 @@ export function useLangGraphService() {
   }, [])
 
   const createThread = useCallback(
-    async (data: { user_id?: string; agent_id?: string } = {}): Promise<any> => {
+    async (data: { user_id?: string; agent_id?: string; expert_id?: string | number } = {}): Promise<any> => {
       try {
         // Check if this is a B-Bot request
         const isBBotRequest = data.agent_id === "b-bot"
@@ -59,7 +59,7 @@ export function useLangGraphService() {
             .join(", "),
         )
 
-        const response = await fetch("https://api.b-bot.space/api/v2/threads", {
+        const response = await fetch("/api/embed-proxy/threads", {
           method: "POST",
           headers,
           body: JSON.stringify(data),
@@ -166,14 +166,11 @@ export function useLangGraphService() {
             .join(", "),
         )
 
-        const response = await fetch(
-          `https://api.b-bot.space/api/v2/threads/${threadId}/graph?assistant_id=${assistantId}`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify(input),
-          },
-        )
+        const response = await fetch(`/api/embed-proxy/threads/${threadId}/graph?assistant_id=${encodeURIComponent(assistantId)}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(input),
+        })
 
         if (!response.ok) {
           const errorText = await response.text()
@@ -278,7 +275,7 @@ export function useLangGraphService() {
             .join(", "),
         )
 
-        const response = await fetch(`https://api.b-bot.space/api/v2/threads/${threadId}/messages`, {
+        const response = await fetch(`/api/embed-proxy/threads/${threadId}/messages`, {
           method: "POST",
           headers,
           body: JSON.stringify(message),

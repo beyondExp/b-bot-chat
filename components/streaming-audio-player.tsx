@@ -12,17 +12,19 @@ interface StreamingAudioPlayerProps {
 export function StreamingAudioPlayer({ audioChunks, autoPlay = true }: StreamingAudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentIndexRef = useRef(0);
   const chunksRef = useRef<string[]>([]);
   const isPlayingRef = useRef(false);
+  const currentUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     chunksRef.current = audioChunks;
     
     // Auto-play if we have new chunks and were waiting or just started
     if (autoPlay && !isPlayingRef.current && chunksRef.current.length > currentIndexRef.current) {
-      playNextChunk();
+      void playNextChunk({ userGesture: false });
     }
   }, [audioChunks, autoPlay]);
 
@@ -33,10 +35,14 @@ export function StreamingAudioPlayer({ audioChunks, autoPlay = true }: Streaming
         audioRef.current.pause();
         audioRef.current = null;
       }
+      if (currentUrlRef.current) {
+        URL.revokeObjectURL(currentUrlRef.current);
+        currentUrlRef.current = null;
+      }
     };
   }, []);
 
-  const playNextChunk = async () => {
+  const playNextChunk = async ({ userGesture }: { userGesture: boolean }) => {
     if (currentIndexRef.current >= chunksRef.current.length) {
       setIsPlaying(false);
       isPlayingRef.current = false;
@@ -45,28 +51,42 @@ export function StreamingAudioPlayer({ audioChunks, autoPlay = true }: Streaming
 
     if (!audioRef.current) {
       audioRef.current = new Audio();
+      audioRef.current.muted = false;
+      audioRef.current.volume = 1;
       audioRef.current.onended = () => {
         currentIndexRef.current++;
         setCurrentIndex(currentIndexRef.current);
-        playNextChunk();
+        void playNextChunk({ userGesture: false });
       };
       audioRef.current.onerror = (e) => {
         console.error("Audio playback error:", e);
         // Try skip on error
         currentIndexRef.current++;
         setCurrentIndex(currentIndexRef.current);
-        playNextChunk();
+        void playNextChunk({ userGesture: false });
       };
     }
 
     const chunk = chunksRef.current[currentIndexRef.current];
     try {
-      const response = await fetch(`data:audio/mp3;base64,${chunk}`);
+      // Use the standard MP3 mime type. Some browsers are picky about `audio/mp3`.
+      const response = await fetch(`data:audio/mpeg;base64,${chunk}`);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       
+      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
+      currentUrlRef.current = url;
       audioRef.current.src = url;
-      await audioRef.current.play();
+      try {
+        await audioRef.current.play();
+        setAutoplayBlocked(false);
+      } catch (err: any) {
+        // Autoplay policies often block async audio playback unless it's triggered by a user gesture.
+        if (!userGesture && (err?.name === "NotAllowedError" || err?.name === "AbortError")) {
+          setAutoplayBlocked(true);
+        }
+        throw err;
+      }
       setIsPlaying(true);
       isPlayingRef.current = true;
     } catch (error) {
@@ -88,7 +108,7 @@ export function StreamingAudioPlayer({ audioChunks, autoPlay = true }: Streaming
         currentIndexRef.current = 0;
         setCurrentIndex(0);
       }
-      playNextChunk();
+      void playNextChunk({ userGesture: true });
     }
   };
 
@@ -122,6 +142,12 @@ export function StreamingAudioPlayer({ audioChunks, autoPlay = true }: Streaming
       <Button variant="ghost" size="icon" onClick={reset} className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground">
         <RotateCcw className="h-3 w-3" />
       </Button>
+
+      {autoplayBlocked && !isPlaying && (
+        <div className="hidden sm:block text-xs text-muted-foreground">
+          Audio blocked by browser. Click play.
+        </div>
+      )}
     </div>
   );
 }

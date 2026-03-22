@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
 
-// Base URL for the API
-const API_V3_BASE_URL = "https://api.b-bot.space/api/v3"
+function _joinUrl(base: string, path: string) {
+  const b = (base || "").replace(/\/+$/, "")
+  const p = (path || "").replace(/^\/+/, "")
+  return `${b}/${p}`
+}
 
 // Handle both GET and POST methods
 export async function GET(req: Request) {
@@ -15,14 +18,20 @@ export async function POST(req: Request) {
 // Shared handler function for both GET and POST
 async function handleRequest(req: Request) {
   try {
-    // Get the API key from environment variables (server-side only)
-    // Use the same default as MainAPI if not configured
-    const apiKey = process.env.ADMIN_API_KEY || "your-super-secret-admin-key"
+    // This endpoint is server-side only and uses an admin key to list public distribution channels.
+    // It must point to our MainAPI instance (not api.b-bot.space).
+    const mainApiUrl = process.env.MAIN_API_URL || process.env.MAIN_API_PUBLIC_URL || ""
+    if (!mainApiUrl) {
+      return NextResponse.json({ error: "MAIN_API_URL not configured" }, { status: 500 })
+    }
 
-    console.log("[Agents] Using API key:", apiKey === "your-super-secret-admin-key" ? "default key" : "custom key");
+    const apiKey = process.env.ADMIN_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: "ADMIN_API_KEY not configured" }, { status: 500 })
+    }
 
     // Forward the request to the actual API with the admin key
-    const response = await fetch(`${API_V3_BASE_URL}/public/distribution-channels`, {
+    const response = await fetch(_joinUrl(mainApiUrl, "/v3/public/distribution-channels"), {
       method: "GET", // Always use GET for the upstream API
       headers: {
         "X-API-Key": apiKey,

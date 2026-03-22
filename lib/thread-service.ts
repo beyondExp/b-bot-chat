@@ -116,8 +116,8 @@ export class ThreadService {
               continue // Try next endpoint
             }
             
-            // Don't filter by userId here either - the server already did it
-            return this.processThreadsResponse(data, undefined)
+            // Prefer server-side filtering, but keep a local filter as a safety net.
+            return this.processThreadsResponse(data, userId)
           } else {
             console.warn('[ThreadService] Endpoint failed:', url, response.status, response.statusText)
             continue // Try next endpoint

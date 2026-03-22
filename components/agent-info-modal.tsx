@@ -50,7 +50,7 @@ export function AgentInfoModal({ isOpen, onClose, agent }: AgentInfoModalProps) 
         </DialogHeader>
         
         <div className="flex flex-col items-center gap-4 py-4">
-          <div className="relative w-24 h-24 rounded-full overflow-hidden border-4 border-background shadow-lg">
+          <div className="relative w-24 h-24 rounded-[1rem] overflow-hidden border-4 border-background shadow-lg">
             <Image
               src={agent.profileImage || "/helpful-robot.png"}
               alt={agent.name || "Agent"}

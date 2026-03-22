@@ -47,7 +47,7 @@ export function ChatMessages({
   // Get agent avatar
   const getAgentAvatar = () => {
     if (selectedAgent === "bbot" || selectedAgent === "b-bot" || !selectedAgent) {
-      return "https://beyond-bot.ai/logo-schwarz.svg";
+      return "/api/branding/main-agent.svg";
     }
     const agent = agents.find(a => a.id === selectedAgent);
     if (agent && agent.profileImage) {
@@ -84,7 +84,7 @@ export function ChatMessages({
             Start a conversation by sending a message or try one of these suggestions:
           </p>
           <div className="flex flex-col gap-2 items-center w-full max-w-md mx-auto px-2">
-            {welcomeSuggestions.map((suggestion) => (
+            {welcomeSuggestions.slice(0, 3).map((suggestion) => (
               <Button
                 key={suggestion}
                 variant="outline"

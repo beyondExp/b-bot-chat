@@ -7,12 +7,14 @@ import { cn } from '@/lib/utils'
 import Image from "next/image"
 import { SimpleVAD } from '@/lib/simple-vad'
 import ReactMarkdown from 'react-markdown'
+import { useI18n } from "@/lib/i18n"
 
 interface VoiceCallViewProps {
   agentName: string
   agentAvatar: string
   onEndCall: () => void
   onAudioData: (audioBuffer: Float32Array, timestamp: number) => void
+  onCallConnected?: () => void
   onAudioPlayed?: (messageIds: string[]) => void // Report which message IDs had audio played
   messages?: any[] // Show text messages below call UI
   audioMap?: Record<string, string[]> // TTS audio chunks mapped by message ID
@@ -24,20 +26,24 @@ export function VoiceCallView({
   agentAvatar,
   onEndCall,
   onAudioData,
+  onCallConnected,
   onAudioPlayed,
   messages = [],
   audioMap = {},
   isLoading = false
 }: VoiceCallViewProps) {
+  const { t } = useI18n()
   const [isConnected, setIsConnected] = useState(false)
   const [isCalling, setIsCalling] = useState(true) // "Calling..." state
   const [isMuted, setIsMuted] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false) // Agent is speaking (TTS playing)
   const [isWaitingForAgent, setIsWaitingForAgent] = useState(false) // Waiting for agent response
-  const [vadStatus, setVadStatus] = useState('Calling...')
+  const [vadStatusKey, setVadStatusKey] = useState<string>("call.status.calling")
+  const [vadError, setVadError] = useState<string | null>(null)
   const [callDuration, setCallDuration] = useState(0)
   const [audioAmplitude, setAudioAmplitude] = useState(0) // 0-1 amplitude for blob animation
+  const [ttsAutoplayBlocked, setTtsAutoplayBlocked] = useState(false) // Browser blocked audio playback until user gesture
   
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
@@ -58,6 +64,7 @@ export function VoiceCallView({
   const currentChunkIndexRef = useRef<number>(0)
   const isPlayingTTSRef = useRef<boolean>(false)
   const audioQueueRef = useRef<string[]>([]) // Queue of audio chunks to play
+  const currentTtsUrlRef = useRef<string | null>(null)
 
   const CALLING_DURATION = 2000 // Show "Calling..." for 2 seconds
 
@@ -170,12 +177,14 @@ export function VoiceCallView({
 
   // Play next TTS chunk from queue
   const playNextTTSChunk = async () => {
+    if (ttsAutoplayBlocked) return
+
     if (audioQueueRef.current.length === 0) {
       console.log('[VoiceCall] 🔊 TTS playback complete, resuming VAD')
       isPlayingTTSRef.current = false
       setIsAgentSpeaking(false)
       setIsWaitingForAgent(false)
-      setVadStatus('Ready - Speak naturally')
+      setVadStatusKey("call.status.ready")
       
       // Resume VAD after agent finishes speaking
       if (vadRef.current && isConnected) {
@@ -187,13 +196,20 @@ export function VoiceCallView({
 
     isPlayingTTSRef.current = true
     setIsAgentSpeaking(true)
-    setVadStatus('Agent speaking...')
+    setVadStatusKey("call.status.agentSpeaking")
+
+    // Avoid capturing speech while agent audio is playing.
+    if (vadRef.current && isConnected) {
+      vadRef.current.pause()
+    }
 
     const chunk = audioQueueRef.current.shift()!
     
     try {
       if (!ttsAudioRef.current) {
         ttsAudioRef.current = new Audio()
+        ttsAudioRef.current.muted = false
+        ttsAudioRef.current.volume = 1
         ttsAudioRef.current.onended = () => {
           console.log('[VoiceCall] 🔊 TTS chunk finished')
           playNextTTSChunk()
@@ -205,12 +221,27 @@ export function VoiceCallView({
       }
 
       // Convert base64 to blob and play
-      const response = await fetch(`data:audio/mp3;base64,${chunk}`)
+      const response = await fetch(`data:audio/mpeg;base64,${chunk}`)
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       
+      if (currentTtsUrlRef.current) URL.revokeObjectURL(currentTtsUrlRef.current)
+      currentTtsUrlRef.current = url
       ttsAudioRef.current.src = url
-      await ttsAudioRef.current.play()
+      try {
+        await ttsAudioRef.current.play()
+        setTtsAutoplayBlocked(false)
+      } catch (err: any) {
+        // Autoplay policies may block async playback until user gesture.
+        if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') {
+          setTtsAutoplayBlocked(true)
+          // Put chunk back at the front so the user can resume.
+          audioQueueRef.current.unshift(chunk)
+          console.warn('[VoiceCall] 🔇 TTS blocked by browser autoplay policy; waiting for user gesture')
+          return
+        }
+        throw err
+      }
       console.log('[VoiceCall] 🔊 Playing TTS chunk')
     } catch (error) {
       console.error('[VoiceCall] Error playing TTS chunk:', error)
@@ -225,6 +256,10 @@ export function VoiceCallView({
         ttsAudioRef.current.pause()
         ttsAudioRef.current = null
       }
+      if (currentTtsUrlRef.current) {
+        URL.revokeObjectURL(currentTtsUrlRef.current)
+        currentTtsUrlRef.current = null
+      }
     }
   }, [])
 
@@ -238,7 +273,7 @@ export function VoiceCallView({
         if (!isPlayingTTSRef.current && audioQueueRef.current.length === 0) {
           console.log('[VoiceCall] No TTS playing, resuming VAD')
           setIsWaitingForAgent(false)
-          setVadStatus('Ready - Speak naturally')
+          setVadStatusKey("call.status.ready")
           if (vadRef.current) {
             vadRef.current.start()
           }
@@ -391,7 +426,8 @@ export function VoiceCallView({
   const startCall = async () => {
     try {
       setIsCalling(true)
-      setVadStatus('Calling...')
+      setVadStatusKey("call.status.calling")
+      setVadError(null)
       
       // Play calling sound (simulated with beep pattern)
       playCallingSound()
@@ -399,7 +435,7 @@ export function VoiceCallView({
       // Simulate "calling" phase (like phone ringing)
       await new Promise(resolve => setTimeout(resolve, CALLING_DURATION))
       
-      setVadStatus('Connecting...')
+      setVadStatusKey("call.status.connecting")
 
       // Get microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -422,19 +458,19 @@ export function VoiceCallView({
       updateAmplitude()
 
       // Initialize SimpleVAD
-      setVadStatus('Initializing voice detection...')
+      setVadStatusKey("call.status.processing")
       
       const vad = new SimpleVAD(stream, {
         onSpeechStart: () => {
           console.log('[VoiceCall] Speech started')
           setIsSpeaking(true)
-          setVadStatus('Listening...')
+          setVadStatusKey("call.status.listening")
         },
         onSpeechEnd: (audioData: Float32Array) => {
           console.log('[VoiceCall] Speech ended, pausing VAD and sending audio...')
           setIsSpeaking(false)
           setIsWaitingForAgent(true)
-          setVadStatus('Processing...')
+          setVadStatusKey("call.status.processing")
           
           // IMPORTANT: Pause VAD immediately to prevent listening during agent turn
           vad.pause()
@@ -456,12 +492,15 @@ export function VoiceCallView({
       vadRef.current = vad
 
       setIsConnected(true)
-      setVadStatus('Ready - Speak naturally')
+      setVadStatusKey("call.status.ready")
       console.log('[VoiceCall] Call started with VAD')
+      onCallConnected?.()
     } catch (error) {
       console.error('[VoiceCall] Error starting call:', error)
-      setVadStatus('Error: ' + (error as Error).message)
-      alert('Failed to start call: ' + (error as Error).message)
+      const msg = (error as Error)?.message || String(error)
+      setVadError(msg)
+      setVadStatusKey("call.status.error")
+      alert(t("call.alert.failedToStart").replace("{message}", msg))
     }
   }
 
@@ -685,12 +724,9 @@ export function VoiceCallView({
                 !isSpeaking && !isAgentSpeaking && !isWaitingForAgent && !isLoading && !isCalling && "ring-2 ring-gray-200"
               )}
               style={{
-                // More dramatic border-radius morph on the avatar itself
-                borderRadius: (isSpeaking || isAgentSpeaking) 
-                  ? `${50 - audioAmplitude * 12}% ${50 + audioAmplitude * 12}% ${50 + audioAmplitude * 10}% ${50 - audioAmplitude * 10}% / ${50 + audioAmplitude * 10}% ${50 - audioAmplitude * 12}% ${50 + audioAmplitude * 12}% ${50 - audioAmplitude * 10}%`
-                  : '50%',
+                borderRadius: "1rem",
                 transform: `scale(${1 + audioAmplitude * 0.1})`,
-                transition: 'border-radius 0.05s ease-out, transform 0.05s ease-out',
+                transition: 'transform 0.05s ease-out',
               }}
             >
               <Image
@@ -719,7 +755,9 @@ export function VoiceCallView({
             (isWaitingForAgent || isLoading) ? "text-yellow-600 font-medium" :
             "text-gray-600"
           )}>
-            {vadStatus}
+            {vadStatusKey === "call.status.error"
+              ? t("call.status.error").replace("{message}", vadError || "")
+              : t(vadStatusKey)}
           </p>
           {isConnected && !isCalling && (
             <p className="text-xs text-gray-500 mt-1">{formatDuration(callDuration)}</p>
@@ -769,9 +807,17 @@ export function VoiceCallView({
             variant="outline"
             size="icon"
             className="w-14 h-14 rounded-full border-gray-300 hover:bg-gray-100 opacity-50 shadow-md"
-            disabled
+            disabled={!ttsAutoplayBlocked}
+            onClick={() => {
+              setTtsAutoplayBlocked(false)
+              void playNextTTSChunk()
+            }}
           >
-            <Volume2 className="w-6 h-6 text-gray-700" />
+            {ttsAutoplayBlocked ? (
+              <VolumeX className="w-6 h-6 text-gray-700" />
+            ) : (
+              <Volume2 className="w-6 h-6 text-gray-700" />
+            )}
           </Button>
         </div>
 
@@ -779,10 +825,13 @@ export function VoiceCallView({
         {!isCalling && (
           <div className="text-center">
             <p className="text-xs text-gray-600">
-              {isAgentSpeaking ? '🔊 Agent is speaking...' : 
-               isSpeaking ? '🎤 Listening to you...' : 
-               isWaitingForAgent || isLoading ? '⏳ Agent is thinking...' : 
-               '🤖 Ready - Speak naturally'}
+              {isAgentSpeaking
+                ? t("call.indicator.agentSpeaking")
+                : isSpeaking
+                  ? t("call.indicator.listening")
+                  : isWaitingForAgent || isLoading
+                    ? t("call.indicator.thinking")
+                    : t("call.indicator.ready")}
             </p>
           </div>
         )}
@@ -794,7 +843,7 @@ export function VoiceCallView({
           <div className="max-w-2xl mx-auto space-y-3 pt-4">
             <div className="text-center mb-4">
               <div className="inline-block px-3 py-1 rounded-full bg-gray-200 text-xs text-gray-600 font-medium">
-                Conversation Transcript
+                {t("call.transcript")}
               </div>
             </div>
             {messages.map((msg, idx) => {

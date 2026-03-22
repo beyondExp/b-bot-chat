@@ -3,8 +3,6 @@
 import { useCallback } from "react"
 import { useAppAuth } from "@/lib/app-auth"
 
-const API_BASE_URL = "https://api.b-bot.space/api/v2"
-const API_V3_BASE_URL = "https://api.b-bot.space/api/v3"
 export const LANGGRAPH_AUDIENCE = process.env.NEXT_PUBLIC_SYNAPSE_URL || "http://localhost:2024"
 
 // Token cache (client-side only)
@@ -28,12 +26,12 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
       ...options.headers,
     }
 
-    console.log(`Making ${options.method || "GET"} request to ${API_BASE_URL}${endpoint}`)
+    console.log(`Making ${options.method || "GET"} request to /api/embed-proxy${endpoint}`)
     if (options.body) {
       console.log(`Request body: ${options.body}`)
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`/api/embed-proxy${endpoint}`, {
       ...options,
       headers,
     })
@@ -126,12 +124,12 @@ export function useAuthenticatedFetch() {
           ...options.headers,
         }
 
-        console.log(`Making ${options.method || "GET"} request to ${API_BASE_URL}${endpoint}`)
+        console.log(`Making ${options.method || "GET"} request to /api/embed-proxy${endpoint}`)
         if (options.body) {
           console.log(`Request body: ${options.body}`)
         }
 
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        const response = await fetch(`/api/embed-proxy${endpoint}`, {
           ...options,
           headers,
         })

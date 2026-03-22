@@ -24,7 +24,8 @@ const BBOT_AGENT: Agent = {
   shortDescription: "Your helpful AI assistant powered by LangGraph",
   description:
     "B-Bot is an intelligent AI assistant that can help you with various tasks, answer questions, and provide assistance across different domains. Built with LangGraph for reliable and efficient responses.",
-  profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
+  // Use runtime-configurable main-agent logo (env-driven).
+  profileImage: "/api/branding/main-agent.svg",
   category: "General",
   publisherId: "b-bot-official",
   publisher: {
@@ -42,11 +43,13 @@ const BBOT_AGENT: Agent = {
     { id: "general-knowledge", name: "General Knowledge", description: "Answer questions on various topics" },
   ],
   apps: [],
-  templates: ["Hello! How can I help you today?", "What can you do?", "Tell me about yourself", "Help me with a task"],
+  // Do not ship hardcoded English starter questions for BBot.
+  // The chat UI pulls welcome suggestions from runtime branding (`WELCOME_SUGGESTIONS` via `/api/branding`).
+  templates: [],
   metadata: {
     owner: "b-bot-official",
     expert_profession: "General Assistant",
-    profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
+    profileImage: "/api/branding/main-agent.svg",
   },
   rawData: {
     assistant_id: "bbot",
@@ -55,7 +58,7 @@ const BBOT_AGENT: Agent = {
     metadata: {
       owner: "b-bot-official",
       expert_profession: "General Assistant",
-      profileImage: "https://beyond-bot.ai/logo-schwarz.svg",
+      profileImage: "/api/branding/main-agent.svg",
     },
   },
 }
@@ -68,10 +71,39 @@ export function useAgents() {
   const { user } = useAppAuth()
 
   const ensureBBotAgent = useCallback((list: Agent[]): Agent[] => {
-    const hasBBot = list.some(
+    const normalized = (list || []).map((a) => {
+      const isBBot =
+        a.id === "bbot" ||
+        a.id === "b-bot" ||
+        a.name?.toLowerCase?.() === "b-bot" ||
+        a.name?.toLowerCase?.() === "bbot"
+      if (!isBBot) return a
+
+      // Force B‑Bot branding to be env-driven (prevents logo "flip" after agents load).
+      return {
+        ...a,
+        id: "bbot",
+        profileImage: "/api/branding/main-agent.svg",
+        // Prevent agent templates from overriding runtime welcome suggestions.
+        templates: [],
+        metadata: {
+          ...(a as any).metadata,
+          profileImage: "/api/branding/main-agent.svg",
+        },
+        rawData: {
+          ...(a as any).rawData,
+          metadata: {
+            ...(((a as any).rawData || {}).metadata || {}),
+            profileImage: "/api/branding/main-agent.svg",
+          },
+        },
+      } as Agent
+    })
+
+    const hasBBot = normalized.some(
       (a) => a.id === "bbot" || a.id === "b-bot" || a.name?.toLowerCase?.() === "b-bot" || a.name?.toLowerCase?.() === "bbot",
     )
-    return hasBBot ? list : [BBOT_AGENT, ...list]
+    return hasBBot ? normalized : [BBOT_AGENT, ...normalized]
   }, [])
 
   // Function to get all agents using the new v3 endpoint
@@ -119,28 +151,11 @@ export function useAgents() {
       console.error("Error fetching agents:", err)
       setError("Failed to load agents")
 
-      // Fallback to the old endpoint if the new one fails
-      console.log("Falling back to v2 assistants search endpoint...")
-      try {
-        const fallbackResponse = await authenticatedFetch("/assistants/search", {
-          method: "POST",
-          body: JSON.stringify({
-            metadata: {},
-            graph_id: "bbot",
-            limit: 100,
-            offset: 0,
-          }),
-        })
-
-        console.log("Fallback response from assistants search:", fallbackResponse)
-        const fallbackAgents = Array.isArray(fallbackResponse) ? fallbackResponse.map(transformApiAssistantToAgent) : []
-        console.log(`Fetched ${fallbackAgents.length} agents from fallback endpoint`)
-
-        return ensureBBotAgent(fallbackAgents)
-      } catch (fallbackErr) {
-        console.error("Error fetching agents from fallback endpoint:", fallbackErr)
-        return ensureBBotAgent([])
-      }
+      // Do NOT fall back to `/assistants/search` here:
+      // - It previously hit `api.b-bot.space` (wrong platform)
+      // - Aegra's `/assistants/search` is unstable in our deployment
+      // Agents are expected to come from `/api/agents` (MainAPI v3 public distribution channels).
+      return ensureBBotAgent([])
     } finally {
       setIsLoading(false)
     }
@@ -150,9 +165,16 @@ export function useAgents() {
   const transformApiAssistantToAgent = (assistant: any): Agent => {
     // Extract metadata
     const metadata = assistant.metadata || {}
+    const resolvedId =
+      assistant.assistant_id ||
+      assistant.channel_id ||
+      assistant.id ||
+      (typeof assistant === "string" ? assistant : undefined)
 
     return {
-      id: assistant.assistant_id,
+      // MainAPI returns "distribution channels" with `channel_id`.
+      // Synapse assistants use `assistant_id`. Support both.
+      id: String(resolvedId || ""),
       name: assistant.name || "Unnamed Assistant",
       shortDescription: assistant.description || "No description available",
       description: assistant.description || "No description available",

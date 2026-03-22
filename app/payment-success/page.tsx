@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { CheckCircle } from "lucide-react"
+import { useI18n } from "@/lib/i18n"
 
 export default function PaymentSuccessPage() {
   const router = useRouter()
   const [countdown, setCountdown] = useState(5)
+  const { t } = useI18n()
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -29,16 +31,18 @@ export default function PaymentSuccessPage() {
         <div className="flex justify-center mb-4">
           <CheckCircle size={64} className="text-green-500" />
         </div>
-        <h1 className="text-2xl font-bold mb-2">Payment Successful!</h1>
+        <h1 className="text-2xl font-bold mb-2">{t("payment.success")}</h1>
         <p className="text-muted-foreground mb-6">
-          Your payment has been processed successfully and funds have been added to your account.
+          {t("paymentSuccess.body")}
         </p>
-        <p className="text-sm text-muted-foreground">Redirecting to chat in {countdown} seconds...</p>
+        <p className="text-sm text-muted-foreground">
+          {t("paymentSuccess.redirect").replace("{seconds}", String(countdown))}
+        </p>
         <button
           onClick={() => router.push("/")}
           className="mt-4 w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
         >
-          Return to Chat Now
+          {t("paymentSuccess.returnNow")}
         </button>
       </div>
     </div>
