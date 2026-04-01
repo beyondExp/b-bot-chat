@@ -17,6 +17,17 @@ export const anonymousPublisher: Publisher = {
   followerCount: 0,
 }
 
+function normalizeAgentId(agentId: string): string {
+  const raw = String(agentId || "").trim()
+  const lower = raw.toLowerCase()
+  if (!lower) return raw
+  // Legacy aliases / PWA shortcut param.
+  if (lower === "default") return "bbot"
+  if (lower === "b-bot") return "bbot"
+  if (lower === "bbot") return "bbot"
+  return raw
+}
+
 // Built-in B-Bot agent (should always be available in Chat, even if the backend returns no agents)
 const BBOT_AGENT: Agent = {
   id: "bbot",
@@ -198,8 +209,10 @@ export function useAgents() {
       setError(null)
 
       try {
+        const normalizedAgentId = normalizeAgentId(agentId)
+
         // Special case for "bbot" - inject the agent information instead of fetching
-        if (agentId === "bbot" || agentId === "b-bot") {
+        if (normalizedAgentId === "bbot") {
           return BBOT_AGENT
         }
 
@@ -207,7 +220,7 @@ export function useAgents() {
         if (options?.allowAnonymous) {
           // Anonymous fetch using embed-proxy endpoint, no Authorization header
           // The embed-proxy will automatically add the Admin API Key for anonymous requests
-          const response = await fetch(`/api/embed-proxy/assistants/${agentId}`, {
+          const response = await fetch(`/api/embed-proxy/assistants/${normalizedAgentId}`, {
             method: "GET",
             headers: {
               "Content-Type": "application/json",
@@ -217,7 +230,7 @@ export function useAgents() {
           responseData = await response.json()
         } else {
           // Authenticated fetch as before
-          responseData = await authenticatedFetch(`/assistants/${agentId}`, {
+          responseData = await authenticatedFetch(`/assistants/${normalizedAgentId}`, {
             method: "GET",
           })
         }

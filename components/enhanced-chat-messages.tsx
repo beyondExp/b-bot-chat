@@ -24,60 +24,62 @@ function ToolCalls({ toolCalls }: { toolCalls: Array<{ id?: string; name: string
   const callNames = toolCalls.map(tc => tc.name).join(", ");
 
   return (
-    <div className="mx-auto grid max-w-3xl gap-2 my-2">
-      <div className="overflow-hidden rounded-lg border border-amber-200 bg-amber-50">
+    <div className="w-full my-2">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
         <div 
-          className="border-b border-amber-200 bg-amber-100 px-4 py-2 cursor-pointer hover:bg-amber-200 transition-colors"
+          className="flex items-center gap-2 border-b border-border/60 bg-card px-4 py-2 cursor-pointer select-none hover:bg-muted/40 transition-colors"
           onClick={() => setIsExpanded(!isExpanded)}
         >
-          <h3 className="font-medium text-amber-900 flex items-center gap-2">
-            <Wrench className="w-4 h-4" />
-            <span>Tool Calls ({totalCalls})</span>
-            {isExpanded ? (
-              <ChevronDown className="w-4 h-4 ml-auto" />
-            ) : (
-              <ChevronRight className="w-4 h-4 ml-auto" />
+          <Wrench className="w-4 h-4 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-foreground">
+              Tool Calls ({totalCalls})
+            </div>
+            {!isExpanded && (
+              <div className="text-xs text-muted-foreground truncate">
+                {callNames}
+              </div>
             )}
-          </h3>
-          {!isExpanded && (
-            <p className="text-sm text-amber-700 mt-1 truncate">
-              {callNames}
-            </p>
+          </div>
+          {isExpanded ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
           )}
         </div>
         
         {isExpanded && (
-          <div className="p-2">
+          <div className="p-3 space-y-2">
             {toolCalls.map((tc, idx) => {
               const args = tc.args as Record<string, any>;
               const hasArgs = Object.keys(args).length > 0;
               return (
                 <div
                   key={idx}
-                  className="mb-2 last:mb-0 overflow-hidden rounded border border-amber-300 bg-amber-25"
+                  className="overflow-hidden rounded-xl border border-border bg-background"
                 >
-                  <div className="border-b border-amber-300 bg-amber-100 px-3 py-2">
-                    <h4 className="font-medium text-amber-900 flex items-center gap-2 text-sm">
-                      <Wrench className="w-3 h-3" />
+                  <div className="border-b border-border/60 bg-muted/30 px-3 py-2">
+                    <h4 className="font-semibold text-foreground flex items-center gap-2 text-sm">
+                      <Wrench className="w-3 h-3 text-muted-foreground" />
                       {tc.name}
                       {tc.id && (
-                        <code className="ml-2 rounded bg-amber-200 px-1 py-0.5 text-xs">
+                        <code className="ml-2 rounded bg-muted px-1 py-0.5 text-xs text-muted-foreground">
                           {tc.id}
                         </code>
                       )}
                     </h4>
                   </div>
                   {hasArgs ? (
-                    <table className="min-w-full divide-y divide-amber-300">
-                      <tbody className="divide-y divide-amber-300">
+                    <table className="min-w-full divide-y divide-border/60">
+                      <tbody className="divide-y divide-border/60">
                         {Object.entries(args).map(([key, value], argIdx) => (
                           <tr key={argIdx}>
-                            <td className="px-3 py-1 text-xs font-medium whitespace-nowrap text-amber-900">
+                            <td className="px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-foreground align-top">
                               {key}
                             </td>
-                            <td className="px-3 py-1 text-xs text-amber-700">
+                            <td className="px-3 py-1.5 text-xs text-muted-foreground">
                               {typeof value === 'object' ? (
-                                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs break-all">
+                                <code className="block rounded bg-muted/40 px-2 py-1 font-mono text-xs whitespace-pre-wrap break-words">
                                   {JSON.stringify(value, null, 2)}
                                 </code>
                               ) : (
@@ -89,7 +91,7 @@ function ToolCalls({ toolCalls }: { toolCalls: Array<{ id?: string; name: string
                       </tbody>
                     </table>
                   ) : (
-                    <code className="block p-2 text-xs text-amber-700">{"{}"}</code>
+                    <code className="block p-3 text-xs text-muted-foreground">{"{}"}</code>
                   )}
                 </div>
               );
@@ -106,19 +108,17 @@ function ToolResult({ message }: { message: ChatMessage }) {
   if (!message.content) return null;
 
   return (
-    <div className="mx-auto grid max-w-3xl gap-2 my-2">
-      <div className="overflow-hidden rounded-lg border border-green-200 bg-green-50">
-        <div className="border-b border-green-200 bg-green-100 px-4 py-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-medium text-green-900 flex items-center gap-2">
-              <CheckCircle className="w-4 h-4" />
-              Tool Result: {message.name || "Unknown Tool"}
-            </h3>
+    <div className="w-full my-2">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <div className="flex items-center gap-2 border-b border-border/60 bg-card px-4 py-2">
+          <CheckCircle className="w-4 h-4 text-muted-foreground" />
+          <div className="text-sm font-semibold text-foreground">
+            Tool Result: {message.name || "Unknown Tool"}
           </div>
         </div>
-        <div className="p-3 bg-green-50">
-          <div className="text-sm text-green-800 whitespace-pre-wrap">
-            {typeof message.content === 'string' ? message.content : JSON.stringify(message.content, null, 2)}
+        <div className="p-3 bg-background">
+          <div className="text-xs text-muted-foreground whitespace-pre-wrap">
+            {typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2)}
           </div>
         </div>
       </div>
@@ -137,39 +137,41 @@ function ToolEventsCollapsible({ toolEvents }: { toolEvents: any[] }) {
 
   return (
     <div className="my-2">
-      <div className="mx-4">
-        <div className="overflow-hidden rounded-lg border border-amber-200 bg-amber-50">
+      <div className="w-full">
+        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
           <div 
-            className="border-b border-amber-200 bg-amber-100 px-4 py-2 cursor-pointer hover:bg-amber-200 transition-colors"
+            className="flex items-center gap-2 border-b border-border/60 bg-card px-4 py-2 cursor-pointer select-none hover:bg-muted/40 transition-colors"
             onClick={() => setIsExpanded(!isExpanded)}
           >
-            <h3 className="font-medium text-amber-900 flex items-center gap-2">
-              <Wrench className="w-4 h-4" />
-              <span>Tool Events ({totalEvents})</span>
-              {isExpanded ? (
-                <ChevronDown className="w-4 h-4 ml-auto" />
-              ) : (
-                <ChevronRight className="w-4 h-4 ml-auto" />
+            <Wrench className="w-4 h-4 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-foreground">
+                Tool Events ({totalEvents})
+              </div>
+              {!isExpanded && (
+                <div className="text-xs text-muted-foreground truncate">
+                  {eventNames}
+                </div>
               )}
-            </h3>
-            {!isExpanded && (
-              <p className="text-sm text-amber-700 mt-1 truncate">
-                {eventNames}
-              </p>
+            </div>
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
             )}
           </div>
           
           {isExpanded && (
-            <div className="p-2">
+            <div className="p-3 space-y-2">
               {toolEvents.map((event, index) => (
-                <div key={index} className="mb-2 last:mb-0">
-                  <div className="flex items-start gap-3 bg-amber-25 text-amber-800 rounded-lg px-3 py-2 border-l-4 border-amber-400">
-                    <Wrench className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div key={index}>
+                  <div className="flex items-start gap-3 rounded-xl px-3 py-2 border border-border bg-background">
+                    <Wrench className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
-                      <div className="font-medium text-amber-900 mb-1 text-sm">
+                      <div className="font-semibold text-foreground mb-1 text-sm">
                         {event.tool_name || event.name || "Tool Processing"}
                       </div>
-                      <div className="text-xs leading-relaxed whitespace-pre-wrap">
+                      <div className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
                         {event.content || event.tool_response?.content || "Processing..."}
                       </div>
                       {event.status && (
@@ -467,12 +469,12 @@ export function EnhancedChatMessages({
             const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
             
             return (
-              <div key={message.id || idx} className="group mr-auto flex items-start gap-2">
+              <div key={message.id || idx} className="group mr-auto flex items-start gap-2 w-full">
                 <Avatar className="h-8 w-8">
                   <AvatarImage src={getAgentAvatar() || "/placeholder.svg"} alt={getAgentName()} />
                   <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
                 </Avatar>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 flex-1 min-w-0">
                   {isToolResult ? (
                     // Show tool result (like agent-chat-ui)
                     <ToolResult message={message} />
@@ -486,8 +488,8 @@ export function EnhancedChatMessages({
                       
                       {/* Show AI message content with markdown rendering */}
                       {message.content && (
-                        <div className="py-1">
-                          <div className="p-3 bg-muted rounded-lg">
+                        <div className="py-1 w-full max-w-3xl">
+                          <div className="p-3 bg-muted rounded-lg w-full">
                             <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
                               <ReactMarkdown>{message.content}</ReactMarkdown>
                             </div>

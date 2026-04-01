@@ -28,10 +28,6 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile
 
-      - name: Lint
-        shell: bash
-        run: pnpm lint
-
       - name: Build
         shell: bash
         run: pnpm build

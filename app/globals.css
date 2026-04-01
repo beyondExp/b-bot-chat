@@ -79,6 +79,53 @@
   }
 }
 
+/* Hub-style grid background for chat surfaces */
+.bbot-grid-bg {
+  position: relative;
+  isolation: isolate;
+  --mx: 50%;
+  --my: 120px;
+}
+
+.bbot-grid-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, hsl(var(--foreground) / 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--foreground) / 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.18;
+}
+
+.bbot-grid-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, hsl(var(--foreground) / 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--foreground) / 0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.55;
+  mask-image: radial-gradient(220px 220px at var(--mx) var(--my), #000 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(220px 220px at var(--mx) var(--my), #000 0%, transparent 70%);
+}
+
+.bbot-grid-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Prevent scroll anchoring from pulling the chat pane downward as new content streams in */
+.bbot-chat-scroll {
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
+
 /* Responsive layout */
 .app-container {
   display: flex;

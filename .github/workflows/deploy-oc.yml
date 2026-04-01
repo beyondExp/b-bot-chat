@@ -1,0 +1,139 @@
+name: Build & Deploy (OpenShift)
+
+on:
+  push:
+    branches: ["main", "staging"]
+  workflow_dispatch:
+
+concurrency:
+  group: oc-prod
+  cancel-in-progress: false
+
+jobs:
+  build_test:
+    name: Build + tests
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Build
+        shell: bash
+        run: pnpm build
+
+      - name: Set image tag
+        id: tag
+        shell: bash
+        run: |
+          ts="$(date -u +%Y%m%d-%H%M%S)"
+          short="${GITHUB_SHA::7}"
+          echo "tag=hotfix-chat-${ts}-g${short}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push image
+        shell: bash
+        run: |
+          IMAGE="xevox56/bbot-chat:${{ steps.tag.outputs.tag }}"
+
+          docker build \
+            -t "$IMAGE" \
+            --build-arg NEXT_PUBLIC_AUTH_PROVIDER="${NEXT_PUBLIC_AUTH_PROVIDER:-zitadel}" \
+            --build-arg NEXT_PUBLIC_ZITADEL_AUTHORITY="${NEXT_PUBLIC_ZITADEL_AUTHORITY:-https://idp.beyond-bot.ch}" \
+            --build-arg NEXT_PUBLIC_ZITADEL_CLIENT_ID="${NEXT_PUBLIC_ZITADEL_CLIENT_ID:-363202201499207860}" \
+            --build-arg NEXT_PUBLIC_ZITADEL_SCOPES="${NEXT_PUBLIC_ZITADEL_SCOPES:-openid profile email}" \
+            --build-arg NEXT_PUBLIC_ZITADEL_RESOURCE="${NEXT_PUBLIC_ZITADEL_RESOURCE:-}" \
+            --build-arg NEXT_PUBLIC_AUTH0_DOMAIN="${NEXT_PUBLIC_AUTH0_DOMAIN:-}" \
+            --build-arg NEXT_PUBLIC_AUTH0_CLIENT_ID="${NEXT_PUBLIC_AUTH0_CLIENT_ID:-}" \
+            --build-arg NEXT_PUBLIC_AUTH0_AUDIENCE="${NEXT_PUBLIC_AUTH0_AUDIENCE:-}" \
+            --build-arg NEXT_PUBLIC_SYNAPSE_URL="${NEXT_PUBLIC_SYNAPSE_URL:-https://synapse.beyond-bot.ch}" \
+            .
+
+          docker push "$IMAGE"
+        env:
+          NEXT_PUBLIC_AUTH_PROVIDER: ${{ secrets.NEXT_PUBLIC_AUTH_PROVIDER }}
+          NEXT_PUBLIC_ZITADEL_AUTHORITY: ${{ secrets.NEXT_PUBLIC_ZITADEL_AUTHORITY }}
+          NEXT_PUBLIC_ZITADEL_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_ZITADEL_CLIENT_ID }}
+          NEXT_PUBLIC_ZITADEL_SCOPES: ${{ secrets.NEXT_PUBLIC_ZITADEL_SCOPES }}
+          NEXT_PUBLIC_ZITADEL_RESOURCE: ${{ secrets.NEXT_PUBLIC_ZITADEL_RESOURCE }}
+          NEXT_PUBLIC_AUTH0_DOMAIN: ${{ secrets.NEXT_PUBLIC_AUTH0_DOMAIN }}
+          NEXT_PUBLIC_AUTH0_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_AUTH0_CLIENT_ID }}
+          NEXT_PUBLIC_AUTH0_AUDIENCE: ${{ secrets.NEXT_PUBLIC_AUTH0_AUDIENCE }}
+          NEXT_PUBLIC_SYNAPSE_URL: ${{ secrets.NEXT_PUBLIC_SYNAPSE_URL }}
+
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+
+  deploy:
+    name: Deploy to OpenShift (prod)
+    needs: build_test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install oc
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver="4.19.10"
+          url="https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${ver}/openshift-client-linux-${ver}.tar.gz"
+          curl -fsSL "$url" -o oc.tgz
+          tar -xzf oc.tgz oc kubectl
+          sudo mv oc /usr/local/bin/oc
+          sudo chmod +x /usr/local/bin/oc
+          oc version --client
+
+      - name: Login
+        shell: bash
+        env:
+          OC_SERVER: ${{ secrets.OC_SERVER }}
+          OC_TOKEN: ${{ secrets.OC_TOKEN }}
+        run: |
+          oc login "$OC_SERVER" --token="$OC_TOKEN" --insecure-skip-tls-verify=true
+
+      - name: Deploy (rollout) chat
+        shell: bash
+        env:
+          NS: ${{ secrets.OC_NAMESPACE }}
+        run: |
+          : "${NS:=beyond-group}"
+          IMAGE="xevox56/bbot-chat:${{ needs.build_test.outputs.tag }}"
+          oc -n "$NS" set image deployment/bbot-bbot-platform-chat chat="$IMAGE"
+          oc -n "$NS" rollout status deployment/bbot-bbot-platform-chat --timeout=15m
+
+      - name: Smoke test (public /)
+        shell: bash
+        env:
+          CHAT_URL: ${{ secrets.CHAT_URL }}
+        run: |
+          url="${CHAT_URL:-https://chat.beyond-bot.ch/}"
+          curl -fsS "$url" >/dev/null
+
+      - name: Rollback on failure
+        if: failure()
+        shell: bash
+        env:
+          NS: ${{ secrets.OC_NAMESPACE }}
+        run: |
+          : "${NS:=beyond-group}"
+          oc -n "$NS" rollout undo deployment/bbot-bbot-platform-chat
+

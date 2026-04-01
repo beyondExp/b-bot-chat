@@ -35,7 +35,7 @@ interface DiscoverPageProps {
 // Fallback data in case API fails
 const fallbackAgents: Agent[] = [
   {
-    id: "b-bot",
+    id: "bbot",
     name: "B-Bot",
     shortDescription: "Your personal AI assistant",
     description:
@@ -52,42 +52,6 @@ const fallbackAgents: Agent[] = [
       { id: "data-analysis", name: "Data Analysis", description: "Analyze data and generate insights" },
     ],
     apps: [{ id: "notion", name: "Notion", icon: "N" }],
-  },
-  {
-    id: "default",
-    name: "Beyond Assistant",
-    shortDescription: "General purpose AI assistant",
-    description:
-      "A versatile AI assistant that can help with a wide range of tasks, from answering questions to generating content.",
-    profileImage: "/placeholder.svg?height=200&width=200",
-    category: "General",
-    featured: true,
-    popular: true,
-    publisherId: "beyond-official",
-    publisher: anonymousPublisher, // Use anonymous publisher for fallback data
-    abilities: [
-      { id: "web-search", name: "Web Search", description: "Search the web for information" },
-      { id: "creative-writing", name: "Creative Writing", description: "Generate creative content" },
-    ],
-    apps: [{ id: "notion", name: "Notion", icon: "N" }],
-  },
-  // Keep the rest of the fallback agents
-  {
-    id: "professor",
-    name: "Professor Einstein",
-    shortDescription: "Physics and mathematics expert",
-    description:
-      "An expert in physics and mathematics who can explain complex concepts in simple terms and provide detailed explanations.",
-    profileImage: "/placeholder.svg?height=200&width=200",
-    category: "Education",
-    popular: true,
-    publisherId: "edu-labs",
-    publisher: anonymousPublisher, // Use anonymous publisher for fallback data
-    abilities: [
-      { id: "web-search", name: "Web Search", description: "Search the web for information" },
-      { id: "data-analysis", name: "Data Analysis", description: "Analyze data and generate insights" },
-    ],
-    apps: [{ id: "calculator", name: "Calculator", icon: "=" }],
   },
 ]
 
@@ -116,7 +80,17 @@ export function DiscoverPage({
 
   // Fetch agents
   useEffect(() => {
-    if (!isAuthenticated) return
+    // If the user isn't authenticated, we can't call `getAccessTokenSilently()`.
+    // Don't get stuck in an infinite loading state — show fallback agents instead.
+    if (!isAuthenticated) {
+      setError(null)
+      setUseFallback(true)
+      setAgents(fallbackAgents)
+      setFilteredAgents(fallbackAgents)
+      setCategories(Array.from(new Set(fallbackAgents.map((agent) => agent.category))))
+      setIsLoading(false)
+      return
+    }
 
     const fetchData = async () => {
       setIsLoading(true)
@@ -259,9 +233,7 @@ export function DiscoverPage({
   }
 
   // Show error state
-  if (error) {
-    return null
-  }
+  // (Don't early-return on error; we can still show fallback content + the banner below.)
 
   // Count user's published agents
   const userAgentsCount = agents.filter((agent) => agent.isPublishedByUser).length

@@ -49,6 +49,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [contactAgentIds, setContactAgentIds] = useState<string[]>([])
   const [recentAgents, setRecentAgents] = useState<string[]>([])
 
+  const normalizeAgentId = (id?: string | null): string | null => {
+    const raw = (id ?? "").toString().trim()
+    const lower = raw.toLowerCase()
+    if (!lower) return null
+    if (lower === "default") return "bbot"
+    if (lower === "b-bot") return "bbot"
+    if (lower === "bbot") return "bbot"
+    return raw
+  }
+
   // Prevent page-level scrolling; the chat should scroll inside the messages pane only.
   // This avoids the "second scrollbar" + growing blank space below the sticky input.
   useEffect(() => {
@@ -75,7 +85,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Initialize selectedAgent from initialAgent, currentSession, or saved thread data
   const getInitialAgent = (): string | null => {
     // First priority: initialAgent prop
-    if (initialAgent) return initialAgent
+    if (initialAgent) return normalizeAgentId(initialAgent)
     
     // Second priority: check if we have a current session with agent info
     const savedThreadId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID)
@@ -84,7 +94,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const session = allSessions.find(s => s.threadId === savedThreadId)
       if (session?.agentId) {
         console.log('[Chat] Restoring agent from saved session:', session.agentId)
-        return session.agentId
+        return normalizeAgentId(session.agentId)
       }
     }
     
@@ -1219,7 +1229,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     ChatHistoryManager.setCurrentThreadId(session.threadId, MAIN_CHAT_ID)
     
     // Then set the agent
-    setSelectedAgent(session.agentId)
+    setSelectedAgent(normalizeAgentId(session.agentId))
     
     console.log('[Chat] Selected chat - agent:', session.agentId, 'thread:', session.threadId)
     
@@ -1247,16 +1257,54 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   const handleSelectAgent = (agentId: string) => {
     console.log('[Chat] Selecting agent:', agentId)
-    setSelectedAgent(agentId)
+    setSelectedAgent(normalizeAgentId(agentId))
     // The useEffect will handle clearing the current session
   }
 
   const handleNewChat = () => {
-    console.log('[Chat] Starting new chat')
-    setCurrentSession(null)
-    ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
-    setIsLoadingOldConversation(false) // New chat should auto-play audio
-    // No need to reload the page - useStream will start a new thread on next message
+    void (async () => {
+      console.log("[Chat] Starting new chat")
+
+      // Clear UI/session state first
+      setCurrentSession(null)
+      setToolEvents([])
+      setFollowUpSuggestions([])
+      setFollowUpSuggestionsLoading(false)
+      pendingFollowUpsRef.current = null
+      setIsLoadingOldConversation(false) // New chat should auto-play audio
+
+      // Critical: clear any locally persisted + in-memory thread id
+      ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+      setActiveThreadId(undefined)
+      setLastThreadId(undefined)
+
+      // For authenticated users, pre-create a fresh thread so the UI reliably switches immediately.
+      // For anonymous users, the embed proxy will create a new thread on next message.
+      const canCreateThread = isAuthenticated || isLocallyAuthenticated()
+      if (!canCreateThread) return
+
+      try {
+        const userId = user?.sub ? String(user.sub) : null
+        const agentId = normalizeAgentId(selectedAgent) || "bbot"
+        const entityId = userId ? userId.replace(/[|\-]/g, "") + "_" + agentId : null
+
+        const created = await threadService.createThread({
+          configurable: {
+            agent_id: agentId,
+            ...(userId ? { user_id: userId } : {}),
+            ...(entityId ? { entity_id: entityId } : {}),
+          },
+        })
+
+        const newThreadId = created?.thread_id ? String(created.thread_id).trim() : ""
+        if (!newThreadId) return
+
+        ChatHistoryManager.setCurrentThreadId(newThreadId, MAIN_CHAT_ID)
+        setActiveThreadId(newThreadId)
+      } catch (e) {
+        console.warn("[Chat] Failed to pre-create thread; falling back to lazy creation on next message", e)
+      }
+    })()
   }
 
   const handleToggleDiscover = () => {
@@ -1283,7 +1331,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   }
 
   const handleSelectAgentFromContacts = (agentId: string) => {
-    setSelectedAgent(agentId)
+    setSelectedAgent(normalizeAgentId(agentId))
     setShowContactsPage(false)
     // Start a new chat with this agent
     handleNewChat()
@@ -1309,6 +1357,21 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     console.log('[Chat] Selected search result:', messageIndex)
     // TODO: Implement scrolling to specific message
   }
+
+  const handleGridMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    const rect = el.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    el.style.setProperty("--mx", `${x}px`)
+    el.style.setProperty("--my", `${y}px`)
+  }, [])
+
+  const handleGridMouseLeave = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    el.style.setProperty("--mx", `50%`)
+    el.style.setProperty("--my", `120px`)
+  }, [])
 
   // Track if we just left a call (to prevent auto-playing audio that was already heard)
   const [justLeftCall, setJustLeftCall] = useState(false);
@@ -1826,7 +1889,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   return (
     <>
-      <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
+      <div
+        className="flex h-[100dvh] w-[100dvw] min-h-0 flex-col bg-background overflow-hidden bbot-grid-bg"
+        onMouseMove={handleGridMouseMove}
+        onMouseLeave={handleGridMouseLeave}
+      >
         <ChatHeader
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={showSidebar}
@@ -1850,7 +1917,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           />
         )}
 
-        <div className="flex-1 overflow-y-auto min-h-0 scroll-smooth">
+        <div className="flex-1 overflow-y-auto min-h-0 bbot-chat-scroll">
           {isSelectingChat ? (
             <div className="flex items-center justify-center h-full bg-background">
               <div className="text-center">

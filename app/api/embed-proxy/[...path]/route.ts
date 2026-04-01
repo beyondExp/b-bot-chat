@@ -157,29 +157,31 @@ async function handleAnonymousThreadCreation(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
-  const { params } = await contextPromise;
-  return handleEmbedProxyRequest(request, params.path, "GET");
+type EmbedProxyContext = { params: Promise<{ path: string[] }> }
+
+export async function GET(request: NextRequest, context: EmbedProxyContext) {
+  const { path } = await context.params
+  return handleEmbedProxyRequest(request, path, "GET")
 }
 
-export async function POST(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
-  const { params } = await contextPromise;
-  return handleEmbedProxyRequest(request, params.path, "POST");
+export async function POST(request: NextRequest, context: EmbedProxyContext) {
+  const { path } = await context.params
+  return handleEmbedProxyRequest(request, path, "POST")
 }
 
-export async function PUT(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
-  const { params } = await contextPromise;
-  return handleEmbedProxyRequest(request, params.path, "PUT");
+export async function PUT(request: NextRequest, context: EmbedProxyContext) {
+  const { path } = await context.params
+  return handleEmbedProxyRequest(request, path, "PUT")
 }
 
-export async function DELETE(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
-  const { params } = await contextPromise;
-  return handleEmbedProxyRequest(request, params.path, "DELETE");
+export async function DELETE(request: NextRequest, context: EmbedProxyContext) {
+  const { path } = await context.params
+  return handleEmbedProxyRequest(request, path, "DELETE")
 }
 
-export async function PATCH(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
-  const { params } = await contextPromise;
-  return handleEmbedProxyRequest(request, params.path, "PATCH");
+export async function PATCH(request: NextRequest, context: EmbedProxyContext) {
+  const { path } = await context.params
+  return handleEmbedProxyRequest(request, path, "PATCH")
 }
 
 const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || ""

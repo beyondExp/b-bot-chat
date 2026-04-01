@@ -65,10 +65,10 @@
   ],
   "shortcuts": [
     {
-      "name": "Chat with Assistant",
+      "name": "Chat with B-Bot",
       "short_name": "Chat",
-      "description": "Start a new chat with Beyond Assistant",
-      "url": "/?agent=default",
+      "description": "Start a new chat with B-Bot",
+      "url": "/?agent=bbot",
       "icons": [{ "src": "/icons/chat-shortcut.png", "sizes": "192x192" }]
     },
     {
