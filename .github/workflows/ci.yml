@@ -16,6 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+          run_install: false
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -24,9 +30,7 @@ jobs:
 
       - name: Install dependencies
         shell: bash
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         shell: bash
