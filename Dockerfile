@@ -4,7 +4,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package.json pnpm-lock.yaml ./
 RUN corepack enable \
-  && corepack prepare pnpm@9 --activate \
   && pnpm install --frozen-lockfile
 
 FROM node:20-alpine AS builder
@@ -38,7 +37,6 @@ ENV NEXT_PUBLIC_AUTH0_AUDIENCE=${NEXT_PUBLIC_AUTH0_AUDIENCE}
 ENV NEXT_PUBLIC_SYNAPSE_URL=${NEXT_PUBLIC_SYNAPSE_URL}
 
 RUN corepack enable \
-  && corepack prepare pnpm@9 --activate \
   && pnpm build
 
 FROM node:20-alpine AS runner
