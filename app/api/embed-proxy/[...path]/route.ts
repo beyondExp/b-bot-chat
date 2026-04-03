@@ -188,6 +188,35 @@ const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || ""
 const MAIN_API_URL = process.env.MAIN_API_URL || process.env.MAIN_API_PUBLIC_URL || ""
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || ""
 
+async function _resolveSynapseAssistantIdFromDistributionChannel(publicChannelId: string): Promise<string | null> {
+  const channelId = String(publicChannelId || "").trim()
+  if (!channelId) return null
+  if (!MAIN_API_URL || !ADMIN_API_KEY) return null
+
+  try {
+    const r = await fetch(`${MAIN_API_URL}/v3/public/distribution-channels/${encodeURIComponent(channelId)}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": ADMIN_API_KEY,
+      },
+      redirect: "manual",
+    })
+    if (!r.ok) return null
+    const dc: any = await r.json().catch(() => null)
+    const candidate =
+      dc?.assistant_id ||
+      dc?.assistantId ||
+      dc?.assistant?.assistant_id ||
+      dc?.assistant?.assistantId ||
+      dc?.assistant?.id
+    const resolved = String(candidate || "").trim()
+    return resolved ? resolved : null
+  } catch {
+    return null
+  }
+}
+
 function _sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(String(s || ""), "utf8").digest("hex")
 }
@@ -370,8 +399,10 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
       }
 
-      // Enforce password protection for the target assistant
-      const assistantId =
+      // Prefer enforcing password protection based on the thread's stored distribution-channel id.
+      // The client may send a Synapse assistant UUID for execution, but password configs live on the public channel.
+      const threadId = String(pathSegments?.[1] || "").trim()
+      const assistantFromPayload =
         (typeof (body as any)?.assistant_id === "string" && (body as any).assistant_id.trim() ? (body as any).assistant_id.trim() : "") ||
         (typeof (body as any)?.assistantId === "string" && (body as any).assistantId.trim() ? (body as any).assistantId.trim() : "") ||
         (typeof (body as any)?.config?.configurable?.assistant_id === "string" && (body as any).config.configurable.assistant_id.trim()
@@ -380,14 +411,56 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         (typeof (body as any)?.config?.configurable?.agent_id === "string" && (body as any).config.configurable.agent_id.trim()
           ? (body as any).config.configurable.agent_id.trim()
           : "")
-      if (assistantId) {
-        const pwErr = await _requireEmbedPasswordIfConfigured(request, assistantId)
+
+      let assistantPublicId = assistantFromPayload
+      try {
+        if (threadId) {
+          const tRes = await fetch(`${langGraphApiUrl}/threads/${encodeURIComponent(threadId)}`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-ID": "admin",
+              "Admin-API-Key": apiKey,
+            },
+          })
+          if (tRes.ok) {
+            const tData: any = await tRes.json().catch(() => null)
+            const fromMeta = String(tData?.metadata?.assistant_id || tData?.metadata?.agent_id || "").trim()
+            if (fromMeta) assistantPublicId = fromMeta
+          }
+        }
+      } catch {
+        // best-effort; fall back to payload
+      }
+
+      if (assistantPublicId) {
+        const pwErr = await _requireEmbedPasswordIfConfigured(request, assistantPublicId)
         if (pwErr) return pwErr
+      }
+
+      // Resolve Synapse assistant UUID for execution if the public id refers to a distribution channel.
+      // Keep the public id in thread metadata for ACL/password checks, but execute using the Synapse assistant UUID.
+      try {
+        if (assistantPublicId && !isBBotAssistantId(assistantPublicId)) {
+          const resolved = await _resolveSynapseAssistantIdFromDistributionChannel(assistantPublicId)
+          if (resolved) {
+            ;(body as any).assistant_id = resolved
+            if ((body as any).config && typeof (body as any).config === "object") {
+              ;(body as any).config.configurable = (body as any).config.configurable || {}
+              if (typeof (body as any).config.configurable === "object") {
+                ;(body as any).config.configurable.assistant_id = resolved
+                ;(body as any).config.configurable.agent_id = assistantPublicId
+              }
+            }
+          }
+        }
+      } catch {
+        // best-effort; continue even if resolution fails
       }
 
       // B-Bot has a dedicated stream proxy in Synapse that is more stable than
       // the raw /threads/{id}/runs/stream path for browser streaming.
-      if (isBBotAssistantId(assistantId) && pathSegments.length >= 4) {
+      if (isBBotAssistantId(assistantPublicId) && pathSegments.length >= 4) {
         streamTargetPath = `bbot/threads/${pathSegments[1]}/runs/stream`
       }
 

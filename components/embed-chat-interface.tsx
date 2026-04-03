@@ -270,14 +270,36 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     return uuidRegex.test(str);
   };
 
+  // In embed mode, `selectedAgent` is typically a public distribution-channel id.
+  // When the channel payload includes a Synapse assistant UUID, prefer that for runs.
+  const resolvedSynapseAssistantId = useMemo(() => {
+    try {
+      const raw = (agentObj && typeof agentObj === "object") ? agentObj : null
+      const meta = raw?.metadata || {}
+      const candidate =
+        raw?.assistant_id ||
+        raw?.assistantId ||
+        raw?.synapse_assistant_id ||
+        meta?.synapseAssistantId ||
+        meta?.synapse_assistant_id ||
+        meta?.assistant_id ||
+        meta?.assistantId
+      const resolved = String(candidate || "").trim()
+      return resolved ? resolved : null
+    } catch {
+      return null
+    }
+  }, [agentObj])
+
   // Get the assistant ID - only use it if it's a valid UUID, otherwise use a default
   const getAssistantId = () => {
-    if (selectedAgent && isValidUUID(selectedAgent)) {
-      return selectedAgent;
+    const resolved = resolvedSynapseAssistantId || selectedAgent
+    if (resolved && isValidUUID(String(resolved))) {
+      return String(resolved)
     }
     // For non-UUID agent IDs like "bbot", return the agent name directly
     // The API accepts specific registered graphs: indexer, retrieval_graph, bbot, open_deep_research
-    return selectedAgent || "bbot"; // Use the actual agent name or default to bbot
+    return String(resolved || "bbot"); // Use the actual agent name or default to bbot
   };
 
   // State for API key (can be undefined since proxy handles auth)

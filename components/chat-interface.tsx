@@ -505,14 +505,39 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return uuidRegex.test(str);
   };
 
+  // Resolve the Synapse assistant UUID from the selected distribution channel record (when available).
+  // In Chat, `selectedAgent` is typically the public distribution-channel id, while Synapse expects a UUID assistant id.
+  const selectedAgentSynapseAssistantId = useMemo(() => {
+    try {
+      if (!selectedAgent) return null
+      const agentObj = agents.find((a: any) => String(a?.id || "").trim() === String(selectedAgent).trim())
+      const raw = agentObj?.rawData || {}
+      const meta = agentObj?.metadata || {}
+      const candidate =
+        raw?.assistant_id ||
+        raw?.assistantId ||
+        raw?.synapse_assistant_id ||
+        meta?.synapseAssistantId ||
+        meta?.synapse_assistant_id ||
+        meta?.assistant_id ||
+        meta?.assistantId
+      const resolved = String(candidate || "").trim()
+      if (!resolved) return null
+      return resolved
+    } catch {
+      return null
+    }
+  }, [agents, selectedAgent])
+
   // Get the assistant ID - only use it if it's a valid UUID, otherwise use a default
   const getAssistantId = () => {
-    if (selectedAgent && isValidUUID(selectedAgent)) {
-      return selectedAgent;
+    const resolved = selectedAgentSynapseAssistantId || selectedAgent
+    if (resolved && isValidUUID(String(resolved))) {
+      return String(resolved)
     }
     // For non-UUID agent IDs like "bbot", return the agent name directly
     // The API accepts specific registered graphs: indexer, retrieval_graph, bbot, open_deep_research
-    return selectedAgent || "bbot"; // Use the actual agent name or default to bbot
+    return String(resolved || "bbot"); // Use the actual agent name or default to bbot
   };
 
   // State for API key - get auth token for proxy forwarding
