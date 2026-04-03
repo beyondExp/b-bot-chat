@@ -599,6 +599,15 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const meta = agentObj?.metadata || raw?.metadata || {}
       const dcMeta = meta?.distributionChannel || meta?.distribution_channel || null
       const candidate =
+        // Some API responses expose ownership on the top-level agent object.
+        agentObj?.owner ??
+        agentObj?.owner_id ??
+        agentObj?.ownerId ??
+        agentObj?.user_id ??
+        agentObj?.userId ??
+        agentObj?.user?.id ??
+        agentObj?.created_by ??
+        agentObj?.createdBy ??
         meta?.owner ??
         meta?.owner_id ??
         meta?.ownerId ??
@@ -608,6 +617,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         raw?.owner ??
         raw?.owner_id ??
         raw?.ownerId ??
+        raw?.user_id ??
+        raw?.userId ??
+        raw?.user?.id ??
         meta?.created_by ??
         meta?.createdBy ??
         raw?.created_by ??

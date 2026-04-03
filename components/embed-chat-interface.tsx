@@ -325,6 +325,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const getKnowledgeEntityId = () => {
     try {
       const meta = (agentObj && typeof agentObj === "object") ? (agentObj as any).metadata : null
+      const top = (agentObj && typeof agentObj === "object") ? (agentObj as any) : null
       const dcMeta = meta?.distributionChannel || meta?.distribution_channel || null
       const cfg = dcMeta?.config || dcMeta?.configuration || null
       const expertCandidate = meta?.expert_id ?? meta?.expertId ?? cfg?.expert_id ?? cfg?.expertId
@@ -332,6 +333,14 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       if (!Number.isFinite(expertId) || expertId <= 0) return null
 
       const ownerCandidate =
+        top?.owner ??
+        top?.owner_id ??
+        top?.ownerId ??
+        top?.user_id ??
+        top?.userId ??
+        top?.user?.id ??
+        top?.created_by ??
+        top?.createdBy ??
         meta?.owner ??
         meta?.owner_id ??
         meta?.ownerId ??
