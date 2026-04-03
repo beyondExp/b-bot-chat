@@ -588,12 +588,48 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }
   }, [agents, selectedAgent])
 
+  // Knowledge domains are authored by an expert owner in the Hub. In Swiss Chat, end-users differ from that owner.
+  // The knowledge graph is stored per "<owner_uid>_<expert_id>_<knowledge_domain_id>", so we must query using the
+  // owner's uid for KB access (while keeping `entity_id` per end-user for memory).
+  const selectedAgentOwnerUserId = useMemo(() => {
+    try {
+      if (!selectedAgent) return null
+      const agentObj = agents.find((a: any) => String(a?.id || "").trim() === String(selectedAgent).trim())
+      const raw = agentObj?.rawData || {}
+      const meta = agentObj?.metadata || raw?.metadata || {}
+      const dcMeta = meta?.distributionChannel || meta?.distribution_channel || null
+      const candidate =
+        meta?.owner ??
+        meta?.owner_id ??
+        meta?.ownerId ??
+        dcMeta?.owner ??
+        dcMeta?.owner_id ??
+        dcMeta?.ownerId ??
+        raw?.owner ??
+        raw?.owner_id ??
+        raw?.ownerId ??
+        meta?.created_by ??
+        meta?.createdBy ??
+        raw?.created_by ??
+        raw?.createdBy
+      const s = String(candidate || "").trim()
+      return s ? s : null
+    } catch {
+      return null
+    }
+  }, [agents, selectedAgent])
+
   // Get entity ID for state management
   const getEntityId = () => {
     const userId = user?.sub || "anonymous-user";
     const suffix = selectedAgentExpertId != null ? String(selectedAgentExpertId) : String(selectedAgent || "bbot")
     return _sanitizeUserId(userId) + '_' + suffix;
   };
+
+  const getKnowledgeEntityId = () => {
+    if (!selectedAgentOwnerUserId || selectedAgentExpertId == null) return null
+    return _sanitizeUserId(selectedAgentOwnerUserId) + "_" + String(selectedAgentExpertId)
+  }
 
   // Get current thread ID
   const getCurrentThreadId = () => {
@@ -1011,6 +1047,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const userId = user?.sub || "anonymous-user";
       const agentId = selectedAgent || "bbot";
       const entityId = getEntityId();
+      const knowledgeEntityId = getKnowledgeEntityId()
 
           // Merge assistant apps with user apps (user apps take precedence)
           const agentObj = agents.find((a: any) => a.id === selectedAgent);
@@ -1060,6 +1097,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             { 
               messages: allMessages,
               entity_id: entityId,
+              ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
               user_id: userId,
               agent_id: agentId,
               ...(hasQueuedFiles ? { files: queuedFiles } : {}),
@@ -1070,6 +1108,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   agent_id: agentId,
                   user_id: userId,
                   entity_id: entityId,
+                  ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
                   temperature: 0.7,
                   top_p: 1.0,
                   instructions: "Be helpful and concise.",
@@ -1089,6 +1128,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   newMessage,
                 ] as any,
                 entity_id: entityId,
+                ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
                 user_id: userId,
                 agent_id: agentId,
               }),
@@ -1143,6 +1183,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const userId = user?.sub || "anonymous-user";
       const agentId = selectedAgent || "bbot";
       const entityId = getEntityId();
+      const knowledgeEntityId = getKnowledgeEntityId()
 
           // Merge assistant apps with user apps and get modalities
           const agentObj = agents.find((a: any) => a.id === selectedAgent);
@@ -1218,6 +1259,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             { 
               messages: allMessages,
               entity_id: entityId,
+              ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
               user_id: userId,
               agent_id: agentId,
               ...(hasQueuedFiles ? { files: queuedFiles } : {}),
@@ -1228,6 +1270,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   agent_id: agentId,
                   user_id: userId,
                   entity_id: entityId,
+                  ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
                   temperature: 0.7,
                   top_p: 1.0,
                   instructions: "Be helpful and concise.",
@@ -1247,6 +1290,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               newMessage,
             ] as any,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
           }),
@@ -1340,12 +1384,14 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         const userId = user?.sub ? String(user.sub) : null
         const agentId = normalizeAgentId(selectedAgent) || "bbot"
         const entityId = userId ? (_sanitizeUserId(userId) + "_" + (selectedAgentExpertId != null ? String(selectedAgentExpertId) : agentId)) : null
+        const knowledgeEntityId = getKnowledgeEntityId()
 
         const created = await threadService.createThread({
           configurable: {
             agent_id: agentId,
             ...(userId ? { user_id: userId } : {}),
             ...(entityId ? { entity_id: entityId } : {}),
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           },
         })
 
@@ -1460,6 +1506,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const userId = user?.sub || "anonymous-user"
       const agentId = selectedAgent || "bbot"
       const entityId = getEntityId()
+      const knowledgeEntityId = getKnowledgeEntityId()
 
       const agentObj = agents.find((a: any) => a.id === selectedAgent)
       const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
@@ -1503,6 +1550,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         {
           messages: [greetingMessage],
           entity_id: entityId,
+          ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,
           agent_id: agentId,
         },
@@ -1512,6 +1560,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               agent_id: agentId,
               user_id: userId,
               entity_id: entityId,
+              ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
               temperature: 0.4,
               top_p: 1.0,
               instructions: "You are speaking on a phone call. Keep it brief and natural.",
@@ -1527,6 +1576,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             ...prev,
             messages: [...(prev.messages ?? []), greetingMessage] as any,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
           }),
@@ -1586,6 +1636,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const userId = user?.sub || "anonymous-user";
       const agentId = selectedAgent || "bbot";
       const entityId = getEntityId();
+      const knowledgeEntityId = getKnowledgeEntityId()
 
       // Get agent configuration (same as handleSendMessage)
       const agentObj = agents.find((a: any) => a.id === selectedAgent)
@@ -1632,6 +1683,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         { 
           messages: [newMessage],
           entity_id: entityId,
+          ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,
           agent_id: agentId
         },
@@ -1641,6 +1693,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               agent_id: agentId,
               user_id: userId,
               entity_id: entityId,
+              ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
               temperature: 0.7,
               top_p: 1.0,
               instructions: "Be helpful and concise.",
@@ -1659,6 +1712,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               newMessage,
             ] as any,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
           }),

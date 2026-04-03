@@ -223,6 +223,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         user_id: userId,
         agent_id: agentId,
         entity_id: getEntityId(),
+        knowledge_entity_id: getKnowledgeEntityId(),
         distributionChannel: {
           type: "Embed"
         }
@@ -320,6 +321,34 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     const suffix = Number.isFinite(expertId) && expertId > 0 ? String(expertId) : String(selectedAgent || "bbot")
     return _sanitizeUserId(userId) + '_' + suffix;
   };
+
+  const getKnowledgeEntityId = () => {
+    try {
+      const meta = (agentObj && typeof agentObj === "object") ? (agentObj as any).metadata : null
+      const dcMeta = meta?.distributionChannel || meta?.distribution_channel || null
+      const cfg = dcMeta?.config || dcMeta?.configuration || null
+      const expertCandidate = meta?.expert_id ?? meta?.expertId ?? cfg?.expert_id ?? cfg?.expertId
+      const expertId = Number(expertCandidate)
+      if (!Number.isFinite(expertId) || expertId <= 0) return null
+
+      const ownerCandidate =
+        meta?.owner ??
+        meta?.owner_id ??
+        meta?.ownerId ??
+        dcMeta?.owner ??
+        dcMeta?.owner_id ??
+        dcMeta?.ownerId ??
+        cfg?.owner ??
+        cfg?.owner_id ??
+        cfg?.ownerId
+      const ownerId = String(ownerCandidate || "").trim()
+      if (!ownerId) return null
+
+      return _sanitizeUserId(ownerId) + "_" + String(expertId)
+    } catch {
+      return null
+    }
+  }
 
   // Get stored thread ID or use current session thread ID
   const getThreadId = () => {
@@ -677,6 +706,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userId = embedUserId || user?.sub || "anonymous-user";
       const agentId = selectedAgent;
       const entityId = getEntityId();
+      const knowledgeEntityId = getKnowledgeEntityId()
 
       // Merge assistant apps with user apps (user apps take precedence)
       const userApps = {};
@@ -709,6 +739,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         { 
           messages: [newMessage],
           entity_id: entityId,  // Required in main payload for LangGraph
+          ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,      // Also add these for compatibility
           agent_id: agentId
         },
@@ -718,6 +749,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           agent_id: agentId,
           user_id: userId,
               entity_id: entityId,
+              ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           temperature: 0.7,
           max_tokens: 1024,
           top_p: 1.0,
@@ -734,6 +766,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             agent_id: agentId,
             assistant_id: agentId,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             distributionChannel: {
               type: "Embed"
             }
@@ -872,6 +905,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userId = embedUserId || user?.sub || "anonymous-user";
       const agentId = selectedAgent;
       const entityId = getEntityId();
+      const knowledgeEntityId = getKnowledgeEntityId()
 
       // Get expert_id from assistant metadata if available
       const expertId = agentObj?.metadata?.expert_id;
@@ -893,6 +927,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         { 
           messages: langGraphMessages,
           entity_id: entityId,  // Required in main payload for LangGraph
+          ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,      // Also add these for compatibility
           agent_id: agentId
         },
@@ -902,6 +937,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               agent_id: agentId,
               user_id: userId,
               entity_id: entityId,
+              ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
               temperature: 0.7,
               max_tokens: 1024,
               top_p: 1.0,
@@ -917,6 +953,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             agent_id: agentId,
             assistant_id: agentId,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             distributionChannel: {
               type: "Embed"
             }
@@ -925,6 +962,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             ...prev,
             messages: langGraphMessages,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
             expert_id: expertId,
@@ -981,6 +1019,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userId = embedUserId || user?.sub || "anonymous-user";
       const agentId = selectedAgent;
       const entityId = getEntityId();
+      const knowledgeEntityId = getKnowledgeEntityId()
 
       // Get expert_id from assistant metadata if available
       const expertId = agentObj?.metadata?.expert_id;
@@ -1002,6 +1041,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         { 
           messages: langGraphMessages,
           entity_id: entityId,  // Required in main payload for LangGraph
+          ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,      // Also add these for compatibility
           agent_id: agentId
         },
@@ -1011,6 +1051,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               agent_id: agentId,
               user_id: userId,
               entity_id: entityId,
+              ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
               temperature: 0.7,
               max_tokens: 1024,
               top_p: 1.0,
@@ -1026,6 +1067,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             agent_id: agentId,
             assistant_id: agentId,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             distributionChannel: {
               type: "Embed"
             }
@@ -1034,6 +1076,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             ...prev,
             messages: langGraphMessages,
             entity_id: entityId,
+            ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
             expert_id: expertId,
