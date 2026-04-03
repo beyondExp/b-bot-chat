@@ -105,22 +105,33 @@ jobs:
           oc version --client
 
       - name: Login
+        id: oc_login
         shell: bash
         env:
           OC_SERVER: ${{ secrets.OC_SERVER }}
           OC_TOKEN: ${{ secrets.OC_TOKEN }}
+          NS: ${{ secrets.OC_NAMESPACE }}
         run: |
+          set -euo pipefail
+          : "${OC_SERVER:?Missing OC_SERVER secret}"
+          : "${OC_TOKEN:?Missing OC_TOKEN secret}"
+          : "${NS:?Missing OC_NAMESPACE secret (must be the OpenShift project name)}"
+
           oc login "$OC_SERVER" --token="$OC_TOKEN" --insecure-skip-tls-verify=true
+          oc whoami
+          oc project "$NS"
 
       - name: Deploy (rollout) chat
         shell: bash
         env:
           NS: ${{ secrets.OC_NAMESPACE }}
         run: |
-          : "${NS:=beyond-group}"
+          set -euo pipefail
+          : "${NS:?Missing OC_NAMESPACE secret (must be the OpenShift project name)}"
           IMAGE="xevox56/bbot-chat:${{ needs.build_test.outputs.tag }}"
-          oc -n "$NS" set image deployment/bbot-bbot-platform-chat chat="$IMAGE"
-          oc -n "$NS" rollout status deployment/bbot-bbot-platform-chat --timeout=15m
+          oc -n "$NS" get deployment/bbot-chat >/dev/null
+          oc -n "$NS" set image deployment/bbot-chat web="$IMAGE"
+          oc -n "$NS" rollout status deployment/bbot-chat --timeout=15m
 
       - name: Smoke test (public /)
         shell: bash
@@ -131,11 +142,12 @@ jobs:
           curl -fsS "$url" >/dev/null
 
       - name: Rollback on failure
-        if: failure()
+        if: failure() && steps.oc_login.outcome == 'success'
         shell: bash
         env:
           NS: ${{ secrets.OC_NAMESPACE }}
         run: |
-          : "${NS:=beyond-group}"
-          oc -n "$NS" rollout undo deployment/bbot-bbot-platform-chat
+          set -euo pipefail
+          : "${NS:?Missing OC_NAMESPACE secret (must be the OpenShift project name)}"
+          oc -n "$NS" rollout undo deployment/bbot-chat
 
