@@ -560,11 +560,39 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     console.log('[Chat] API Key state changed:', apiKey ? 'present' : 'undefined');
   }, [apiKey]);
 
+  const _sanitizeUserId = useCallback((raw: string) => {
+    return String(raw || "").replace(/[|\-]/g, "")
+  }, [])
+
+  // In our platform, document access is scoped by entity_id. Knowledge documents are stored per user+expert.
+  // If we use the distribution-channel UUID as the suffix, the agent may see the domain but get empty search results.
+  const selectedAgentExpertId = useMemo(() => {
+    try {
+      if (!selectedAgent) return null
+      const agentObj = agents.find((a: any) => String(a?.id || "").trim() === String(selectedAgent).trim())
+      const raw = agentObj?.rawData || {}
+      const meta = agentObj?.metadata || raw?.metadata || {}
+      const dcMeta = meta?.distributionChannel || meta?.distribution_channel || null
+      const cfg = dcMeta?.config || dcMeta?.configuration || null
+      const candidate =
+        meta?.expert_id ??
+        meta?.expertId ??
+        cfg?.expert_id ??
+        cfg?.expertId ??
+        raw?.expert_id ??
+        raw?.expertId
+      const n = Number(candidate)
+      return Number.isFinite(n) && n > 0 ? n : null
+    } catch {
+      return null
+    }
+  }, [agents, selectedAgent])
+
   // Get entity ID for state management
   const getEntityId = () => {
     const userId = user?.sub || "anonymous-user";
-    const agentId = selectedAgent || "bbot";
-    return userId.replace(/[|\-]/g, '') + '_' + agentId;
+    const suffix = selectedAgentExpertId != null ? String(selectedAgentExpertId) : String(selectedAgent || "bbot")
+    return _sanitizeUserId(userId) + '_' + suffix;
   };
 
   // Get current thread ID
@@ -982,7 +1010,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     try {
       const userId = user?.sub || "anonymous-user";
       const agentId = selectedAgent || "bbot";
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+      const entityId = getEntityId();
 
           // Merge assistant apps with user apps (user apps take precedence)
           const agentObj = agents.find((a: any) => a.id === selectedAgent);
@@ -1114,7 +1142,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     try {
       const userId = user?.sub || "anonymous-user";
       const agentId = selectedAgent || "bbot";
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+      const entityId = getEntityId();
 
           // Merge assistant apps with user apps and get modalities
           const agentObj = agents.find((a: any) => a.id === selectedAgent);
@@ -1311,7 +1339,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       try {
         const userId = user?.sub ? String(user.sub) : null
         const agentId = normalizeAgentId(selectedAgent) || "bbot"
-        const entityId = userId ? userId.replace(/[|\-]/g, "") + "_" + agentId : null
+        const entityId = userId ? (_sanitizeUserId(userId) + "_" + (selectedAgentExpertId != null ? String(selectedAgentExpertId) : agentId)) : null
 
         const created = await threadService.createThread({
           configurable: {
@@ -1431,7 +1459,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     try {
       const userId = user?.sub || "anonymous-user"
       const agentId = selectedAgent || "bbot"
-      const entityId = userId.replace(/[|\-]/g, "") + "_" + agentId
+      const entityId = getEntityId()
 
       const agentObj = agents.find((a: any) => a.id === selectedAgent)
       const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
@@ -1557,7 +1585,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       // Get required IDs for LangGraph (same as handleSendMessage)
       const userId = user?.sub || "anonymous-user";
       const agentId = selectedAgent || "bbot";
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+      const entityId = getEntityId();
 
       // Get agent configuration (same as handleSendMessage)
       const agentObj = agents.find((a: any) => a.id === selectedAgent)

@@ -222,7 +222,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         expert_id: expertId,
         user_id: userId,
         agent_id: agentId,
-        entity_id: userId.replace(/[|\-]/g, '') + '_' + agentId,
+        entity_id: getEntityId(),
         distributionChannel: {
           type: "Embed"
         }
@@ -305,11 +305,20 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   // State for API key (can be undefined since proxy handles auth)
   const [apiKey, setApiKey] = useState<string | undefined>(undefined);
 
+  const _sanitizeUserId = useCallback((raw: string) => {
+    return String(raw || "").replace(/[|\-]/g, "")
+  }, [])
+
   // Get entity ID for state management
   const getEntityId = () => {
     const userId = embedUserId || user?.sub || "anonymous-user";
-    const agentId = selectedAgent || "bbot";
-    return userId.replace(/[|\-]/g, '') + '_' + agentId;
+    const meta = (agentObj && typeof agentObj === "object") ? (agentObj as any).metadata : null
+    const dcMeta = meta?.distributionChannel || meta?.distribution_channel || null
+    const cfg = dcMeta?.config || dcMeta?.configuration || null
+    const candidate = meta?.expert_id ?? meta?.expertId ?? cfg?.expert_id ?? cfg?.expertId
+    const expertId = Number(candidate)
+    const suffix = Number.isFinite(expertId) && expertId > 0 ? String(expertId) : String(selectedAgent || "bbot")
+    return _sanitizeUserId(userId) + '_' + suffix;
   };
 
   // Get stored thread ID or use current session thread ID
@@ -667,7 +676,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     try {
       const userId = embedUserId || user?.sub || "anonymous-user";
       const agentId = selectedAgent;
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+      const entityId = getEntityId();
 
       // Merge assistant apps with user apps (user apps take precedence)
       const userApps = {};
@@ -862,7 +871,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Get the entity info for the request
       const userId = embedUserId || user?.sub || "anonymous-user";
       const agentId = selectedAgent;
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+      const entityId = getEntityId();
 
       // Get expert_id from assistant metadata if available
       const expertId = agentObj?.metadata?.expert_id;
@@ -971,7 +980,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Get the entity info for the request
       const userId = embedUserId || user?.sub || "anonymous-user";
       const agentId = selectedAgent;
-      const entityId = userId.replace(/[|\-]/g, '') + '_' + agentId;
+      const entityId = getEntityId();
 
       // Get expert_id from assistant metadata if available
       const expertId = agentObj?.metadata?.expert_id;
