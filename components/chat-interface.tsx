@@ -1153,6 +1153,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             },
             {
               config: {
+                apps: mergedApps,
                 configurable: {
                   agent_id: agentId,
                   user_id: userId,
@@ -1315,6 +1316,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             },
             {
               config: {
+                apps: mergedApps,
                 configurable: {
                   agent_id: agentId,
                   user_id: userId,
@@ -1605,6 +1607,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         },
         {
           config: {
+            apps: mergedApps,
             configurable: {
               agent_id: agentId,
               user_id: userId,
@@ -1738,6 +1741,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         },
         {
           config: {
+            apps: mergedApps,
             configurable: {
               agent_id: agentId,
               user_id: userId,
