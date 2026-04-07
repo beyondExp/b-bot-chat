@@ -22,7 +22,7 @@ import { ContactsPage } from "./contacts-page"
 import { VoiceCallView } from "./voice-call-view"
 import { AgentSelector } from "./agent-selector"
 import { useAgents } from "@/lib/agent-service"
-import { useAuthenticatedFetch, isLocallyAuthenticated, getAuthToken } from "@/lib/api"
+import { useAuthenticatedFetch, isLocallyAuthenticated, getAuthToken, clearAuthData } from "@/lib/api"
 import { ThreadService, type Thread } from "@/lib/thread-service"
 import { convertToWav } from "@/lib/audio-converter"
 import { useAppAuth } from "@/lib/app-auth"
@@ -329,8 +329,24 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         const data = await res.json()
         const ids = Array.isArray(data?.ids) ? data.ids.map(String).map((s: string) => s.trim()).filter(Boolean) : []
         if (!mounted) return
-        setContactAgentIds(ids)
-        contactsStore.setIds(ids) // keep local cache in sync
+        // Merge server ids with local cache so a recent local add isn't lost on reload
+        // (e.g., user adds a contact and reloads before server persistence finishes).
+        const localIds = contactsStore.getIds()
+        const merged = Array.from(new Set([...localIds, ...ids].map(String).map((s) => s.trim()).filter(Boolean)))
+        setContactAgentIds(merged)
+        contactsStore.setIds(merged) // keep local cache in sync
+
+        // If the server list is missing some local ids, push the merged list back (best-effort).
+        if (merged.length !== ids.length) {
+          void fetch("/api/contacts", {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ids: merged }),
+          }).catch(() => {})
+        }
       } catch (e) {
         console.warn("[Chat] Failed to sync contacts from server; using local cache", e)
       }
@@ -542,18 +558,39 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // State for API key - get auth token for proxy forwarding
   const [apiKey, setApiKey] = useState<string | undefined>(undefined);
+  const [apiKeyLoadingTimedOut, setApiKeyLoadingTimedOut] = useState(false)
 
   // Initialize API key on mount and auth changes
   useEffect(() => {
+    let cancelled = false
     const initializeApiKey = async () => {
       console.log('[Chat] Initializing API key...');
       const token = await getApiKey();
       console.log('[Chat] Got API key:', token ? 'present' : 'null');
-      setApiKey(token || undefined);
+      if (!cancelled) {
+        setApiKey(token || undefined);
+      }
     };
     
     initializeApiKey();
+    return () => {
+      cancelled = true
+    }
   }, [isAuthenticated, user]); // Re-run when auth state changes
+
+  // If we're authenticated but token fetching stalls, show a recovery UI instead of a permanent white screen.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setApiKeyLoadingTimedOut(false)
+      return
+    }
+    if (apiKey) {
+      setApiKeyLoadingTimedOut(false)
+      return
+    }
+    const t = setTimeout(() => setApiKeyLoadingTimedOut(true), 7000)
+    return () => clearTimeout(t)
+  }, [isAuthenticated, apiKey])
 
   // Debug logging for apiKey changes
   useEffect(() => {
@@ -1905,10 +1942,33 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Anonymous users can proceed immediately using embed proxy
   if (isAuthenticated && !apiKey) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="loading loading-spinner loading-lg"></div>
-          <p className="mt-2">Authenticating...</p>
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="text-center max-w-md px-6">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent mx-auto" />
+          <p className="mt-4 text-sm text-muted-foreground">Authenticating…</p>
+          {apiKeyLoadingTimedOut && (
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-md"
+              >
+                Reload
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    clearAuthData()
+                  } catch {}
+                  window.location.reload()
+                }}
+                className="px-4 py-2 bg-muted text-foreground rounded-md"
+              >
+                Reset session
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )

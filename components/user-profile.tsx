@@ -7,10 +7,16 @@ import { useRouter } from "next/navigation"
 import { useAppAuth } from "@/lib/app-auth"
 import { clearAuthData, isLocallyAuthenticated } from "@/lib/api"
 import { flagForLocale, SUPPORTED_LOCALES, useI18n, type Locale } from "@/lib/i18n"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 export function UserProfile() {
   const { user, logout, isAuthenticated, loginWithRedirect, isLoading } = useAppAuth()
-  const [showDropdown, setShowDropdown] = useState(false)
   const [localAuthState, setLocalAuthState] = useState(false)
   const [showLanguagePicker, setShowLanguagePicker] = useState(false)
   const router = useRouter()
@@ -56,137 +62,123 @@ export function UserProfile() {
 
     logout({
       logoutParams: {
-        returnTo: window.location.origin,
+        returnTo: `${window.location.origin}/`,
       },
     })
   }
 
   return (
-    <div className="relative">
-      <button
-        className="flex items-center gap-2"
-        onClick={() => setShowDropdown(!showDropdown)}
-        aria-label={t("auth.userProfile")}
-      >
-        <div className="w-8 h-8 rounded-[1rem] overflow-hidden border border-border">
-          {user?.picture ? (
-            <Image
-              src={user.picture || "/placeholder.svg"}
-              alt={user.name || "User"}
-              width={32}
-              height={32}
-              className="object-cover"
-            />
-          ) : (
-            <div className="w-full h-full bg-muted flex items-center justify-center">
-              <User size={16} className="text-muted-foreground" />
-            </div>
-          )}
-        </div>
-      </button>
-
-      {showDropdown && (
-        <div className="absolute right-0 mt-2 w-64 bg-card rounded-lg shadow-lg border border-border z-50 overflow-hidden">
-          <div className="p-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-[1rem] overflow-hidden border border-border">
-                {user?.picture ? (
-                  <Image
-                    src={user.picture || "/placeholder.svg"}
-                    alt={user.name || "User"}
-                    width={40}
-                    height={40}
-                    className="object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-muted flex items-center justify-center">
-                    <User size={20} className="text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-              <div className="overflow-hidden">
-                <p className="font-medium truncate">{user?.name || "User"}</p>
-                <p className="text-xs text-muted-foreground truncate">{user?.email || "user@example.com"}</p>
-              </div>
-            </div>
-          </div>
-          <div className="p-2">
-            <button
-              className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
-              onClick={() => setShowLanguagePicker((v) => !v)}
-              aria-label={t("settings.language")}
-            >
-              <Languages size={16} />
-              <span>{t("settings.language")}</span>
-              <span className="ml-auto text-lg leading-none">{flagForLocale(locale)}</span>
-            </button>
-
-            {showLanguagePicker && (
-              <div className="px-2 pb-2">
-                <div className="grid grid-cols-4 gap-1 rounded-md border border-border bg-background p-2">
-                  {(SUPPORTED_LOCALES as readonly Locale[]).map((l) => (
-                    <button
-                      key={l}
-                      type="button"
-                      className={[
-                        "flex items-center justify-center rounded-md p-2 text-xl leading-none hover:bg-muted",
-                        l === locale ? "bg-muted" : "",
-                      ].join(" ")}
-                      onClick={() => {
-                        setLocale(l)
-                        setShowLanguagePicker(false)
-                      }}
-                      aria-label={t(`lang.${l}`)}
-                      title={t(`lang.${l}`)}
-                    >
-                      {flagForLocale(l)}
-                    </button>
-                  ))}
-                </div>
+    <DropdownMenu onOpenChange={(open) => !open && setShowLanguagePicker(false)}>
+      <DropdownMenuTrigger asChild>
+        <button className="flex items-center gap-2" aria-label={t("auth.userProfile")}>
+          <div className="w-8 h-8 rounded-[1rem] overflow-hidden border border-border">
+            {user?.picture ? (
+              <Image
+                src={user.picture || "/placeholder.svg"}
+                alt={user.name || "User"}
+                width={32}
+                height={32}
+                className="object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-muted flex items-center justify-center">
+                <User size={16} className="text-muted-foreground" />
               </div>
             )}
+          </div>
+        </button>
+      </DropdownMenuTrigger>
 
-            <button
-              className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
-              onClick={() => {
-                router.push("/account?tab=chatProfile")
-                setShowDropdown(false)
-              }}
-            >
-              <Sparkles size={16} />
-              <span>{t("account.nav.chatProfile")}</span>
-            </button>
-
-            <button
-              className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
-              onClick={() => {
-                router.push("/account")
-                setShowDropdown(false)
-              }}
-            >
-              <Settings size={16} />
-              <span>{t("auth.accountBilling")}</span>
-            </button>
-            <button
-              className="w-full flex items-center gap-2 p-2 text-sm hover:bg-muted rounded-md transition-colors"
-              onClick={() => {
-                router.push("/account?tab=chatProfile")
-                setShowDropdown(false)
-              }}
-            >
-              <User size={16} />
-              <span>{t("account.nav.chatProfile")}</span>
-            </button>
-            <button
-              className="w-full flex items-center gap-2 p-2 text-sm text-destructive hover:bg-muted rounded-md transition-colors"
-              onClick={handleLogout}
-            >
-              <LogOut size={16} />
-              <span>{t("auth.signOut")}</span>
-            </button>
+      <DropdownMenuContent align="end" side="bottom" className="w-64 p-0">
+        <div className="p-4 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-[1rem] overflow-hidden border border-border">
+              {user?.picture ? (
+                <Image
+                  src={user.picture || "/placeholder.svg"}
+                  alt={user.name || "User"}
+                  width={40}
+                  height={40}
+                  className="object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-muted flex items-center justify-center">
+                  <User size={20} className="text-muted-foreground" />
+                </div>
+              )}
+            </div>
+            <div className="overflow-hidden">
+              <p className="font-medium truncate">{user?.name || "User"}</p>
+              <p className="text-xs text-muted-foreground truncate">{user?.email || "user@example.com"}</p>
+            </div>
           </div>
         </div>
-      )}
-    </div>
+
+        <div className="p-1">
+          <DropdownMenuItem
+            onSelect={(e) => {
+              // Keep menu open while selecting a language.
+              e.preventDefault()
+              setShowLanguagePicker((v) => !v)
+            }}
+            aria-label={t("settings.language")}
+          >
+            <Languages size={16} />
+            <span>{t("settings.language")}</span>
+            <span className="ml-auto text-lg leading-none">{flagForLocale(locale)}</span>
+          </DropdownMenuItem>
+
+          {showLanguagePicker && (
+            <div className="px-2 pb-2">
+              <div className="grid grid-cols-4 gap-1 rounded-md border border-border bg-background p-2">
+                {(SUPPORTED_LOCALES as readonly Locale[]).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    className={[
+                      "flex items-center justify-center rounded-md p-2 text-xl leading-none hover:bg-muted",
+                      l === locale ? "bg-muted" : "",
+                    ].join(" ")}
+                    onClick={() => {
+                      setLocale(l)
+                      setShowLanguagePicker(false)
+                    }}
+                    aria-label={t(`lang.${l}`)}
+                    title={t(`lang.${l}`)}
+                  >
+                    {flagForLocale(l)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <DropdownMenuItem
+            onSelect={() => {
+              router.push("/account?tab=chatProfile")
+            }}
+          >
+            <Sparkles size={16} />
+            <span>{t("account.nav.chatProfile")}</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onSelect={() => {
+              router.push("/account")
+            }}
+          >
+            <Settings size={16} />
+            <span>{t("auth.accountBilling")}</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={handleLogout}>
+            <LogOut size={16} />
+            <span>{t("auth.signOut")}</span>
+          </DropdownMenuItem>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

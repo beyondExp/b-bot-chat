@@ -59,12 +59,13 @@ export class SimpleVAD {
     
     // Use ScriptProcessor for audio capture (AudioWorklet would be better but more complex)
     this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1)
-    this.analyser.connect(this.scriptProcessor)
-    this.scriptProcessor.connect(this.audioContext.destination)
-    
     this.scriptProcessor.onaudioprocess = (event) => {
       this.processAudio(event.inputBuffer)
     }
+
+    // IMPORTANT:
+    // Start in a paused state. We only connect the processor in `start()`.
+    // This avoids listening too early (e.g., during call greeting audio).
   }
   
   private processAudio(buffer: AudioBuffer) {

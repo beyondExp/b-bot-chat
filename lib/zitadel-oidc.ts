@@ -12,6 +12,8 @@ export function getZitadelUserManagerSettings(): UserManagerSettings {
   const client_id = process.env.NEXT_PUBLIC_ZITADEL_CLIENT_ID || ""
   const scope = process.env.NEXT_PUBLIC_ZITADEL_SCOPES || "openid profile email"
   const resource = process.env.NEXT_PUBLIC_ZITADEL_RESOURCE || ""
+  const postLogoutRedirectUri =
+    (process.env.NEXT_PUBLIC_POST_LOGOUT_REDIRECT_URI || "").trim() || `${window.location.origin}/`
 
   if (!authority) throw new Error("Missing NEXT_PUBLIC_ZITADEL_AUTHORITY")
   if (!client_id) throw new Error("Missing NEXT_PUBLIC_ZITADEL_CLIENT_ID")
@@ -21,7 +23,7 @@ export function getZitadelUserManagerSettings(): UserManagerSettings {
     client_id,
     redirect_uri: `${window.location.origin}/auth/callback`,
     silent_redirect_uri: `${window.location.origin}/auth/silent-renew`,
-    post_logout_redirect_uri: window.location.origin,
+    post_logout_redirect_uri: postLogoutRedirectUri,
     response_type: "code",
     scope,
     automaticSilentRenew: true,

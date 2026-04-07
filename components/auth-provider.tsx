@@ -36,6 +36,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const zitadelClientId = process.env.NEXT_PUBLIC_ZITADEL_CLIENT_ID || ""
   const zitadelScope = process.env.NEXT_PUBLIC_ZITADEL_SCOPES || "openid profile email"
   const zitadelResource = process.env.NEXT_PUBLIC_ZITADEL_RESOURCE || ""
+  // Some IdPs require exact matching including trailing slash. Allow overriding in env.
+  const postLogoutRedirectUri =
+    (process.env.NEXT_PUBLIC_POST_LOGOUT_REDIRECT_URI || "").trim() || `${window.location.origin}/`
   const isZitadelCallbackPath =
     window.location.pathname === "/auth/callback" || window.location.pathname === "/auth/silent-renew"
   const zitadelUserStore = new WebStorageStateStore({ store: window.localStorage })
@@ -47,7 +50,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         client_id={zitadelClientId}
         redirect_uri={`${window.location.origin}/auth/callback`}
         silent_redirect_uri={`${window.location.origin}/auth/silent-renew`}
-        post_logout_redirect_uri={window.location.origin}
+        post_logout_redirect_uri={postLogoutRedirectUri}
         response_type="code"
         scope={zitadelScope}
         automaticSilentRenew={true}

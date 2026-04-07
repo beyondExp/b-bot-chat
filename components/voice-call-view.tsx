@@ -177,7 +177,20 @@ export function VoiceCallView({
 
   // Play next TTS chunk from queue
   const playNextTTSChunk = async () => {
-    if (ttsAutoplayBlocked) return
+    if (ttsAutoplayBlocked) {
+      // If the browser blocks autoplay, don't stall the call UX.
+      // Let the user speak; when they press the volume button we will resume playback.
+      if (vadRef.current && isConnected) {
+        vadRef.current.start()
+      }
+      if (isWaitingForAgent) {
+        setIsWaitingForAgent(false)
+      }
+      setIsAgentSpeaking(false)
+      setIsWaitingForAgent(false)
+      setVadStatusKey("call.status.ready")
+      return
+    }
 
     if (audioQueueRef.current.length === 0) {
       console.log('[VoiceCall] 🔊 TTS playback complete, resuming VAD')
@@ -238,6 +251,15 @@ export function VoiceCallView({
           // Put chunk back at the front so the user can resume.
           audioQueueRef.current.unshift(chunk)
           console.warn('[VoiceCall] 🔇 TTS blocked by browser autoplay policy; waiting for user gesture')
+          // Don't stall listening entirely while audio is blocked.
+          if (vadRef.current && isConnected) {
+            vadRef.current.start()
+          }
+          if (isWaitingForAgent) {
+            setIsWaitingForAgent(false)
+          }
+          setIsAgentSpeaking(false)
+          setVadStatusKey("call.status.ready")
           return
         }
         throw err
@@ -488,12 +510,19 @@ export function VoiceCallView({
         sampleRate: 16000
       })
       
-      vad.start()
       vadRef.current = vad
 
+      // The call usually starts with an agent greeting (see parent `onCallConnected` behavior).
+      // Keep VAD paused until the greeting TTS completes (or until loading finishes without TTS).
       setIsConnected(true)
-      setVadStatusKey("call.status.ready")
-      console.log('[VoiceCall] Call started with VAD')
+      const expectAgentToSpeakFirst = Boolean(onCallConnected)
+      setIsWaitingForAgent(expectAgentToSpeakFirst)
+      setVadStatusKey(expectAgentToSpeakFirst ? "call.status.processing" : "call.status.ready")
+      if (!expectAgentToSpeakFirst) {
+        // No greeting flow: start listening immediately.
+        vad.start()
+      }
+      console.log('[VoiceCall] Call started; VAD state=', expectAgentToSpeakFirst ? 'paused(waiting)' : 'listening')
       onCallConnected?.()
     } catch (error) {
       console.error('[VoiceCall] Error starting call:', error)
@@ -632,7 +661,8 @@ export function VoiceCallView({
               <div 
                 className={cn(
                   "absolute transition-all",
-                  isSpeaking && "bg-gradient-to-br from-primary/60 to-violet-500/40",
+                  // Keep the UI neutral/white (avoid violet tint bleeding into the whole view)
+                  isSpeaking && "bg-gradient-to-br from-primary/45 to-slate-200/45",
                   isAgentSpeaking && "bg-gradient-to-br from-green-500/60 to-emerald-400/40",
                   isCalling && "bg-gradient-to-br from-blue-500/40 to-blue-400/20"
                 )}
@@ -653,7 +683,7 @@ export function VoiceCallView({
               <div 
                 className={cn(
                   "absolute transition-all",
-                  isSpeaking && "bg-gradient-to-tl from-primary/50 to-violet-400/35",
+                  isSpeaking && "bg-gradient-to-tl from-primary/35 to-slate-100/55",
                   isAgentSpeaking && "bg-gradient-to-tl from-green-400/50 to-emerald-300/35"
                 )}
                 style={{
@@ -671,7 +701,7 @@ export function VoiceCallView({
               <div 
                 className={cn(
                   "absolute transition-all opacity-70",
-                  isSpeaking && "bg-gradient-to-r from-violet-500/40 to-primary/30",
+                  isSpeaking && "bg-gradient-to-r from-slate-200/50 to-primary/25",
                   isAgentSpeaking && "bg-gradient-to-r from-emerald-500/40 to-green-400/30"
                 )}
                 style={{
@@ -689,7 +719,7 @@ export function VoiceCallView({
               <div 
                 className={cn(
                   "absolute transition-all opacity-50",
-                  isSpeaking && "bg-gradient-to-bl from-primary/30 to-fuchsia-500/20",
+                  isSpeaking && "bg-gradient-to-bl from-primary/20 to-slate-50/60",
                   isAgentSpeaking && "bg-gradient-to-bl from-green-500/30 to-teal-400/20"
                 )}
                 style={{
