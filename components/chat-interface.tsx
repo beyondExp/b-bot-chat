@@ -1164,7 +1164,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   system_message,
                   apps: mergedApps,
                   distribution_channel: { type: "Chat" },
-                  input_modalities: [],
+                  input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
                 }
               },
@@ -1326,7 +1326,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   system_message,
                   apps: mergedApps,
                   distribution_channel: { type: "Chat" },
-                  input_modalities: [], // No special input modalities needed (audio is in content)
+                  input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
                 }
               },
@@ -1616,7 +1616,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               system_message,
               apps: mergedApps,
               distribution_channel: { type: "Chat" },
-              input_modalities: [],
+              input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
               output_modalities: finalOutputModalities,
             },
           },
@@ -1749,7 +1749,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               system_message,
               apps: mergedApps,
               distribution_channel: { type: "Chat" },
-              input_modalities: [],
+              input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
               output_modalities: finalOutputModalities,
             }
           },

@@ -1212,8 +1212,9 @@
 
 .discover-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1rem;
+  /* Slightly smaller cards so the grid feels contained */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
 }
 
 @media (max-width: 640px) {
@@ -1223,7 +1224,7 @@
 }
 
 .agent-card {
-  border-radius: 2rem;
+  border-radius: 1.25rem;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--card));
   overflow: hidden;
@@ -1240,11 +1241,11 @@
 
 .agent-card-badge {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  padding: 0.25rem 0.5rem;
+  top: 0.6rem;
+  right: 0.6rem;
+  padding: 0.2rem 0.45rem;
   border-radius: 2rem;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 500;
   z-index: 1;
 }
@@ -1265,21 +1266,21 @@
 }
 
 .agent-card-image-container {
-  padding: 1.5rem;
+  padding: 0.9rem;
   display: flex;
   justify-content: center;
   background-color: hsla(var(--muted), 0.5);
 }
 
 .agent-card-image {
-  width: 80px;
-  height: 80px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   object-fit: cover;
 }
 
 .agent-card-content {
-  padding: 1rem;
+  padding: 0.8rem;
   flex: 1;
 }
 
@@ -1293,16 +1294,22 @@
 }
 
 .agent-card-title {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   margin-bottom: 0.25rem;
 }
 
 .agent-card-description {
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   color: hsl(var(--muted-foreground));
   margin-bottom: 0.75rem;
   line-height: 1.4;
+  /* Keep cards compact */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 
 /* Publisher info in agent card */
@@ -1310,8 +1317,8 @@
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  margin-bottom: 0.75rem;
-  padding: 0.375rem 0.5rem;
+  margin-bottom: 0.6rem;
+  padding: 0.3rem 0.45rem;
   background-color: hsla(var(--muted), 0.5);
   border-radius: 0.5rem;
   cursor: pointer;
@@ -1347,7 +1354,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.375rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
 }
 
 .agent-card-ability,
@@ -1355,10 +1362,10 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0.2rem 0.45rem;
   border-radius: 1rem;
   background-color: hsla(var(--muted), 0.5);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: hsl(var(--foreground));
 }
 
@@ -1369,7 +1376,7 @@
 }
 
 .agent-card-button {
-  padding: 0.75rem;
+  padding: 0.6rem 0.75rem;
   background-color: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
   font-weight: 500;
@@ -1382,7 +1389,7 @@
 }
 
 .agent-card-contact-button {
-  padding: 0.75rem;
+  padding: 0.6rem 0.75rem;
   background-color: hsl(var(--muted));
   color: hsl(var(--foreground));
   font-weight: 500;
