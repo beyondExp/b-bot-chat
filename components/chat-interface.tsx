@@ -1083,6 +1083,18 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     setCurrentSession(session);
   }, [thread.messages, currentSession, selectedAgent, user?.sub]);
 
+  const coerceAppsDict = (value: any): Record<string, any> => {
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
+  };
+
+  const pickAppsDict = (...candidates: any[]): Record<string, any> => {
+    for (const c of candidates) {
+      const d = coerceAppsDict(c);
+      if (Object.keys(d).length > 0) return d;
+    }
+    return {};
+  };
+
   // Function to handle sending a message with streaming
   const handleSendMessage = async (messageContent: string) => {
     setToolEvents([]); // Clear previous tool events
@@ -1100,10 +1112,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
           // Merge assistant apps with user apps (user apps take precedence)
           const agentObj = agents.find((a: any) => a.id === selectedAgent);
-          const assistantApps = agentObj?.rawData?.config?.apps || {};
+          const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
+          const assistantApps = pickAppsDict(
+            (config as any)?.apps,
+            agentObj?.rawData?.apps,
+            agentObj?.rawData?.metadata?.apps,
+            agentObj?.rawData?.config?.apps,
+            agentObj?.rawData?.metadata?.config?.apps,
+          );
           const userApps = {};
           const mergedApps = { ...assistantApps, ...userApps };
-          const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
           const userProfile = loadChatUserProfile(user?.sub || "anonymous")
           const baseSystemMessage =
             (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
@@ -1152,7 +1170,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               ...(hasQueuedFiles ? { files: queuedFiles } : {}),
             },
             {
-              config: {
+              config: ({
                 apps: mergedApps,
                 configurable: {
                   agent_id: agentId,
@@ -1168,7 +1186,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
                 }
-              },
+              } as any),
               streamMode: ["values", "messages", "updates", "custom"], // Full stream modes
               optimisticValues: (prev) => ({
                 ...prev,
@@ -1237,10 +1255,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
           // Merge assistant apps with user apps and get modalities
           const agentObj = agents.find((a: any) => a.id === selectedAgent);
-          const assistantApps = agentObj?.rawData?.config?.apps || {};
+          const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
+          const assistantApps = pickAppsDict(
+            (config as any)?.apps,
+            agentObj?.rawData?.apps,
+            agentObj?.rawData?.metadata?.apps,
+            agentObj?.rawData?.config?.apps,
+            agentObj?.rawData?.metadata?.config?.apps,
+          );
           const userApps = {};
           const mergedApps = { ...assistantApps, ...userApps };
-          const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
           const userProfile = loadChatUserProfile(user?.sub || "anonymous")
           const baseSystemMessage =
             (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
@@ -1315,7 +1339,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               ...(hasQueuedFiles ? { files: queuedFiles } : {}),
             },
             {
-              config: {
+              config: ({
                 apps: mergedApps,
                 configurable: {
                   agent_id: agentId,
@@ -1331,7 +1355,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
                 }
-              },
+              } as any),
           streamMode: ["values", "messages", "updates", "custom"], // Full stream modes
           optimisticValues: (prev) => ({
             ...prev,
@@ -1586,7 +1610,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
       const finalOutputModalities = isBBot && outputModalities.length === 0 ? defaultBBotTTS : outputModalities
 
-      const assistantApps = agentObj?.rawData?.config?.apps || {}
+      const assistantApps = pickAppsDict(
+        (config as any)?.apps,
+        agentObj?.rawData?.apps,
+        agentObj?.rawData?.metadata?.apps,
+        agentObj?.rawData?.config?.apps,
+        agentObj?.rawData?.metadata?.config?.apps,
+      )
       const userApps = {}
       const mergedApps = { ...assistantApps, ...userApps }
 
@@ -1606,7 +1636,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           agent_id: agentId,
         },
         {
-          config: {
+          config: ({
             apps: mergedApps,
             configurable: {
               agent_id: agentId,
@@ -1622,7 +1652,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
               output_modalities: finalOutputModalities,
             },
-          },
+          } as any),
           streamMode: ["values", "messages", "updates", "custom"],
           optimisticValues: (prev) => ({
             ...prev,
@@ -1722,7 +1752,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         : outputModalities;
 
       // Merge assistant apps with user apps as OBJECTS (not arrays!)
-      const assistantApps = agentObj?.rawData?.config?.apps || {};
+      const assistantApps = pickAppsDict(
+        (config as any)?.apps,
+        agentObj?.rawData?.apps,
+        agentObj?.rawData?.metadata?.apps,
+        agentObj?.rawData?.config?.apps,
+        agentObj?.rawData?.metadata?.config?.apps,
+      );
       const userApps = {};
       const mergedApps = { ...assistantApps, ...userApps };
 
@@ -1740,7 +1776,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           agent_id: agentId
         },
         {
-          config: {
+          config: ({
             apps: mergedApps,
             configurable: {
               agent_id: agentId,
@@ -1756,7 +1792,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
               output_modalities: finalOutputModalities,
             }
-          },
+          } as any),
           streamMode: ["values", "messages", "updates", "custom"],
           optimisticValues: (prev) => ({
             ...prev,
