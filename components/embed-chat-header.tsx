@@ -64,7 +64,7 @@ export function EmbedChatHeader({
       
       <div className="flex items-center gap-2">
         <Button
-          variant="outline"
+          variant="outlinePrimary"
           size="sm"
           onClick={onShowHistory}
           className="gap-2 hidden"

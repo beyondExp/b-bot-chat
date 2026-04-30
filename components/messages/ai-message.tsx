@@ -116,7 +116,7 @@ export function AIMessage({
             ) : (
               <Button
                 size="sm"
-                variant="outline"
+                variant="outlinePrimary"
                 onClick={handleGenerateTTS}
                 disabled={isGeneratingAudio}
                 className="gap-2"

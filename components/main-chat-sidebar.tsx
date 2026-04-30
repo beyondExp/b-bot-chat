@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { Trash2, MessageSquare, Plus, Search, X } from 'lucide-react'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Trash2, MessageSquare, PenLine, Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { ChatSession, ChatHistoryManager } from '@/lib/chat-history'
 import { cn } from '@/lib/utils'
@@ -358,13 +358,12 @@ export function MainChatSidebar({
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent side="left" className="w-80 p-0 flex flex-col">
         <SheetHeader className="p-4 border-b space-y-3">
-          <SheetTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5" />
-            {currentAgentName}
+          <SheetTitle className="flex items-center justify-center">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5" />
+              <span className="truncate">{currentAgentName}</span>
+            </div>
           </SheetTitle>
-          <SheetDescription>
-            {t("sidebar.description")}
-          </SheetDescription>
           
           {/* Search Input */}
           <div className="relative">
@@ -466,10 +465,10 @@ export function MainChatSidebar({
               onNewChat()
               onClose()
             }}
-            className="w-full flex items-center gap-2"
-            variant="default"
+            className="w-full flex items-center justify-center gap-2 rounded-full border border-primary/25 bg-primary/10 text-primary hover:bg-primary/15 shadow-sm"
+            variant="outline"
           >
-            <Plus className="h-4 w-4" />
+            <PenLine className="h-4 w-4" />
             {t("sidebar.newChat")}
           </Button>
         </div>

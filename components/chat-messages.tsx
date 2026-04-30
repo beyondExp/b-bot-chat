@@ -87,10 +87,9 @@ export function ChatMessages({
             {welcomeSuggestions.slice(0, 3).map((suggestion) => (
               <Button
                 key={suggestion}
-                variant="outline"
+                variant="outlineTemplate"
                 onClick={() => onSuggestionClick(suggestion)}
                 className="w-full h-auto items-start text-left text-sm whitespace-normal break-words"
-                style={{ backgroundColor: userColor, color: getContrastYIQ(userColor) }}
               >
                 {suggestion}
               </Button>

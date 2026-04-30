@@ -650,178 +650,156 @@ export function VoiceCallView({
   }
 
   return (
-    <div className="flex flex-col h-screen bg-white text-gray-900">
-      {/* Call UI - Fixed at top */}
-      <div className="flex-shrink-0 flex flex-col items-center justify-center py-12">
-        {/* Agent Avatar with Blob Animation */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="relative mb-6" style={{ width: '160px', height: '160px' }}>
-            {/* Outer morphing blob - only visible when active */}
-            {(isSpeaking || isAgentSpeaking || isCalling) && (
-              <div 
-                className={cn(
-                  "absolute transition-all",
-                  // Keep the UI neutral/white (avoid violet tint bleeding into the whole view)
-                  isSpeaking && "bg-gradient-to-br from-primary/45 to-slate-200/45",
-                  isAgentSpeaking && "bg-gradient-to-br from-green-500/60 to-emerald-400/40",
-                  isCalling && "bg-gradient-to-br from-blue-500/40 to-blue-400/20"
-                )}
-                style={{
-                  inset: `-${15 + audioAmplitude * 50}px`,
-                  // VERY dramatic blob shape morphing
-                  borderRadius: `${70 - audioAmplitude * 35}% ${30 + audioAmplitude * 45}% ${60 + audioAmplitude * 30}% ${40 - audioAmplitude * 35}% / ${35 + audioAmplitude * 40}% ${65 - audioAmplitude * 35}% ${30 + audioAmplitude * 45}% ${70 - audioAmplitude * 40}%`,
-                  transform: `scale(${1 + audioAmplitude * 0.35}) rotate(${audioAmplitude * 25}deg)`,
-                  filter: `blur(${8 + audioAmplitude * 12}px)`,
-                  transition: 'border-radius 0.05s ease-out, transform 0.05s ease-out, filter 0.05s ease-out, inset 0.05s ease-out',
-                  animation: (isSpeaking || isAgentSpeaking) ? 'none' : 'blob-idle 4s ease-in-out infinite',
-                }}
-              />
-            )}
-            
-            {/* Inner morphing blob layer - MUCH more intense */}
-            {(isSpeaking || isAgentSpeaking) && (
-              <div 
-                className={cn(
-                  "absolute transition-all",
-                  isSpeaking && "bg-gradient-to-tl from-primary/35 to-slate-100/55",
-                  isAgentSpeaking && "bg-gradient-to-tl from-green-400/50 to-emerald-300/35"
-                )}
-                style={{
-                  inset: `-${10 + audioAmplitude * 35}px`,
-                  borderRadius: `${35 + audioAmplitude * 40}% ${65 - audioAmplitude * 35}% ${40 + audioAmplitude * 35}% ${60 - audioAmplitude * 40}% / ${65 - audioAmplitude * 35}% ${35 + audioAmplitude * 40}% ${60 - audioAmplitude * 30}% ${40 + audioAmplitude * 35}%`,
-                  transform: `scale(${1 + audioAmplitude * 0.25}) rotate(${-audioAmplitude * 35}deg)`,
-                  filter: `blur(${6 + audioAmplitude * 10}px)`,
-                  transition: 'border-radius 0.04s ease-out, transform 0.04s ease-out, inset 0.04s ease-out',
-                }}
-              />
-            )}
-            
-            {/* Third blob layer for extra depth when active */}
-            {(isSpeaking || isAgentSpeaking) && audioAmplitude > 0.15 && (
-              <div 
-                className={cn(
-                  "absolute transition-all opacity-70",
-                  isSpeaking && "bg-gradient-to-r from-slate-200/50 to-primary/25",
-                  isAgentSpeaking && "bg-gradient-to-r from-emerald-500/40 to-green-400/30"
-                )}
-                style={{
-                  inset: `-${audioAmplitude * 60}px`,
-                  borderRadius: `${55 + audioAmplitude * 30}% ${45 - audioAmplitude * 30}% ${55 + audioAmplitude * 25}% ${45 - audioAmplitude * 25}%`,
-                  transform: `rotate(${45 + audioAmplitude * 50}deg) scale(${1 + audioAmplitude * 0.2})`,
-                  filter: `blur(${12 + audioAmplitude * 15}px)`,
-                  transition: 'all 0.06s ease-out',
-                }}
-              />
-            )}
-            
-            {/* Fourth blob layer - appears at high amplitude */}
-            {(isSpeaking || isAgentSpeaking) && audioAmplitude > 0.4 && (
-              <div 
-                className={cn(
-                  "absolute transition-all opacity-50",
-                  isSpeaking && "bg-gradient-to-bl from-primary/20 to-slate-50/60",
-                  isAgentSpeaking && "bg-gradient-to-bl from-green-500/30 to-teal-400/20"
-                )}
-                style={{
-                  inset: `-${audioAmplitude * 80}px`,
-                  borderRadius: `${45 + audioAmplitude * 25}% ${55 - audioAmplitude * 25}% ${50 + audioAmplitude * 20}% ${50 - audioAmplitude * 20}%`,
-                  transform: `rotate(${-30 + audioAmplitude * 60}deg)`,
-                  filter: `blur(${15 + audioAmplitude * 20}px)`,
-                  transition: 'all 0.08s ease-out',
-                }}
-              />
-            )}
-            
-            {/* Waiting state - pulsing glow */}
-            {(isWaitingForAgent || isLoading) && !isAgentSpeaking && !isCalling && (
-              <div 
-                className="absolute inset-0 bg-gradient-to-br from-yellow-500/30 to-amber-400/20 rounded-full animate-pulse"
-                style={{
-                  transform: 'scale(1.15)',
-                  filter: 'blur(8px)',
-                }}
-              />
-            )}
-            
-            {/* Main avatar with visible morph */}
-            <div 
+    <div className="flex min-h-svh flex-col bg-background text-foreground">
+      {/* Header (name on top) */}
+      <div className="flex-shrink-0 pt-10 text-center">
+        <div className="text-2xl font-semibold tracking-tight">{agentName}</div>
+        <p
+          className={cn(
+            "mt-2 text-sm transition-all duration-300",
+            isCalling
+              ? "text-blue-600 animate-pulse font-medium"
+              : isSpeaking
+                ? "text-primary font-medium"
+                : isAgentSpeaking
+                  ? "text-green-600 font-medium"
+                  : isWaitingForAgent || isLoading
+                    ? "text-yellow-600 font-medium"
+                    : "text-muted-foreground",
+          )}
+        >
+          {vadStatusKey === "call.status.error"
+            ? t("call.status.error").replace("{message}", vadError || "")
+            : t(vadStatusKey)}
+        </p>
+        {isConnected && !isCalling && (
+          <p className="mt-1 text-xs text-muted-foreground">{formatDuration(callDuration)}</p>
+        )}
+      </div>
+
+      {/* Middle (round avatar in the center) */}
+      <div className="flex-1 min-h-0 px-6 flex flex-col items-center justify-center gap-8">
+        <div className="relative h-44 w-44">
+          {(isSpeaking || isAgentSpeaking || isCalling || isWaitingForAgent || isLoading) && (
+            <div
               className={cn(
-                "absolute inset-3 overflow-hidden shadow-2xl transition-all",
-                isSpeaking && "ring-4 ring-primary/80",
-                isAgentSpeaking && "ring-4 ring-green-500/80",
-                (isWaitingForAgent || isLoading) && !isAgentSpeaking && "ring-4 ring-yellow-500/60 animate-pulse",
-                isCalling && "ring-4 ring-blue-500/60",
-                !isSpeaking && !isAgentSpeaking && !isWaitingForAgent && !isLoading && !isCalling && "ring-2 ring-gray-200"
+                "absolute -inset-6 rounded-full blur-2xl opacity-70 transition-colors",
+                isSpeaking && "bg-primary/25",
+                isAgentSpeaking && "bg-emerald-400/25",
+                isCalling && "bg-blue-500/20",
+                (isWaitingForAgent || isLoading) && !isAgentSpeaking && !isCalling && "bg-amber-400/20",
               )}
-              style={{
-                borderRadius: "1rem",
-                transform: `scale(${1 + audioAmplitude * 0.1})`,
-                transition: 'transform 0.05s ease-out',
-              }}
-            >
-              <Image
-                src={agentAvatar}
-                alt={agentName}
-                fill
-                className="object-cover"
-              />
-            </div>
-            
-            {/* Pulsing rings during call setup */}
-            {isCalling && (
-              <>
-                <div className="absolute inset-0 rounded-full border-4 border-blue-500/60 animate-ping" style={{ animationDuration: '2s' }} />
-                <div className="absolute inset-0 rounded-full border-4 border-blue-400/40 animate-ping" style={{ animationDuration: '2s', animationDelay: '1s' }} />
-              </>
+            />
+          )}
+
+          <div
+            className={cn(
+              "relative h-full w-full overflow-hidden rounded-full bg-muted shadow-xl ring-2 transition-all",
+              isSpeaking && "ring-primary/70",
+              isAgentSpeaking && "ring-emerald-400/70",
+              (isWaitingForAgent || isLoading) && !isAgentSpeaking && !isCalling && "ring-amber-400/60",
+              isCalling && "ring-blue-500/60",
+              !isSpeaking && !isAgentSpeaking && !isWaitingForAgent && !isLoading && !isCalling && "ring-border",
             )}
+            style={{
+              transform: `scale(${1 + audioAmplitude * 0.06})`,
+              transition: "transform 0.06s ease-out",
+            }}
+          >
+            <Image src={agentAvatar} alt={agentName} fill className="object-cover" />
           </div>
-          
-          <h2 className="text-2xl font-semibold mb-1 text-gray-900">{agentName}</h2>
-          <p className={cn(
-            "text-sm transition-all duration-300",
-            isCalling ? "text-blue-600 animate-pulse font-medium" : 
-            isSpeaking ? "text-primary font-medium" :
-            isAgentSpeaking ? "text-green-600 font-medium" :
-            (isWaitingForAgent || isLoading) ? "text-yellow-600 font-medium" :
-            "text-gray-600"
-          )}>
-            {vadStatusKey === "call.status.error"
-              ? t("call.status.error").replace("{message}", vadError || "")
-              : t(vadStatusKey)}
-          </p>
-          {isConnected && !isCalling && (
-            <p className="text-xs text-gray-500 mt-1">{formatDuration(callDuration)}</p>
+
+          {/* Pulsing rings during call setup */}
+          {isCalling && (
+            <>
+              <div className="absolute inset-0 rounded-full border-2 border-blue-500/50 animate-ping" style={{ animationDuration: "2s" }} />
+              <div
+                className="absolute inset-0 rounded-full border-2 border-blue-400/30 animate-ping"
+                style={{ animationDuration: "2s", animationDelay: "1s" }}
+              />
+            </>
           )}
         </div>
-        
-        {/* CSS for idle blob animation */}
-        <style jsx>{`
-          @keyframes blob-idle {
-            0%, 100% { 
-              border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; 
-            }
-            25% { 
-              border-radius: 45% 55% 50% 50% / 55% 45% 55% 45%; 
-            }
-            50% { 
-              border-radius: 55% 45% 45% 55% / 50% 50% 50% 50%; 
-            }
-            75% { 
-              border-radius: 40% 60% 55% 45% / 45% 55% 45% 55%; 
-            }
-          }
-        `}</style>
 
-        {/* Call Controls */}
-        <div className="flex items-center gap-6 mb-4">
+        {/* Optional transcript preview */}
+        {messages.length > 0 && (
+          <div className="w-full max-w-2xl max-h-[30vh] overflow-y-auto rounded-2xl border border-border bg-muted/30 p-3">
+            <div className="text-center mb-4">
+              <div className="inline-block px-3 py-1 rounded-full bg-muted text-xs text-muted-foreground font-medium">
+                {t("call.transcript")}
+              </div>
+            </div>
+            {messages.map((msg, idx) => {
+              const text = getMessageText(msg.content)
+              const isAudio = hasAudioContent(msg.content)
+              const isUser = msg.role === 'user' || msg.type === 'human'
+
+              // Skip messages with no content at all
+              if (!text && !isAudio) return null
+
+              return (
+                <div
+                  key={msg.id || idx}
+                  className={cn(
+                    "flex",
+                    isUser ? "justify-end" : "justify-start"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "max-w-[85%] px-4 py-2 rounded-2xl shadow-sm",
+                      isUser
+                        ? "bg-primary text-primary-foreground rounded-br-sm"
+                        : "bg-background text-foreground rounded-bl-sm border border-border"
+                    )}
+                  >
+                    {isAudio && !text ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Mic className="w-4 h-4" />
+                        <span className="italic opacity-80">Voice message</span>
+                      </div>
+                    ) : (
+                      <div className={cn(
+                        "text-sm prose prose-sm max-w-none",
+                        isUser ? "prose-invert" : "prose-gray dark:prose-invert"
+                      )}>
+                        <ReactMarkdown
+                          components={{
+                            p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+                            ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
+                            ol: ({ children }) => <ol className="my-1 ml-4 list-decimal">{children}</ol>,
+                            li: ({ children }) => <li className="mb-0.5">{children}</li>,
+                            code: ({ children }) => <code className="bg-muted rounded px-1 py-0.5 text-xs">{children}</code>,
+                            pre: ({ children }) => <pre className="bg-muted rounded p-2 my-1 overflow-x-auto text-xs">{children}</pre>,
+                            a: ({ href, children }) => <a href={href} className="underline" target="_blank" rel="noopener noreferrer">{children}</a>,
+                            strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                            em: ({ children }) => <em className="italic">{children}</em>,
+                          }}
+                        >
+                          {text}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Footer (controls at bottom) */}
+      <div className="flex-shrink-0 pb-[max(2rem,env(safe-area-inset-bottom))] pt-6">
+        <div className="flex items-center justify-center gap-6">
           <Button
             variant="outline"
             size="icon"
-            className="w-14 h-14 rounded-full border-gray-300 hover:bg-gray-100 shadow-md"
+            className="w-14 h-14 rounded-full border-border hover:bg-muted shadow-md"
             onClick={toggleMute}
             disabled={isCalling}
           >
-            {isMuted ? <MicOff className="w-6 h-6 text-gray-700" /> : <Mic className="w-6 h-6 text-gray-700" />}
+            {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
           </Button>
 
           <Button
@@ -836,25 +814,20 @@ export function VoiceCallView({
           <Button
             variant="outline"
             size="icon"
-            className="w-14 h-14 rounded-full border-gray-300 hover:bg-gray-100 opacity-50 shadow-md"
+            className="w-14 h-14 rounded-full border-border hover:bg-muted shadow-md disabled:opacity-50"
             disabled={!ttsAutoplayBlocked}
             onClick={() => {
               setTtsAutoplayBlocked(false)
               void playNextTTSChunk()
             }}
           >
-            {ttsAutoplayBlocked ? (
-              <VolumeX className="w-6 h-6 text-gray-700" />
-            ) : (
-              <Volume2 className="w-6 h-6 text-gray-700" />
-            )}
+            {ttsAutoplayBlocked ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
           </Button>
         </div>
 
-        {/* Status Indicator */}
         {!isCalling && (
-          <div className="text-center">
-            <p className="text-xs text-gray-600">
+          <div className="mt-4 text-center">
+            <p className="text-xs text-muted-foreground">
               {isAgentSpeaking
                 ? t("call.indicator.agentSpeaking")
                 : isSpeaking
@@ -866,78 +839,6 @@ export function VoiceCallView({
           </div>
         )}
       </div>
-
-      {/* Messages Display - Scrollable */}
-      {messages.length > 0 && (
-        <div className="flex-1 overflow-y-auto px-4 pb-4 bg-gray-50">
-          <div className="max-w-2xl mx-auto space-y-3 pt-4">
-            <div className="text-center mb-4">
-              <div className="inline-block px-3 py-1 rounded-full bg-gray-200 text-xs text-gray-600 font-medium">
-                {t("call.transcript")}
-              </div>
-            </div>
-            {messages.map((msg, idx) => {
-              const text = getMessageText(msg.content)
-              const isAudio = hasAudioContent(msg.content)
-              const isUser = msg.role === 'user' || msg.type === 'human'
-              
-              // Skip messages with no content at all
-              if (!text && !isAudio) return null
-              
-              return (
-                <div
-                  key={msg.id || idx}
-                  className={cn(
-                    "flex",
-                    isUser ? "justify-end" : "justify-start"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "max-w-[85%] px-4 py-2 rounded-2xl shadow-sm",
-                      isUser
-                        ? "bg-primary text-primary-foreground rounded-br-sm"
-                        : "bg-white text-gray-900 rounded-bl-sm border border-gray-200"
-                    )}
-                  >
-                    {isAudio && !text ? (
-                      // Audio-only message
-                      <div className="flex items-center gap-2 text-sm">
-                        <Mic className="w-4 h-4" />
-                        <span className="italic opacity-80">Voice message</span>
-                      </div>
-                    ) : (
-                      // Text message with markdown rendering
-                      <div className={cn(
-                        "text-sm prose prose-sm max-w-none",
-                        isUser ? "prose-invert" : "prose-gray"
-                      )}>
-                        <ReactMarkdown
-                          components={{
-                            p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
-                            ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
-                            ol: ({ children }) => <ol className="my-1 ml-4 list-decimal">{children}</ol>,
-                            li: ({ children }) => <li className="mb-0.5">{children}</li>,
-                            code: ({ children }) => <code className="bg-black/10 rounded px-1 py-0.5 text-xs">{children}</code>,
-                            pre: ({ children }) => <pre className="bg-black/10 rounded p-2 my-1 overflow-x-auto text-xs">{children}</pre>,
-                            a: ({ href, children }) => <a href={href} className="underline" target="_blank" rel="noopener noreferrer">{children}</a>,
-                            strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                            em: ({ children }) => <em className="italic">{children}</em>,
-                          }}
-                        >
-                          {text}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-            {/* Scroll anchor */}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-      )}
     </div>
   )
 }

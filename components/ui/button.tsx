@@ -14,6 +14,22 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:
           "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        outlinePrimary:
+          "relative overflow-hidden border border-primary/50 bg-transparent text-primary shadow-sm hover:border-primary/70 " +
+          "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:rounded-[inherit] before:content-[''] " +
+          "before:opacity-0 before:h-full before:w-[55%] before:-translate-x-[140%] " +
+          "before:bg-[linear-gradient(90deg,transparent,hsl(var(--primary)_/_0.22),transparent)] " +
+          "hover:before:animate-bbot-sweep " +
+          "[&>*]:relative [&>*]:z-10",
+        outlineTemplate:
+          "relative overflow-hidden border-2 border-black bg-transparent text-black shadow-sm " +
+          "hover:border-black hover:text-black " +
+          "dark:border-white dark:text-white dark:hover:border-white dark:hover:text-white " +
+          "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:rounded-[inherit] before:content-[''] " +
+          "before:opacity-0 before:h-full before:w-[58%] before:-translate-x-[140%] " +
+          "before:bg-[linear-gradient(90deg,transparent,hsl(var(--primary)_/_0.32),transparent)] " +
+          "hover:before:animate-bbot-sweep " +
+          "[&>*]:relative [&>*]:z-10",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",

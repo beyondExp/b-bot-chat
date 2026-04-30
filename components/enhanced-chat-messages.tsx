@@ -394,6 +394,26 @@ export function EnhancedChatMessages({
     return -1
   })()
 
+  const welcomeTitleText = welcomeTitle || t("welcome.fallbackTitle").replace("{name}", getAgentName())
+  const renderSwissStyled = (text: string) => {
+    // Highlight the word "Swiss" (red fill with black outline) for Swiss Chat welcome.
+    // If the string doesn't include "Swiss", render it as-is.
+    if (!text.includes("Swiss")) return text
+    const parts = text.split(/(Swiss)/g)
+    return parts.map((part, i) =>
+      part === "Swiss" ? (
+        <span
+          key={`swiss-${i}`}
+          className="text-primary font-extrabold"
+        >
+          Swiss
+        </span>
+      ) : (
+        <span key={`swiss-part-${i}`}>{part}</span>
+      ),
+    )
+  }
+
   return (
     <div className="chat-messages p-4 space-y-2">
       {messages.length === 0 ? (
@@ -403,7 +423,7 @@ export function EnhancedChatMessages({
             <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
           </Avatar>
           <h2 className="text-2xl font-bold mb-2">
-            {welcomeTitle || t("welcome.fallbackTitle").replace("{name}", getAgentName())}
+            {renderSwissStyled(welcomeTitleText)}
           </h2>
           <p className="text-gray-500 mb-6 text-center max-w-md">
             {welcomeSubtitle || t("welcome.fallbackSubtitle")}
@@ -412,10 +432,9 @@ export function EnhancedChatMessages({
             {welcomeSuggestions.slice(0, 3).map((suggestion) => (
               <Button
                 key={suggestion}
-                variant="outline"
+                variant="outlineTemplate"
                 onClick={() => onSuggestionClick(suggestion)}
                 className="w-full h-auto items-start text-left text-sm whitespace-normal break-words"
-                style={{ backgroundColor: userColor, color: getContrastYIQ(userColor) }}
               >
                 {suggestion}
               </Button>
@@ -518,7 +537,7 @@ export function EnhancedChatMessages({
                               <Button
                                 key={`${s.value}-${i}`}
                                 type="button"
-                                variant="outline"
+                                variant="outlinePrimary"
                                 size="sm"
                                 onClick={() => {
                                   if (s.action !== "send_message") return
@@ -530,7 +549,14 @@ export function EnhancedChatMessages({
                               </Button>
                             ))
                           : Array.from({ length: 3 }).map((_, i) => (
-                              <Button key={`loading-${i}`} type="button" variant="outline" size="sm" disabled className="h-auto">
+                              <Button
+                                key={`loading-${i}`}
+                                type="button"
+                                variant="outlinePrimary"
+                                size="sm"
+                                disabled
+                                className="h-auto opacity-70"
+                              >
                                 {t("followups.loading")}
                               </Button>
                             ))}

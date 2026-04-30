@@ -185,13 +185,13 @@ export function ContactsPage({
         </div>
         
         {/* Search Input */}
-        <div className="relative">
+        <div className="relative w-full max-w-md mx-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder={t("contacts.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 pr-9"
+            className="pl-9 pr-9 h-10 rounded-full bg-muted/20 border-border/60"
           />
           {searchQuery && (
             <button
@@ -215,7 +215,8 @@ export function ContactsPage({
               <p className="text-sm mb-6">{t("contacts.discoverToStart")}</p>
               <Button
                 onClick={onDiscoverAgents}
-                className="mx-auto"
+                variant="outline"
+                className="mx-auto rounded-full border-primary/25 bg-primary/10 text-primary hover:bg-primary/15 shadow-sm"
               >
                 <Sparkles className="h-4 w-4 mr-2" />
                 {t("contacts.discoverAgents")}
@@ -355,16 +356,18 @@ export function ContactsPage({
       </ScrollArea>
 
       {/* Action Buttons */}
-      <div className="p-4 border-t bg-background space-y-2">
-        <Button
-          onClick={onDiscoverAgents}
-          className="w-full flex items-center gap-2"
-          variant="default"
-        >
-          <Sparkles className="h-4 w-4" />
-          {t("contacts.discoverAgents")}
-        </Button>
-      </div>
+      {contacts.length > 0 && (
+        <div className="p-4 border-t bg-background space-y-2">
+          <Button
+            onClick={onDiscoverAgents}
+            className="w-full flex items-center justify-center gap-2 rounded-full border border-primary/25 bg-primary/10 text-primary hover:bg-primary/15 shadow-sm"
+            variant="outline"
+          >
+            <Sparkles className="h-4 w-4" />
+            {t("contacts.discoverAgents")}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
