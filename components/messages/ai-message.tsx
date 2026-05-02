@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { messageMetadataManager } from "@/lib/message-metadata";
 import { VoiceMessagePlayer } from "@/components/voice-message-player";
 import { Button } from "@/components/ui/button";
@@ -99,7 +100,7 @@ export function AIMessage({
         {contentString.length > 0 && (
           <div>
             <div className="prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown>{contentString}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{contentString}</ReactMarkdown>
             </div>
           </div>
         )}

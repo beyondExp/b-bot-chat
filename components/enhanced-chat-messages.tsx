@@ -10,6 +10,7 @@ import { HumanMessage } from "./messages/human-message"
 import { AIMessage } from "./messages/ai-message"
 import { ensureToolCallsHaveResponses, DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { useI18n } from "@/lib/i18n"
 
 import { StreamingAudioPlayer } from "./streaming-audio-player"
@@ -510,7 +511,7 @@ export function EnhancedChatMessages({
                         <div className="py-1 w-full max-w-3xl">
                           <div className="p-3 bg-muted rounded-lg w-full">
                             <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
-                              <ReactMarkdown>{message.content}</ReactMarkdown>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                             </div>
                             
                             {/* 🔊 TTS Audio Player: Show if this message has audio chunks */}
@@ -578,7 +579,7 @@ export function EnhancedChatMessages({
                 </Avatar>
                 <div className="p-3 bg-muted rounded-lg">
                   <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
-                    <ReactMarkdown>{incomingMessage}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{incomingMessage}</ReactMarkdown>
                   </div>
                 </div>
               </div>

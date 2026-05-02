@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import clsx from "clsx"
 import { Wrench, CheckCircle } from 'lucide-react'
 
@@ -129,7 +130,7 @@ export function ChatMessages({
                   <Card className={`p-3 ${(message.role === "user" || message.type === "human") ? "" : "bg-muted"}`}
                     style={(message.role === "user" || message.type === "human") ? { backgroundColor: userColor, color: getContrastYIQ(userColor) } : {}}>
                     <div className="prose prose-sm dark:prose-invert">
-                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                     </div>
                   </Card>
                 </div>
@@ -147,7 +148,7 @@ export function ChatMessages({
                 </Avatar>
                 <Card className="p-3 bg-muted">
                   <div className="prose prose-sm dark:prose-invert">
-                    <ReactMarkdown>{incomingMessage}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{incomingMessage}</ReactMarkdown>
                   </div>
                 </Card>
               </div>

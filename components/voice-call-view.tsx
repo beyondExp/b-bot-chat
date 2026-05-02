@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import Image from "next/image"
 import { SimpleVAD } from '@/lib/simple-vad'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useI18n } from "@/lib/i18n"
 
 interface VoiceCallViewProps {
@@ -764,6 +765,7 @@ export function VoiceCallView({
                         isUser ? "prose-invert" : "prose-gray dark:prose-invert"
                       )}>
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
                           components={{
                             p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
                             ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
