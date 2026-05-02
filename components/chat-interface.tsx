@@ -38,6 +38,12 @@ interface ChatInterfaceProps {
   initialAgent?: string | null
 }
 
+type ChatStreamMessage = {
+  id?: string
+  type?: string
+  content?: unknown
+}
+
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const { user, isAuthenticated, getAccessTokenSilently, provider } = useAppAuth()
   const { t, locale } = useI18n()
@@ -753,7 +759,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Chat error:", errorMessage);
     },
-    onFinish: () => {
+    onFinish: (state: { values?: { messages?: ChatStreamMessage[] } }) => {
       console.log("Stream finished");
       try {
         const pending = pendingFollowUpsRef.current
@@ -766,7 +772,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         pendingFollowUpsRef.current = null
         setFollowUpSuggestionsLoading(false)
       }
-      saveCurrentSession();
+      const finalMessages = state.values?.messages
+      saveCurrentSession(Array.isArray(finalMessages) ? finalMessages : undefined);
     },
     onThreadId: (threadId: string) => {
       console.log("[Chat] Thread ID received from LangGraph:", threadId);
@@ -1041,8 +1048,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   }, [thread.messages]);
 
   // Save current session to chat history (only once per thread)
-  const saveCurrentSession = useCallback(() => {
-    const messages = thread.messages;
+  const saveCurrentSession = useCallback((messagesOverride?: ChatStreamMessage[]) => {
+    const messages = (messagesOverride || thread.messages || []) as ChatStreamMessage[];
     if (!messages || messages.length === 0) return;
 
     const userMessage = messages.find(msg => msg.type === 'human');

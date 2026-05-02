@@ -25,6 +25,12 @@ interface EmbedChatInterfaceProps {
   embedId?: string
 }
 
+type ChatStreamMessage = {
+  id?: string
+  type?: string
+  content?: unknown
+}
+
 export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: EmbedChatInterfaceProps) {
   // Normalize agent id: treat 'b-bot' and 'bbot' as the same
   const normalizedAgent = (!initialAgent || initialAgent === "b-bot" || initialAgent === "bbot") ? "bbot" : initialAgent;
@@ -411,9 +417,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       
       setAgentError(errorMessage || "An error occurred");
     },
-    onFinish: () => {
+    onFinish: (state: { values?: { messages?: ChatStreamMessage[] } }) => {
       console.log("Stream finished");
-      saveCurrentSession();
+      const finalMessages = state.values?.messages
+      saveCurrentSession(Array.isArray(finalMessages) ? finalMessages : undefined);
     },
     onThreadId: async (threadId: string) => {
       console.log("Thread ID received:", threadId);
@@ -477,8 +484,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   }, [thread.messages]);
 
   // Save current session to chat history (only once per thread)
-  const saveCurrentSession = useCallback(() => {
-    const messages = streamingMessages.length > 0 ? streamingMessages : thread.messages;
+  const saveCurrentSession = useCallback((messagesOverride?: ChatStreamMessage[]) => {
+    const messages = (messagesOverride || (streamingMessages.length > 0 ? streamingMessages : thread.messages) || []) as ChatStreamMessage[];
     if (!messages || messages.length === 0) return;
 
     const userMessage = messages.find(msg => msg.type === 'human');

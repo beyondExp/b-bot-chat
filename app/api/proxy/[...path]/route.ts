@@ -4,6 +4,24 @@ import { applyDefaultBbotModel } from "@/lib/bbot-default-model"
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
 
+function removeHopByHopHeaders(headers: Headers) {
+  for (const header of [
+    "connection",
+    "content-length",
+    "expect",
+    "host",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+  ]) {
+    headers.delete(header)
+  }
+}
+
 export async function GET(request: NextRequest, contextPromise: Promise<{ params: { path: string[] } }>) {
   const { params } = await contextPromise;
   return handleProxyRequest(request, params.path, "GET");
@@ -93,6 +111,8 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
 
     // Prepare headers: copy all incoming headers
     const headers = new Headers(request.headers);
+
+    removeHopByHopHeaders(headers)
 
     // Always set Content-Type to application/json (or preserve original if needed)
     headers.set("Content-Type", "application/json");
@@ -188,7 +208,7 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
     }
 
     // Always remove Content-Length if body is changed
-    headers.delete("Content-Length");
+    removeHopByHopHeaders(headers)
 
     // Make the request to the LangGraph API
     const upstreamBody = body == null ? null : typeof body === "string" ? body : JSON.stringify(body)

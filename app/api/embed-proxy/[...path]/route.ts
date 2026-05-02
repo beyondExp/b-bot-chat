@@ -5,6 +5,14 @@ import { applyDefaultBbotModel, isBBotAssistantId } from "@/lib/bbot-default-mod
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
 
+function createLangGraphJsonHeaders(apiKey: string, userId: string) {
+  const headers = new Headers()
+  headers.set("Content-Type", "application/json")
+  headers.set("X-User-ID", userId)
+  headers.set("Admin-API-Key", apiKey)
+  return headers
+}
+
 function injectGeminiApiKey(body: any) {
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return body
@@ -548,13 +556,9 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         url.searchParams.append(key, value)
       }
       
-      // Set up headers for direct LangGraph access
-      const headers = new Headers(request.headers);
-      headers.set("Content-Type", "application/json");
-      
-      // Use admin token for anonymous embed requests
-      headers.set("X-User-ID", "anonymous-embed-user");
-      headers.set("Admin-API-Key", apiKey);
+      // Only send headers LangGraph needs. Forwarded browser/proxy headers such as
+      // Expect/Connection can make undici fail before the final history refresh.
+      const headers = createLangGraphJsonHeaders(apiKey, "anonymous-embed-user")
       
       // Get request body for history request
       let body = null
