@@ -41,7 +41,7 @@ export function PWAInstaller() {
     // One-time cache bust: old service worker cached Next.js bundles and caused stale JS.
     // Clear caches + unregister once per version marker.
     const cacheBustKey = "sw-cache-busted"
-    const cacheBustVersion = "v25"
+    const cacheBustVersion = "v26"
     if (localStorage.getItem(cacheBustKey) !== cacheBustVersion) {
       ;(async () => {
         try {

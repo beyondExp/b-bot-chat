@@ -1,12 +1,10 @@
-// IMPORTANT: avoid caching Next.js build artifacts (_next) to prevent stale JS after deployments.
-// Bump cache version to force clients onto the updated strategy.
-const CACHE_NAME = "beyond-bot-cache-v3"
+// IMPORTANT: never cache Next.js HTML or build artifacts. Hashed chunks disappear
+// after deployments, so stale HTML can point browsers at files that no longer exist.
+const CACHE_NAME = "beyond-bot-cache-v4"
 const urlsToCache = [
-  "/",
   "/manifest.json",
   "/icons/icon-192x192.png",
   "/icons/icon-512x512.png",
-  // Removed other static assets that might not exist
 ]
 
 // Install service worker and cache static assets
@@ -49,13 +47,24 @@ self.addEventListener("activate", (event) => {
 
 // Serve cached content when offline
 self.addEventListener("fetch", (event) => {
-  // Skip caching for API requests and non-GET requests
-  if (event.request.url.includes("/api/") || event.request.method !== "GET") {
+  const url = new URL(event.request.url)
+
+  // Ignore browser-extension and other non-http(s) schemes. Cache Storage cannot
+  // store those requests and will throw "Request scheme ... is unsupported".
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
     return
   }
 
-  // Never cache Next.js build assets; always fetch fresh.
-  if (event.request.url.includes("/_next/")) {
+  // Skip API/auth requests, non-GET requests, navigation HTML, and Next build assets.
+  // These must always come from the network to avoid stale deployments.
+  if (
+    event.request.method !== "GET" ||
+    url.pathname.includes("/api/") ||
+    url.pathname.includes("/auth/") ||
+    url.pathname.startsWith("/_next/") ||
+    event.request.mode === "navigate" ||
+    event.request.destination === "document"
+  ) {
     return
   }
 
@@ -74,7 +83,6 @@ self.addEventListener("fetch", (event) => {
           }
 
           // Avoid caching JS/CSS bundles (stale deployments).
-          const url = new URL(event.request.url)
           if (url.pathname.endsWith(".js") || url.pathname.endsWith(".css")) {
             return response
           }
@@ -83,12 +91,7 @@ self.addEventListener("fetch", (event) => {
           const responseToCache = response.clone()
 
           caches.open(CACHE_NAME).then((cache) => {
-            // Don't cache API requests, auth endpoints, or non-GET requests
-            if (!event.request.url.includes("/api/") && 
-                !event.request.url.includes("/auth/") && 
-                event.request.method === "GET") {
-              cache.put(event.request, responseToCache)
-            }
+            cache.put(event.request, responseToCache)
           })
 
           return response
