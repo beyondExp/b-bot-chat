@@ -205,6 +205,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [isLoadingOldConversation, setIsLoadingOldConversation] = useState(false) // Track if loading old conversation
   const [playedDuringCall, setPlayedDuringCall] = useState<Set<string>>(new Set()) // Track message IDs played during call
   const messagesRef = useRef<any[]>([]); // Ref to track messages for event handlers
+  const [fallbackStreamMessages, setFallbackStreamMessages] = useState<any[]>([])
+  const lastStreamLoadingRef = useRef(false)
+  const lastFallbackErrorKeyRef = useRef<string | null>(null)
 
   // Add tool event handling like B-Bot Hub
   const handleToolEvent = (event: any) => {
@@ -219,6 +222,33 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [showSidebar, setShowSidebar] = useState(false)
   const [draftInput, setDraftInput] = useState("")
+
+  const buildFriendlyStreamErrorMessage = useCallback((details?: string): any => {
+    const text = String(details || "").toLowerCase()
+    const providerUnavailable =
+      text.includes("503") ||
+      text.includes("service unavailable") ||
+      text.includes("timeout") ||
+      text.includes("fetch failed") ||
+      text.includes("socket")
+
+    return {
+      id: `stream-error-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      type: "ai",
+      role: "assistant",
+      content: providerUnavailable
+        ? "Entschuldigung, ich konnte gerade keine Antwort erzeugen, weil der KI-Dienst kurzzeitig nicht erreichbar war. Bitte versuche es gleich noch einmal."
+        : "Entschuldigung, beim Erzeugen der Antwort ist etwas schiefgelaufen. Bitte versuche es gleich noch einmal.",
+    }
+  }, [])
+
+  const appendFriendlyStreamErrorMessage = useCallback((details?: string) => {
+    const key = `${ChatHistoryManager.getCurrentThreadId("main-chat") || "no-thread"}:${String(details || "stream-error").slice(0, 120)}`
+    if (lastFallbackErrorKeyRef.current === key) return
+    lastFallbackErrorKeyRef.current = key
+    const fallbackMessage = buildFriendlyStreamErrorMessage(details)
+    setFallbackStreamMessages(prev => [...prev, fallbackMessage])
+  }, [buildFriendlyStreamErrorMessage])
   
   // Main chat identifier to separate from embed storage
   const MAIN_CHAT_ID = "main-chat"
@@ -758,6 +788,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       console.error("Stream error:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Chat error:", errorMessage);
+      appendFriendlyStreamErrorMessage(errorMessage);
     },
     onFinish: (state: { values?: { messages?: ChatStreamMessage[] } }) => {
       console.log("Stream finished");
@@ -1047,6 +1078,35 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }
   }, [thread.messages]);
 
+  // If a stream completes without an assistant message, show a visible apology in the chat.
+  useEffect(() => {
+    const wasLoading = lastStreamLoadingRef.current
+    lastStreamLoadingRef.current = !!thread.isLoading
+    if (!wasLoading || thread.isLoading) return
+
+    const messages = (Array.isArray(thread.messages) ? thread.messages : []) as any[]
+    if (!messages.length) return
+
+    let lastHumanIndex = -1
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const type = String(messages[i]?.type || messages[i]?.role || "").toLowerCase()
+      if (type === "human" || type === "user") {
+        lastHumanIndex = i
+        break
+      }
+    }
+    if (lastHumanIndex === -1) return
+
+    const hasAssistantAfter = messages.slice(lastHumanIndex + 1).some((msg) => {
+      const type = String(msg?.type || msg?.role || "").toLowerCase()
+      const content = String(msg?.content || "").trim()
+      return (type === "ai" || type === "assistant") && content.length > 0
+    })
+    if (hasAssistantAfter) return
+
+    appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
+  }, [thread.isLoading, thread.messages, appendFriendlyStreamErrorMessage])
+
   // Save current session to chat history (only once per thread)
   const saveCurrentSession = useCallback((messagesOverride?: ChatStreamMessage[]) => {
     const messages = (messagesOverride || thread.messages || []) as ChatStreamMessage[];
@@ -1107,6 +1167,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     setToolEvents([]); // Clear previous tool events
     setFollowUpSuggestions([])
     setFollowUpSuggestionsLoading(false)
+    setFallbackStreamMessages([])
     pendingFollowUpsRef.current = null
     console.log('[Chat] handleSendMessage called with:', messageContent)
     if (!messageContent.trim()) return
@@ -1129,6 +1190,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           );
           const userApps = {};
           const mergedApps = { ...assistantApps, ...userApps };
+          const hasMergedApps = Object.keys(mergedApps).length > 0
           const userProfile = loadChatUserProfile(user?.sub || "anonymous")
           const baseSystemMessage =
             (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
@@ -1175,10 +1237,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               user_id: userId,
               agent_id: agentId,
               ...(hasQueuedFiles ? { files: queuedFiles } : {}),
+              ...(hasMergedApps ? { apps: mergedApps } : {}),
             },
             {
               config: ({
-                apps: mergedApps,
+                ...(hasMergedApps ? { apps: mergedApps } : {}),
                 configurable: {
                   agent_id: agentId,
                   user_id: userId,
@@ -1188,7 +1251,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   top_p: 1.0,
                   instructions: "Be helpful and concise.",
                   system_message,
-                  apps: mergedApps,
+                  ...(hasMergedApps ? { apps: mergedApps } : {}),
                   distribution_channel: { type: "Chat" },
                   input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
@@ -1206,6 +1269,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                 ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
                 user_id: userId,
                 agent_id: agentId,
+                ...(hasMergedApps ? { apps: mergedApps } : {}),
               }),
             }
           );
@@ -1333,6 +1397,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
       const queuedFiles = queuedWorkdeskFilesRef.current || {}
       const hasQueuedFiles = Object.keys(queuedFiles).length > 0
+      const hasMergedApps = Object.keys(mergedApps).length > 0
 
           // Submit using LangGraph's useStream with audio modality
           // 🎤 Use audio-capable model for voice messages
@@ -1344,10 +1409,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               user_id: userId,
               agent_id: agentId,
               ...(hasQueuedFiles ? { files: queuedFiles } : {}),
+              ...(hasMergedApps ? { apps: mergedApps } : {}),
             },
             {
               config: ({
-                apps: mergedApps,
+                ...(hasMergedApps ? { apps: mergedApps } : {}),
                 configurable: {
                   agent_id: agentId,
                   user_id: userId,
@@ -1357,7 +1423,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   top_p: 1.0,
                   instructions: "Be helpful and concise.",
                   system_message,
-                  apps: mergedApps,
+                  ...(hasMergedApps ? { apps: mergedApps } : {}),
                   distribution_channel: { type: "Chat" },
                   input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
                   output_modalities: finalOutputModalities, // Use configured or default BBot modalities
@@ -1375,6 +1441,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
           }),
         }
       );
@@ -1626,6 +1693,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       )
       const userApps = {}
       const mergedApps = { ...assistantApps, ...userApps }
+      const hasMergedApps = Object.keys(mergedApps).length > 0
 
       const greetingMessage: any = {
         id: `${DO_NOT_RENDER_ID_PREFIX}call-greeting-${Date.now()}`,
@@ -1641,10 +1709,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,
           agent_id: agentId,
+          ...(hasMergedApps ? { apps: mergedApps } : {}),
         },
         {
           config: ({
-            apps: mergedApps,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
             configurable: {
               agent_id: agentId,
               user_id: userId,
@@ -1654,7 +1723,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               top_p: 1.0,
               instructions: "You are speaking on a phone call. Keep it brief and natural.",
               system_message,
-              apps: mergedApps,
+              ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: { type: "Chat" },
               input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
               output_modalities: finalOutputModalities,
@@ -1668,6 +1737,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
           }),
         },
       )
@@ -1768,6 +1838,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       );
       const userApps = {};
       const mergedApps = { ...assistantApps, ...userApps };
+      const hasMergedApps = Object.keys(mergedApps).length > 0
 
       // Get the current thread ID to ensure we use the same thread
       const currentThreadId = getCurrentThreadId();
@@ -1780,11 +1851,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           entity_id: entityId,
           ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,
-          agent_id: agentId
+          agent_id: agentId,
+          ...(hasMergedApps ? { apps: mergedApps } : {}),
         },
         {
           config: ({
-            apps: mergedApps,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
             configurable: {
               agent_id: agentId,
               user_id: userId,
@@ -1794,7 +1866,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               top_p: 1.0,
               instructions: "Be helpful and concise.",
               system_message,
-              apps: mergedApps,
+              ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: { type: "Chat" },
               input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
               output_modalities: finalOutputModalities,
@@ -1811,6 +1883,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
             user_id: userId,
             agent_id: agentId,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
           }),
         }
       );
@@ -2158,7 +2231,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             <EnhancedChatMessages
               shouldAutoPlayAudio={!isLoadingOldConversation}
               playedMessageIds={playedDuringCall}
-              messages={thread.messages?.filter((msg: any) => {
+              messages={[...((thread.messages || []) as any[]), ...fallbackStreamMessages].filter((msg: any) => {
                 // Filter out empty AI messages that only contain tool_calls (trigger messages)
                 if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {
                   console.log("🚫 [ChatInterface] Filtering out empty AI message with tool_calls:", msg.id);

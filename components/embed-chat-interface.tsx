@@ -59,6 +59,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [waitingForEditResponse, setWaitingForEditResponse] = useState<{messageIndex: number, originalContent: string} | null>(null);
   const [branchRefreshKey, setBranchRefreshKey] = useState(0);
+  const lastStreamLoadingRef = useRef(false);
+  const lastFallbackErrorKeyRef = useRef<string | null>(null);
 
   // Get streaming, color, and dark mode from query params
   let streaming = true;
@@ -379,6 +381,52 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     setStreamingMessages([])
   }, [embedId])
 
+  const buildFriendlyStreamErrorMessage = useCallback((details?: string): Message => {
+    const text = String(details || "").toLowerCase()
+    const providerUnavailable =
+      text.includes("503") ||
+      text.includes("service unavailable") ||
+      text.includes("timeout") ||
+      text.includes("fetch failed") ||
+      text.includes("socket")
+
+    return {
+      id: `stream-error-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      type: "ai",
+      content: providerUnavailable
+        ? "Entschuldigung, ich konnte gerade keine Antwort erzeugen, weil der KI-Dienst kurzzeitig nicht erreichbar war. Bitte versuche es gleich noch einmal."
+        : "Entschuldigung, beim Erzeugen der Antwort ist etwas schiefgelaufen. Bitte versuche es gleich noch einmal.",
+    } as Message
+  }, [])
+
+  const appendFriendlyStreamErrorMessage = useCallback((details?: string) => {
+    const key = `${ChatHistoryManager.getCurrentThreadId(embedId) || "no-thread"}:${String(details || "stream-error").slice(0, 120)}`
+    if (lastFallbackErrorKeyRef.current === key) return
+    lastFallbackErrorKeyRef.current = key
+
+    const fallbackMessage = buildFriendlyStreamErrorMessage(details)
+    setStreamingMessages(prev => {
+      const list = Array.isArray(prev) ? prev : []
+      return [...list, fallbackMessage]
+    })
+
+    try {
+      const currentConversation = messageMetadataManager.getCurrentConversation()
+      if (currentConversation.length > 0) {
+        messageMetadataManager.setBaseConversation([
+          ...currentConversation,
+          {
+            id: String(fallbackMessage.id),
+            role: "assistant",
+            type: "ai",
+            content: String(fallbackMessage.content || ""),
+          },
+        ])
+        setBranchRefreshKey(prev => prev + 1)
+      }
+    } catch {}
+  }, [buildFriendlyStreamErrorMessage, embedId])
+
   // State to track if we've set thread metadata
   const [threadMetadataSet, setThreadMetadataSet] = useState<string | null>(null);
 
@@ -415,7 +463,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         resetBrokenThread()
       }
       
-      setAgentError(errorMessage || "An error occurred");
+      appendFriendlyStreamErrorMessage(errorMessage);
+      setAgentError("");
     },
     onFinish: (state: { values?: { messages?: ChatStreamMessage[] } }) => {
       console.log("Stream finished");
@@ -728,6 +777,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
+      const hasMergedApps = Object.keys(mergedApps).length > 0
       const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
       const userProfile = loadChatUserProfile(user?.sub || "anonymous")
       const baseSystemMessage =
@@ -757,7 +807,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           entity_id: entityId,  // Required in main payload for LangGraph
           ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,      // Also add these for compatibility
-          agent_id: agentId
+          agent_id: agentId,
+          ...(hasMergedApps ? { apps: mergedApps } : {}),
         },
         {
         config: {
@@ -771,7 +822,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           top_p: 1.0,
           instructions: "Be helpful and concise.",
           system_message,
-          apps: mergedApps,
+          ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
           },
@@ -797,6 +848,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             user_id: userId,
             agent_id: agentId,
             expert_id: expertId,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
           }),
         }
       );
@@ -858,6 +910,35 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         };
       });
   };
+
+  // Some stream failures end cleanly from the transport perspective but never produce an AI answer.
+  // In that case, add a visible assistant apology instead of leaving the user with no response.
+  useEffect(() => {
+    const wasLoading = lastStreamLoadingRef.current
+    lastStreamLoadingRef.current = !!thread.isLoading
+    if (!wasLoading || thread.isLoading) return
+
+    const rawMessages = (streamingMessages.length > 0 ? streamingMessages : thread.messages) || []
+    const converted = convertMessages(rawMessages as Message[])
+    if (!converted.length) return
+
+    let lastHumanIndex = -1
+    for (let i = converted.length - 1; i >= 0; i -= 1) {
+      if (converted[i]?.role === "user" || converted[i]?.type === "human") {
+        lastHumanIndex = i
+        break
+      }
+    }
+    if (lastHumanIndex === -1) return
+
+    const hasAssistantAfter = converted.slice(lastHumanIndex + 1).some((msg) => {
+      const content = String(msg?.content || "").trim()
+      return (msg?.role === "assistant" || msg?.type === "ai") && content.length > 0
+    })
+    if (hasAssistantAfter) return
+
+    appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
+  }, [thread.isLoading, thread.messages, streamingMessages, appendFriendlyStreamErrorMessage])
 
   // Handle message editing
   const handleMessageEdit = async (messageId: string, newContent: string, parentCheckpoint?: string) => {
@@ -930,6 +1011,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
+      const hasMergedApps = Object.keys(mergedApps).length > 0
       const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
       const userProfile = loadChatUserProfile(user?.sub || "anonymous")
       const baseSystemMessage =
@@ -945,7 +1027,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           entity_id: entityId,  // Required in main payload for LangGraph
           ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,      // Also add these for compatibility
-          agent_id: agentId
+          agent_id: agentId,
+          ...(hasMergedApps ? { apps: mergedApps } : {}),
         },
         {
           config: {
@@ -959,7 +1042,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               top_p: 1.0,
               instructions: "Be helpful and concise.",
               system_message,
-              apps: mergedApps,
+              ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
           },
@@ -982,6 +1065,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             user_id: userId,
             agent_id: agentId,
             expert_id: expertId,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
           }),
         }
       );
@@ -1044,6 +1128,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const userApps = {};
       const assistantApps = agentObj?.rawData?.config?.apps || {};
       const mergedApps = { ...assistantApps, ...userApps };
+      const hasMergedApps = Object.keys(mergedApps).length > 0
       const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
       const userProfile = loadChatUserProfile(user?.sub || "anonymous")
       const baseSystemMessage =
@@ -1059,7 +1144,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           entity_id: entityId,  // Required in main payload for LangGraph
           ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
           user_id: userId,      // Also add these for compatibility
-          agent_id: agentId
+          agent_id: agentId,
+          ...(hasMergedApps ? { apps: mergedApps } : {}),
         },
         {
           config: {
@@ -1073,7 +1159,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               top_p: 1.0,
               instructions: "Be helpful and concise.",
               system_message,
-              apps: mergedApps,
+              ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
             }
           },
@@ -1096,6 +1182,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             user_id: userId,
             agent_id: agentId,
             expert_id: expertId,
+            ...(hasMergedApps ? { apps: mergedApps } : {}),
           }),
         }
       );
