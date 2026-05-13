@@ -2,10 +2,10 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Wrench, CheckCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Wrench, CheckCircle, ChevronDown, ChevronRight, CornerUpLeft } from 'lucide-react'
 import { HumanMessage } from "./messages/human-message"
 import { AIMessage } from "./messages/ai-message"
 import { ensureToolCallsHaveResponses, DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses"
@@ -14,6 +14,101 @@ import remarkGfm from "remark-gfm"
 import { useI18n } from "@/lib/i18n"
 
 import { StreamingAudioPlayer } from "./streaming-audio-player"
+
+function SwipeToReply({
+  enabled,
+  onReply,
+  children,
+}: {
+  enabled: boolean
+  onReply: () => void
+  children: React.ReactNode
+}) {
+  const startRef = useRef<{ x: number; y: number; pointerId: number } | null>(null)
+  const triggeredRef = useRef(false)
+  const [dx, setDx] = useState(0)
+
+  const reset = useCallback(() => {
+    startRef.current = null
+    triggeredRef.current = false
+    setDx(0)
+  }, [])
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!enabled) return
+      if (e.pointerType !== "touch") return
+      startRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
+      triggeredRef.current = false
+      setDx(0)
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
+    },
+    [enabled],
+  )
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const start = startRef.current
+      if (!enabled || !start) return
+      if (e.pointerType !== "touch") return
+      if (e.pointerId !== start.pointerId) return
+
+      const rawDx = e.clientX - start.x
+      const rawDy = e.clientY - start.y
+
+      // If the user is scrolling vertically, do not treat it as a swipe.
+      if (Math.abs(rawDy) > 24 && Math.abs(rawDx) < 24) {
+        setDx(0)
+        return
+      }
+
+      if (rawDx <= 0) {
+        setDx(0)
+        return
+      }
+
+      const clamped = Math.min(rawDx, 84)
+      setDx(clamped)
+
+      if (!triggeredRef.current && rawDx >= 64) {
+        triggeredRef.current = true
+        onReply()
+        reset()
+      }
+    },
+    [enabled, onReply, reset],
+  )
+
+  const onPointerUp = useCallback(() => {
+    reset()
+  }, [reset])
+
+  const opacity = Math.max(0, Math.min(1, dx / 64))
+
+  return (
+    <div
+      className="relative touch-pan-y"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
+      <div
+        className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2"
+        style={{ opacity }}
+      >
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground shadow-sm">
+          <CornerUpLeft className="h-4 w-4" />
+        </div>
+      </div>
+      <div style={{ transform: `translateX(${dx}px)` }}>{children}</div>
+    </div>
+  )
+}
 
 // Tool Calls Component (like agent-chat-ui) - Now collapsible
 function ToolCalls({ toolCalls }: { toolCalls: Array<{ id?: string; name: string; args: Record<string, any> }> }) {
@@ -233,6 +328,7 @@ interface EnhancedChatMessagesProps {
   suggestions?: string[]
   userColor?: string
   isLoading?: boolean
+  onSwipeReply?: (message: ChatMessage) => void
   onMessageEdit?: (messageId: string, newContent: string, parentCheckpoint?: string) => void
   audioMap?: Record<string, string[]> // 🔊 TTS audio chunks mapped by message ID
   onMessageRegenerate?: (messageId: string, parentCheckpoint?: string) => void
@@ -271,6 +367,7 @@ export function EnhancedChatMessages({
   suggestions,
   userColor = '#2563eb',
   isLoading = false,
+  onSwipeReply,
   onMessageEdit,
   onMessageRegenerate,
   onBranchSelect,
@@ -418,30 +515,42 @@ export function EnhancedChatMessages({
   return (
     <div className="chat-messages p-4 space-y-2">
       {messages.length === 0 ? (
-        <div className="flex flex-col items-center justify-center min-h-[400px]">
-          <Avatar className="h-20 w-20 mb-4">
-            <AvatarImage src={getAgentAvatar() || "/placeholder.svg"} alt={getAgentName()} />
-            <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
-          </Avatar>
-          <h2 className="text-2xl font-bold mb-2">
-            {renderSwissStyled(welcomeTitleText)}
-          </h2>
-          <p className="text-gray-500 mb-6 text-center max-w-md">
-            {welcomeSubtitle || t("welcome.fallbackSubtitle")}
-          </p>
-          <div className="flex flex-col gap-2 items-center w-full max-w-md mx-auto px-2">
-            {welcomeSuggestions.slice(0, 3).map((suggestion) => (
-              <Button
-                key={suggestion}
-                variant="outlineTemplate"
-                onClick={() => onSuggestionClick(suggestion)}
-                className="w-full h-auto items-start text-left text-sm whitespace-normal break-words"
-              >
-                {suggestion}
-              </Button>
-            ))}
+        isLoading ? (
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="text-center">
+              <div className="flex items-center justify-center mb-4">
+                <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent" />
+              </div>
+              <p className="text-lg font-semibold text-foreground mb-2">{t("chat.loadingConversationTitle")}</p>
+              <p className="text-sm text-muted-foreground">{t("chat.loadingConversationSubtitle")}</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <Avatar className="h-20 w-20 mb-4">
+              <AvatarImage src={getAgentAvatar() || "/placeholder.svg"} alt={getAgentName()} />
+              <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
+            </Avatar>
+            <h2 className="text-2xl font-bold mb-2">
+              {renderSwissStyled(welcomeTitleText)}
+            </h2>
+            <p className="text-gray-500 mb-6 text-center max-w-md">
+              {welcomeSubtitle || t("welcome.fallbackSubtitle")}
+            </p>
+            <div className="flex flex-col gap-2 items-center w-full max-w-md mx-auto px-2">
+              {welcomeSuggestions.slice(0, 3).map((suggestion) => (
+                <Button
+                  key={suggestion}
+                  variant="outlineTemplate"
+                  onClick={() => onSuggestionClick(suggestion)}
+                  className="w-full h-auto items-start text-left text-sm whitespace-normal break-words"
+                >
+                  {suggestion}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )
       ) : (
         <>
           {visibleMessages.map((message: ChatMessage, idx: number) => {
@@ -470,13 +579,15 @@ export function EnhancedChatMessages({
                       <AvatarFallback>U</AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
-                      <HumanMessage
-                        message={compatibleMessage}
-                        isLoading={isLoading}
-                        onEdit={(newContent, parentCheckpoint) => handleMessageEdit(message, newContent, parentCheckpoint)}
-                        metadata={metadata}
-                        onBranchSelect={(direction) => handleBranchSelect(message, direction)}
-                      />
+                      <SwipeToReply enabled={typeof onSwipeReply === "function"} onReply={() => onSwipeReply?.(message)}>
+                        <HumanMessage
+                          message={compatibleMessage}
+                          isLoading={isLoading}
+                          onEdit={(newContent, parentCheckpoint) => handleMessageEdit(message, newContent, parentCheckpoint)}
+                          metadata={metadata}
+                          onBranchSelect={(direction) => handleBranchSelect(message, direction)}
+                        />
+                      </SwipeToReply>
                     </div>
                   </div>
                 </div>
@@ -508,23 +619,25 @@ export function EnhancedChatMessages({
                       
                       {/* Show AI message content with markdown rendering */}
                       {message.content && (
-                        <div className="py-1 w-full max-w-3xl">
-                          <div className="p-3 bg-muted rounded-lg w-full">
-                            <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-                            </div>
-                            
-                            {/* 🔊 TTS Audio Player: Show if this message has audio chunks */}
-                            {audioMap[message.id] && audioMap[message.id].length > 0 && (
-                              <div className="mt-2 pt-2 border-t border-muted-foreground/20">
-                                <StreamingAudioPlayer 
-                                  audioChunks={audioMap[message.id]} 
-                                  autoPlay={shouldAutoPlayAudio && !playedMessageIds.has(message.id)} 
-                                />
+                        <SwipeToReply enabled={typeof onSwipeReply === "function"} onReply={() => onSwipeReply?.(message)}>
+                          <div className="py-1 w-full max-w-3xl">
+                            <div className="p-3 bg-muted rounded-lg w-full">
+                              <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                               </div>
-                            )}
+                              
+                              {/* 🔊 TTS Audio Player: Show if this message has audio chunks */}
+                              {audioMap[message.id] && audioMap[message.id].length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-muted-foreground/20">
+                                  <StreamingAudioPlayer 
+                                    audioChunks={audioMap[message.id]} 
+                                    autoPlay={shouldAutoPlayAudio && !playedMessageIds.has(message.id)} 
+                                  />
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        </SwipeToReply>
                       )}
                     </>
                   )}

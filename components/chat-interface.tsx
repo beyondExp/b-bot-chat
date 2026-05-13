@@ -30,6 +30,7 @@ import { createContactsStore } from "@/lib/contacts-store"
 import { fetchBranding, type Branding } from "@/lib/branding"
 import { useI18n } from "@/lib/i18n"
 import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/chat-user-profile"
+import { generateLocalKokoroTts, isLocalKokoroTtsModality } from "@/lib/local-tts-service"
 
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
@@ -193,6 +194,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return out
   }, [])
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const shouldScrollToLatestRef = useRef(false)
+  const initialHistoryScrollMarkedRef = useRef(false)
   const [remainingCredits, setRemainingCredits] = useState(0)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
@@ -203,11 +207,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const pendingFollowUpsRef = useRef<any[] | null>(null)
   const [audioMap, setAudioMap] = useState<Record<string, string[]>>({}) // Store TTS audio chunks mapped to message IDs
   const [isLoadingOldConversation, setIsLoadingOldConversation] = useState(false) // Track if loading old conversation
+  const [pendingHistoryThreadId, setPendingHistoryThreadId] = useState<string | null>(null)
   const [playedDuringCall, setPlayedDuringCall] = useState<Set<string>>(new Set()) // Track message IDs played during call
   const messagesRef = useRef<any[]>([]); // Ref to track messages for event handlers
   const [fallbackStreamMessages, setFallbackStreamMessages] = useState<any[]>([])
   const lastStreamLoadingRef = useRef(false)
   const lastFallbackErrorKeyRef = useRef<string | null>(null)
+  const [canonicalThreadMessages, setCanonicalThreadMessages] = useState<any[] | null>(null)
+  const pendingPostStreamReconcileRef = useRef(false)
+  const reconcileInFlightRef = useRef(false)
+  const localTtsGeneratedMessageIdsRef = useRef<Set<string>>(new Set())
 
   // Add tool event handling like B-Bot Hub
   const handleToolEvent = (event: any) => {
@@ -222,6 +231,41 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [showSidebar, setShowSidebar] = useState(false)
   const [draftInput, setDraftInput] = useState("")
+  const [replyContext, setReplyContext] = useState<{ name: string; preview: string } | null>(null)
+
+  const buildReplyPreview = useCallback((content: any): string => {
+    try {
+      if (typeof content === "string") return content
+      if (Array.isArray(content)) {
+        const texts = content
+          .filter((b: any) => b && typeof b === "object" && b.type === "text" && typeof b.text === "string")
+          .map((b: any) => String(b.text || ""))
+        if (texts.length) return texts.join(" ")
+        return "[media]"
+      }
+      if (content == null) return ""
+      return String(content)
+    } catch {
+      return ""
+    }
+  }, [])
+
+  const normalizePreview = useCallback((text: string, maxLen = 160) => {
+    const oneLine = String(text || "").replace(/\s+/g, " ").trim()
+    if (!oneLine) return ""
+    return oneLine.length > maxLen ? oneLine.slice(0, maxLen - 1) + "…" : oneLine
+  }, [])
+
+  const handleSwipeReply = useCallback(
+    (message: any) => {
+      const isUser = message?.role === "user" || message?.type === "human"
+      const name = isUser ? t("common.you") : (agents.find((a: any) => a.id === selectedAgent)?.name || "B-Bot")
+      const preview = normalizePreview(buildReplyPreview(message?.content))
+      if (!preview) return
+      setReplyContext({ name, preview })
+    },
+    [agents, buildReplyPreview, normalizePreview, selectedAgent, t],
+  )
 
   const buildFriendlyStreamErrorMessage = useCallback((details?: string): any => {
     const text = String(details || "").toLowerCase()
@@ -723,6 +767,33 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(() => getCurrentThreadId())
 
+  useEffect(() => {
+    setCanonicalThreadMessages(null)
+    pendingPostStreamReconcileRef.current = false
+  }, [activeThreadId])
+
+  const reconcileThreadState = useCallback(
+    async (threadId: string | undefined | null) => {
+      const tid = String(threadId || "").trim()
+      if (!tid) return
+      if (reconcileInFlightRef.current) return
+      reconcileInFlightRef.current = true
+      try {
+        const state = await threadService.getThread(tid)
+        const messages = state?.values?.messages
+        if (Array.isArray(messages)) {
+          setCanonicalThreadMessages(messages)
+          messagesRef.current = messages
+        }
+      } catch (e) {
+        console.warn("[Chat] Failed to reconcile thread state:", e)
+      } finally {
+        reconcileInFlightRef.current = false
+      }
+    },
+    [threadService],
+  )
+
   const workdeskThreadId = useMemo(() => {
     const tid = activeThreadId || getCurrentThreadId()
     return tid && String(tid).trim() ? String(tid).trim() : null
@@ -810,6 +881,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       console.log("[Chat] Thread ID received from LangGraph:", threadId);
       console.log("[Chat] Saving thread ID to localStorage");
       ChatHistoryManager.setCurrentThreadId(threadId, MAIN_CHAT_ID);
+      setCanonicalThreadMessages(null)
       setActiveThreadId(threadId)
       // Verify it was saved
       const savedId = ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID);
@@ -903,13 +975,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // Extract tool events from message stream (since LangGraph SDK doesn't support onToolEvent directly)
   useEffect(() => {
     // Sync messages ref for event handlers
-    if (thread.messages) {
-      messagesRef.current = thread.messages;
-    }
+    const sourceMessages = (canonicalThreadMessages ?? thread.messages) as any[] | undefined
+    if (sourceMessages) messagesRef.current = sourceMessages
 
-    if (thread.messages && thread.messages.length > 0) {
+    if (sourceMessages && sourceMessages.length > 0) {
       // Find tool messages and convert them to tool events
-      const toolMessages = thread.messages.filter(msg => msg.type === "tool");
+      const toolMessages = sourceMessages.filter(msg => msg.type === "tool");
       const newToolEvents = toolMessages.map(msg => ({
         id: msg.id,
         tool_name: (msg as any).name || "reason_about", 
@@ -923,7 +994,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         setToolEvents(newToolEvents);
       }
     }
-  }, [thread.messages, toolEvents.length]);
+  }, [canonicalThreadMessages, thread.messages, toolEvents.length]);
 
   useEffect(() => {
     const msgs: any[] = Array.isArray(thread.messages) ? thread.messages : []
@@ -1013,6 +1084,102 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }
   }, [thread.messages]);
 
+  const getConfiguredLocalKokoroTts = useCallback(() => {
+    try {
+      const agentObj = agents.find((a: any) => a.id === selectedAgent)
+      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
+      const outputModalities = Array.isArray(config.output_modalities) ? config.output_modalities : []
+      return outputModalities.find((modality: any) => (
+        String(modality?.type || "").toLowerCase() === "tts"
+        && modality?.auto_play !== false
+        && isLocalKokoroTtsModality(modality)
+      )) || null
+    } catch {
+      return null
+    }
+  }, [agents, selectedAgent])
+
+  const plainTextForLocalTts = useCallback((content: any): string => {
+    try {
+      if (typeof content === "string") {
+        const trimmed = content.trim()
+        if (!trimmed) return ""
+        if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+          try { return plainTextForLocalTts(JSON.parse(trimmed)) } catch {}
+        }
+        return trimmed
+          .replace(/```[\s\S]*?```/g, " ")
+          .replace(/https?:\/\/\S+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 1600)
+      }
+      if (Array.isArray(content)) {
+        return content
+          .map((part: any) => {
+            if (typeof part === "string") return part
+            if (part && typeof part === "object") return part.text || part.content || ""
+            return ""
+          })
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 1600)
+      }
+      if (content && typeof content === "object") {
+        return plainTextForLocalTts(content.text || content.content || "")
+      }
+      return String(content || "").trim().slice(0, 1600)
+    } catch {
+      return ""
+    }
+  }, [])
+
+  useEffect(() => {
+    if (thread.isLoading || isLoadingOldConversation) return
+    const modality = getConfiguredLocalKokoroTts()
+    if (!modality) return
+    const messages = (canonicalThreadMessages ?? thread.messages ?? []) as any[]
+    if (!Array.isArray(messages) || messages.length === 0) return
+
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i]
+      const type = String(msg?.type || msg?.role || "").toLowerCase()
+      if (type !== "ai" && type !== "assistant") continue
+      const toolCalls = msg?.tool_calls || msg?.additional_kwargs?.tool_calls || []
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) return
+      const text = plainTextForLocalTts(msg?.content ?? msg?.text ?? "")
+      const msgId = String(msg?.id || `local-tts-${i}-${text.slice(0, 24)}`)
+      if (!text || localTtsGeneratedMessageIdsRef.current.has(msgId)) return
+      localTtsGeneratedMessageIdsRef.current.add(msgId)
+
+      console.log("[LocalTTS] Generating Kokoro audio for message", { msgId, voice: modality.voice })
+      generateLocalKokoroTts({
+        text,
+        modality,
+        onProgress: (progress) => {
+          console.log("[LocalTTS] Kokoro progress", progress)
+        },
+      }).then((audio) => {
+        console.log("[LocalTTS] Kokoro audio generated", { msgId, mime: audio.mime, length: audio.dataUrl.length, stats: audio.stats || null })
+        setAudioMap((prev) => ({
+          ...prev,
+          [msgId]: [audio.dataUrl],
+        }))
+      }).catch((error) => {
+        console.warn("[LocalTTS] Kokoro generation failed", error)
+      })
+      return
+    }
+  }, [
+    canonicalThreadMessages,
+    thread.messages,
+    thread.isLoading,
+    isLoadingOldConversation,
+    getConfiguredLocalKokoroTts,
+    plainTextForLocalTts,
+  ]);
+
   // Effect to clear chat when agent changes (but not on initial load/restore)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [isSelectingChat, setIsSelectingChat] = useState(false)
@@ -1084,7 +1251,43 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     lastStreamLoadingRef.current = !!thread.isLoading
     if (!wasLoading || thread.isLoading) return
 
-    const messages = (Array.isArray(thread.messages) ? thread.messages : []) as any[]
+    // If this was a run we initiated, refetch canonical thread state once at the end.
+    if (pendingPostStreamReconcileRef.current) {
+      pendingPostStreamReconcileRef.current = false
+      const tid =
+        String((thread as any).threadId || "").trim() ||
+        String(activeThreadId || "").trim() ||
+        String(ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID) || "").trim()
+
+      void reconcileThreadState(tid).finally(() => {
+        const messages = (Array.isArray(messagesRef.current) ? messagesRef.current : []) as any[]
+        if (!messages.length) return
+
+        let lastHumanIndex = -1
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+          const type = String(messages[i]?.type || messages[i]?.role || "").toLowerCase()
+          if (type === "human" || type === "user") {
+            lastHumanIndex = i
+            break
+          }
+        }
+        if (lastHumanIndex === -1) return
+
+        const hasAssistantAfter = messages.slice(lastHumanIndex + 1).some((msg) => {
+          const type = String(msg?.type || msg?.role || "").toLowerCase()
+          const content = String(msg?.content || "").trim()
+          return (type === "ai" || type === "assistant") && content.length > 0
+        })
+        if (hasAssistantAfter) return
+
+        appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
+      })
+      return
+    }
+
+    const messages = (Array.isArray(canonicalThreadMessages ?? thread.messages)
+      ? (canonicalThreadMessages ?? thread.messages)
+      : []) as any[]
     if (!messages.length) return
 
     let lastHumanIndex = -1
@@ -1105,7 +1308,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     if (hasAssistantAfter) return
 
     appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
-  }, [thread.isLoading, thread.messages, appendFriendlyStreamErrorMessage])
+  }, [thread.isLoading, thread.messages, canonicalThreadMessages, activeThreadId, appendFriendlyStreamErrorMessage, reconcileThreadState])
 
   // Save current session to chat history (only once per thread)
   const saveCurrentSession = useCallback((messagesOverride?: ChatStreamMessage[]) => {
@@ -1168,6 +1371,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     setFollowUpSuggestions([])
     setFollowUpSuggestionsLoading(false)
     setFallbackStreamMessages([])
+    setCanonicalThreadMessages(null)
+    pendingPostStreamReconcileRef.current = true
     pendingFollowUpsRef.current = null
     console.log('[Chat] handleSendMessage called with:', messageContent)
     if (!messageContent.trim()) return
@@ -1207,11 +1412,14 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             ? outputModalities.filter((m: any) => String(m?.type || "").toLowerCase() !== "tts")
             : [];
 
+          const replyQuote = replyContext?.preview ? `> ${replyContext.preview}\n\n` : ""
+          const finalMessageContent = replyQuote ? `${replyQuote}${messageContent}` : messageContent
+
           // Create the new message
           const newMessage = {
             id: `msg-${Date.now()}`,
             role: "user" as const,
-            content: messageContent,
+            content: finalMessageContent,
           };
 
           // Get current conversation history and ensure tool calls have responses (like agent-chat-ui)
@@ -1273,6 +1481,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               }),
             }
           );
+
+          // Clear reply context after submit so the next message is normal.
+          if (replyContext) setReplyContext(null)
 
           if (hasQueuedFiles) {
             takeQueuedWorkspaceFiles()
@@ -1401,6 +1612,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
           // Submit using LangGraph's useStream with audio modality
           // 🎤 Use audio-capable model for voice messages
+          setCanonicalThreadMessages(null)
+          pendingPostStreamReconcileRef.current = true
           thread.submit(
             { 
               messages: allMessages,
@@ -1469,37 +1682,71 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     
     // Mark that we're loading an old conversation (don't auto-play audio)
     setIsLoadingOldConversation(true)
+    setPendingHistoryThreadId(session.threadId)
+    shouldScrollToLatestRef.current = true
     
     // Set the current session and thread ID first
     setCurrentSession(session)
     ChatHistoryManager.setCurrentThreadId(session.threadId, MAIN_CHAT_ID)
+    setActiveThreadId(session.threadId)
     
     // Then set the agent
     setSelectedAgent(normalizeAgentId(session.agentId))
     
     console.log('[Chat] Selected chat - agent:', session.agentId, 'thread:', session.threadId)
     
-    // Try to load thread from server to get messages
-    try {
-      const threadWithMessages = await threadService.getThread(session.threadId)
-      if (threadWithMessages && threadWithMessages.values?.messages) {
-        console.log('[Chat] Loaded thread messages from server:', threadWithMessages.values.messages.length, 'messages')
-      } else {
-        console.log('[Chat] No messages found in thread on server')
-      }
-    } catch (error) {
-      console.error('[Chat] Error loading thread from server:', error)
-    } finally {
-      // Clear the loading flag after messages are loaded (or failed to load)
-      setTimeout(() => {
-        setIsSelectingChat(false)
-        // After conversation is loaded, reset the flag so new messages can auto-play
-        setTimeout(() => {
-          setIsLoadingOldConversation(false)
-        }, 1000) // Give extra time for messages to render
-      }, 300) // Small delay to ensure UI updates
-    }
+    // Note: history loading is handled by useStream when threadId changes.
+    // We keep the "loading conversation" UI visible until useStream finishes loading.
   }
+
+  // When restoring an existing thread on initial load, we want a one-time scroll to the latest message.
+  useEffect(() => {
+    if (initialHistoryScrollMarkedRef.current) return
+    if (!activeThreadId) return
+    initialHistoryScrollMarkedRef.current = true
+    shouldScrollToLatestRef.current = true
+    setPendingHistoryThreadId(activeThreadId)
+    setIsLoadingOldConversation(true)
+  }, [activeThreadId])
+
+  // Clear the "selecting chat" loading state once the history fetch finishes.
+  useEffect(() => {
+    if (!pendingHistoryThreadId) return
+    // Wait until we're on the target thread
+    if (activeThreadId !== pendingHistoryThreadId) return
+    // Wait for useStream to finish loading that thread
+    if (thread.isLoading) return
+
+    setPendingHistoryThreadId(null)
+    setIsSelectingChat(false)
+    // After conversation is loaded, reset the flag so new messages can auto-play
+    setTimeout(() => setIsLoadingOldConversation(false), 800)
+  }, [pendingHistoryThreadId, activeThreadId, thread.isLoading])
+
+  // Scroll to latest message once after history loads (initial restore or selecting a conversation).
+  useEffect(() => {
+    if (!shouldScrollToLatestRef.current) return
+    if (isSelectingChat) return
+    if (thread.isLoading) return
+
+    const messageCount = (thread.messages?.length || 0) + (fallbackStreamMessages.length || 0)
+    if (messageCount === 0) return
+
+    shouldScrollToLatestRef.current = false
+
+    // Double-rAF ensures the end marker is laid out inside the scroll container.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: "auto", block: "end" })
+          return
+        }
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: "auto" })
+        }
+      })
+    })
+  }, [isSelectingChat, thread.isLoading, thread.messages?.length, fallbackStreamMessages.length])
 
   const handleSelectAgent = (agentId: string) => {
     console.log('[Chat] Selecting agent:', agentId)
@@ -1513,6 +1760,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
       // Clear UI/session state first
       setCurrentSession(null)
+      setReplyContext(null)
       setToolEvents([])
       setFollowUpSuggestions([])
       setFollowUpSuggestionsLoading(false)
@@ -1702,6 +1950,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         content: "Start the call with one short friendly greeting sentence and ask how you can help.",
       }
 
+      setCanonicalThreadMessages(null)
+      pendingPostStreamReconcileRef.current = true
       thread.submit(
         {
           messages: [greetingMessage],
@@ -1845,6 +2095,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       console.log('[Chat] Submitting to thread:', currentThreadId || 'new thread will be created');
       
       // Submit to LangGraph stream with required entity_id
+      setCanonicalThreadMessages(null)
+      pendingPostStreamReconcileRef.current = true
       thread.submit(
         { 
           messages: [newMessage],
@@ -2019,7 +2271,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         onAudioData={handleCallAudioData}
         onCallConnected={handleCallConnected}
         onAudioPlayed={handleAudioPlayedDuringCall}
-        messages={thread.messages || []}
+        messages={(canonicalThreadMessages ?? thread.messages ?? []) as any[]}
         audioMap={audioMap}
         isLoading={thread.isLoading}
       />
@@ -2204,19 +2456,19 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           agentName={selectedAgentData?.name || "B-Bot"}
           agentAvatar={effectiveAgentAvatar}
           agentData={selectedAgentData}
-          hasMessages={thread.messages && thread.messages.length > 0}
+          hasMessages={(canonicalThreadMessages ?? thread.messages ?? []).length > 0}
         />
 
         {/* Message Search Bar */}
         {showMessageSearch && (
           <MessageSearch
-            messages={thread.messages || []}
+            messages={(canonicalThreadMessages ?? thread.messages ?? []) as any[]}
             onClose={() => setShowMessageSearch(false)}
             onSelectMessage={handleSelectSearchResult}
           />
         )}
 
-        <div className="flex-1 overflow-y-auto min-h-0 bbot-chat-scroll">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0 bbot-chat-scroll">
           {isSelectingChat ? (
             <div className="flex items-center justify-center h-full bg-background">
               <div className="text-center">
@@ -2231,7 +2483,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             <EnhancedChatMessages
               shouldAutoPlayAudio={!isLoadingOldConversation}
               playedMessageIds={playedDuringCall}
-              messages={[...((thread.messages || []) as any[]), ...fallbackStreamMessages].filter((msg: any) => {
+              onSwipeReply={handleSwipeReply}
+              messages={[...((canonicalThreadMessages ?? thread.messages ?? []) as any[]), ...fallbackStreamMessages].filter((msg: any) => {
                 // Filter out empty AI messages that only contain tool_calls (trigger messages)
                 if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {
                   console.log("🚫 [ChatInterface] Filtering out empty AI message with tool_calls:", msg.id);
@@ -2302,6 +2555,8 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
             agentName={agents.find((a: any) => a.id === selectedAgent)?.name}
             draft={draftInput}
             onDraftChange={setDraftInput}
+            replyContext={replyContext}
+            onClearReplyContext={() => setReplyContext(null)}
             onOpenWorkdesk={() => {
               setWorkdeskAutoPick(false)
               setWorkdeskOpen(true)

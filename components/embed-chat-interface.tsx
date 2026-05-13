@@ -18,6 +18,7 @@ import { ChatHistoryManager, ChatSession } from "@/lib/chat-history"
 import { messageMetadataManager, type ChatMessage, type MessageMetadata } from "@/lib/message-metadata"
 import { useAppAuth } from "@/lib/app-auth"
 import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/chat-user-profile"
+import { useI18n } from "@/lib/i18n"
 
 interface EmbedChatInterfaceProps {
   initialAgent?: string
@@ -32,12 +33,15 @@ type ChatStreamMessage = {
 }
 
 export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: EmbedChatInterfaceProps) {
+  const { t } = useI18n()
   // Normalize agent id: treat 'b-bot' and 'bbot' as the same
   const normalizedAgent = (!initialAgent || initialAgent === "b-bot" || initialAgent === "bbot") ? "bbot" : initialAgent;
   const [selectedAgent] = useState<string>(normalizedAgent);
   const [tokensUsed, setTokensUsed] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const initialScrollDoneRef = useRef(false)
   const [input, setInput] = useState("")
+  const [replyContext, setReplyContext] = useState<{ name: string; preview: string } | null>(null)
   const [agentValid, setAgentValid] = useState<boolean>(false)
   const [agentError, setAgentError] = useState<string>("")
   const { getAgent } = useAgents()
@@ -61,6 +65,40 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const [branchRefreshKey, setBranchRefreshKey] = useState(0);
   const lastStreamLoadingRef = useRef(false);
   const lastFallbackErrorKeyRef = useRef<string | null>(null);
+
+  const buildReplyPreview = useCallback((content: any): string => {
+    try {
+      if (typeof content === "string") return content
+      if (Array.isArray(content)) {
+        const texts = content
+          .filter((b: any) => b && typeof b === "object" && b.type === "text" && typeof b.text === "string")
+          .map((b: any) => String(b.text || ""))
+        if (texts.length) return texts.join(" ")
+        return "[media]"
+      }
+      if (content == null) return ""
+      return String(content)
+    } catch {
+      return ""
+    }
+  }, [])
+
+  const normalizePreview = useCallback((text: string, maxLen = 160) => {
+    const oneLine = String(text || "").replace(/\s+/g, " ").trim()
+    if (!oneLine) return ""
+    return oneLine.length > maxLen ? oneLine.slice(0, maxLen - 1) + "…" : oneLine
+  }, [])
+
+  const handleSwipeReply = useCallback(
+    (message: ChatMessage) => {
+      const isUser = message?.role === "user" || message?.type === "human"
+      const name = isUser ? t("common.you") : (agentObj?.name || "B-Bot")
+      const preview = normalizePreview(buildReplyPreview((message as any)?.content))
+      if (!preview) return
+      setReplyContext({ name, preview })
+    },
+    [agentObj?.name, buildReplyPreview, normalizePreview, t],
+  )
 
   // Get streaming, color, and dark mode from query params
   let streaming = true;
@@ -474,6 +512,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     onThreadId: async (threadId: string) => {
       console.log("Thread ID received:", threadId);
       ChatHistoryManager.setCurrentThreadId(threadId, embedId);
+      setCanonicalThreadMessages(null)
       
       // Set thread metadata if we haven't already and we have the agent data
       if (threadId && threadId !== threadMetadataSet && agentObj?.metadata?.expert_id) {
@@ -488,12 +527,64 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
 
   // Workaround state for SDK bug - manually track streaming messages  
   const [streamingMessages, setStreamingMessages] = useState<Message[]>([]);
+  const [canonicalThreadMessages, setCanonicalThreadMessages] = useState<Message[] | null>(null)
+  const pendingPostStreamReconcileRef = useRef(false)
+  const reconcileInFlightRef = useRef(false)
+
+  const reconcileThreadState = useCallback(
+    async (threadId: string | undefined | null): Promise<Message[] | null> => {
+      const tid = String(threadId || "").trim()
+      if (!tid) return null
+      if (reconcileInFlightRef.current) return null
+      reconcileInFlightRef.current = true
+      try {
+        const headers = await getHeaders()
+        const apiUrl = getApiUrl()
+        const response = await fetch(`${apiUrl}/threads/${tid}/state`, {
+          method: "GET",
+          headers,
+          credentials: "include",
+        })
+        if (!response.ok) return null
+        const state = await response.json()
+        const messages = state?.values?.messages
+        if (Array.isArray(messages)) {
+          setCanonicalThreadMessages(messages)
+          return messages as Message[]
+        }
+        return null
+      } catch (e) {
+        console.warn("[Embed] Failed to reconcile thread state:", e)
+        return null
+      } finally {
+        reconcileInFlightRef.current = false
+      }
+    },
+    [getApiUrl, getHeaders],
+  )
+
+  // Scroll to the latest message once after history loads (on first render with messages).
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return
+    if (thread.isLoading) return
+    const rawMessages = canonicalThreadMessages ?? (streamingMessages.length > 0 ? streamingMessages : thread.messages) ?? []
+    const messageCount = rawMessages.length || 0
+    if (messageCount === 0) return
+
+    initialScrollDoneRef.current = true
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" })
+      })
+    })
+  }, [thread.isLoading, thread.messages?.length, streamingMessages.length, canonicalThreadMessages])
 
   // Extract tool events from message stream (since LangGraph SDK doesn't support onToolEvent directly)
   useEffect(() => {
-    if (thread.messages && thread.messages.length > 0) {
+    const sourceMessages = canonicalThreadMessages ?? thread.messages
+    if (sourceMessages && sourceMessages.length > 0) {
       // Find tool messages and convert them to tool events
-      const toolMessages = thread.messages.filter(msg => msg.type === "tool");
+      const toolMessages = sourceMessages.filter(msg => msg.type === "tool");
       const newToolEvents = toolMessages.map(msg => ({
         id: msg.id,
         tool_name: (msg as any).name || "reason_about",
@@ -507,7 +598,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         setToolEvents(newToolEvents);
       }
     }
-  }, [thread.messages, toolEvents.length]);
+  }, [canonicalThreadMessages, thread.messages, toolEvents.length]);
   
   // Debug logging for thread state changes
   useEffect(() => {
@@ -534,7 +625,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
 
   // Save current session to chat history (only once per thread)
   const saveCurrentSession = useCallback((messagesOverride?: ChatStreamMessage[]) => {
-    const messages = (messagesOverride || (streamingMessages.length > 0 ? streamingMessages : thread.messages) || []) as ChatStreamMessage[];
+    const messages = (messagesOverride ||
+      canonicalThreadMessages ||
+      (streamingMessages.length > 0 ? streamingMessages : thread.messages) ||
+      []) as ChatStreamMessage[];
     if (!messages || messages.length === 0) return;
 
     const userMessage = messages.find(msg => msg.type === 'human');
@@ -572,7 +666,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
 
     ChatHistoryManager.saveChatSession(session, embedId);
     setCurrentSession(session);
-  }, [streamingMessages, thread.messages, currentSession, selectedAgent, embedUserId, user?.sub, embedId]);
+  }, [canonicalThreadMessages, streamingMessages, thread.messages, currentSession, selectedAgent, embedUserId, user?.sub, embedId]);
 
   // Update streaming messages when SDK finally updates and handle branch management
   useEffect(() => {
@@ -658,6 +752,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const handleNewChat = () => {
     ChatHistoryManager.clearCurrentThreadId(embedId);
     setCurrentSession(null);
+    setReplyContext(null)
     setStreamingMessages([]);
     messageMetadataManager.clear(); // Clear all branch data
     // The thread will automatically create a new thread ID on next message
@@ -668,6 +763,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const handleSelectChat = (session: ChatSession) => {
     setCurrentSession(session);
     ChatHistoryManager.setCurrentThreadId(session.threadId, embedId);
+    setReplyContext(null)
     // Reload to load the selected thread
     window.location.reload();
   };
@@ -766,6 +862,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const handleSendMessage = async (messageContent: string) => {
     setToolEvents([]); // Clear previous tool events
     if (!messageContent.trim()) return;
+    setCanonicalThreadMessages(null)
+    pendingPostStreamReconcileRef.current = true
 
     try {
       const userId = embedUserId || user?.sub || "anonymous-user";
@@ -791,10 +889,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Example: mergedApps["knowledge_companyinfoludemedia"].blacklist = ["edit_line_knowledge_companyinfoludemedia"]
       // Note: Automatic blacklisting for Embed mode is already handled by the backend
 
+      const replyQuote = replyContext?.preview ? `> ${replyContext.preview}\n\n` : ""
+      const finalMessageContent = replyQuote ? `${replyQuote}${messageContent}` : messageContent
+
       // Create the new message
       const newMessage: Message = {
         type: "human",
-        content: messageContent,
+        content: finalMessageContent,
       };
 
       // Get expert_id from assistant metadata if available
@@ -854,6 +955,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       );
 
       setInput("");
+      if (replyContext) setReplyContext(null)
     } catch (error) {
       console.error("Error sending message:", error);
       setAgentError(`Failed to send message: ${error}`);
@@ -918,8 +1020,36 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     lastStreamLoadingRef.current = !!thread.isLoading
     if (!wasLoading || thread.isLoading) return
 
-    const rawMessages = (streamingMessages.length > 0 ? streamingMessages : thread.messages) || []
-    const converted = convertMessages(rawMessages as Message[])
+    if (pendingPostStreamReconcileRef.current) {
+      pendingPostStreamReconcileRef.current = false
+      const tid = getThreadId()
+      void reconcileThreadState(tid).then((reconciled) => {
+        const rawMessages = (reconciled || (canonicalThreadMessages ?? (streamingMessages.length > 0 ? streamingMessages : thread.messages)) || []) as Message[]
+        const converted = convertMessages(rawMessages)
+        if (!converted.length) return
+
+        let lastHumanIndex = -1
+        for (let i = converted.length - 1; i >= 0; i -= 1) {
+          if (converted[i]?.role === "user" || converted[i]?.type === "human") {
+            lastHumanIndex = i
+            break
+          }
+        }
+        if (lastHumanIndex === -1) return
+
+        const hasAssistantAfter = converted.slice(lastHumanIndex + 1).some((msg) => {
+          const content = String(msg?.content || "").trim()
+          return (msg?.role === "assistant" || msg?.type === "ai") && content.length > 0
+        })
+        if (hasAssistantAfter) return
+
+        appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
+      })
+      return
+    }
+
+    const rawMessages = (canonicalThreadMessages ?? (streamingMessages.length > 0 ? streamingMessages : thread.messages) ?? []) as Message[]
+    const converted = convertMessages(rawMessages)
     if (!converted.length) return
 
     let lastHumanIndex = -1
@@ -938,7 +1068,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     if (hasAssistantAfter) return
 
     appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
-  }, [thread.isLoading, thread.messages, streamingMessages, appendFriendlyStreamErrorMessage])
+  }, [thread.isLoading, thread.messages, streamingMessages, canonicalThreadMessages, appendFriendlyStreamErrorMessage, reconcileThreadState, getThreadId])
 
   // Handle message editing
   const handleMessageEdit = async (messageId: string, newContent: string, parentCheckpoint?: string) => {
@@ -1021,6 +1151,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
 
       // Submit the conversation from edit point to regenerate AI response
+      setCanonicalThreadMessages(null)
+      pendingPostStreamReconcileRef.current = true
       thread.submit(
         { 
           messages: langGraphMessages,
@@ -1138,6 +1270,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
 
       // Submit the conversation up to the regeneration point
+      setCanonicalThreadMessages(null)
+      pendingPostStreamReconcileRef.current = true
       thread.submit(
         { 
           messages: langGraphMessages,
@@ -1238,8 +1372,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
                 return currentConversation;
               }
               
-              // Fallback to streaming/thread messages
-              const rawMessages = streamingMessages.length > 0 ? streamingMessages : thread.messages;
+              // Fallback to canonical/streaming/thread messages
+              const rawMessages = (canonicalThreadMessages ?? (streamingMessages.length > 0 ? streamingMessages : thread.messages) ?? []) as Message[];
               const convertedMessages = convertMessages(rawMessages);
               
               console.log("📋 Converting messages for display:");
@@ -1253,12 +1387,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               });
               
               return convertedMessages;
-            }, [streamingMessages, thread.messages, branchRefreshKey])}
+            }, [canonicalThreadMessages, streamingMessages, thread.messages, branchRefreshKey])}
               messagesEndRef={messagesEndRef}
               selectedAgent={selectedAgent}
               agents={agentObj ? [agentObj] : []}
             userColor={userColor}
             isLoading={thread.isLoading}
+            onSwipeReply={handleSwipeReply}
             onSuggestionClick={handleSuggestionClick}
             onMessageEdit={handleMessageEdit}
             onMessageRegenerate={handleMessageRegenerate}
@@ -1284,6 +1419,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             userColor={userColor}
             draft={input}
             onDraftChange={setInput}
+            replyContext={replyContext}
+            onClearReplyContext={() => setReplyContext(null)}
           />
         </div>
       </div>

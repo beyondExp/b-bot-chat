@@ -69,8 +69,9 @@ export function StreamingAudioPlayer({ audioChunks, autoPlay = true }: Streaming
 
     const chunk = chunksRef.current[currentIndexRef.current];
     try {
-      // Use the standard MP3 mime type. Some browsers are picky about `audio/mp3`.
-      const response = await fetch(`data:audio/mpeg;base64,${chunk}`);
+      // Cloud TTS stores raw MP3 base64; local Kokoro stores a full WAV data URL.
+      const src = chunk.startsWith("data:") ? chunk : `data:audio/mpeg;base64,${chunk}`;
+      const response = await fetch(src);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       

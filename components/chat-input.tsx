@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Loader2, Mic, Trash2, Plus, LayoutDashboard, Upload } from "lucide-react"
+import { Send, Loader2, Mic, Trash2, Plus, LayoutDashboard, Upload, X } from "lucide-react"
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder"
 import type React from "react"
 import type { FormEvent } from "react"
@@ -27,6 +27,8 @@ interface ChatInputProps {
   onDraftChange?: (next: string) => void
   onOpenWorkdesk?: () => void
   onAddWorkdeskFiles?: () => void
+  replyContext?: { name: string; preview: string } | null
+  onClearReplyContext?: () => void
 }
 
 interface Ability {
@@ -57,6 +59,8 @@ export function ChatInput({
   onDraftChange,
   onOpenWorkdesk,
   onAddWorkdeskFiles,
+  replyContext = null,
+  onClearReplyContext,
 }: ChatInputProps) {
   const [uncontrolledInput, setUncontrolledInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -423,92 +427,115 @@ export function ChatInput({
           </div>
         ) : (
           /* Normal input UI */
-          <div className="relative flex items-center bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 focus-within:shadow-lg">
-            {/* Left "+" menu (ChatGPT-style) */}
-            <div className="absolute left-2 top-1/2 -translate-y-1/2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+          <>
+            {replyContext && replyContext.preview && (
+              <div className="mb-2 flex items-start justify-between gap-3 rounded-2xl border border-border bg-muted/40 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-muted-foreground">
+                    {t("input.replyingTo").replace("{name}", replyContext.name)}
+                  </div>
+                  <div className="text-sm text-foreground truncate">{replyContext.preview}</div>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 flex-shrink-0"
+                  onClick={() => onClearReplyContext?.()}
+                  title={t("input.cancelReply")}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+
+            <div className="relative flex items-center bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 focus-within:shadow-lg">
+              {/* Left "+" menu (ChatGPT-style) */}
+              <div className="absolute left-2 top-1/2 -translate-y-1/2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-10 w-10 rounded-full hover:bg-primary/10"
+                      aria-label={t("input.more")}
+                      title={t("input.more")}
+                    >
+                      <Plus className="h-5 w-5 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-56">
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        onAddWorkdeskFiles?.()
+                      }}
+                    >
+                      <Upload className="h-4 w-4" />
+                      {t("workdesk.addDocuments")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        onOpenWorkdesk?.()
+                      }}
+                    >
+                      <LayoutDashboard className="h-4 w-4" />
+                      {t("workdesk.open")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              {/* Main input area */}
+              <div className="flex-1 min-w-0">
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={t("input.messagePlaceholder").replace("{name}", placeholderName)}
+                  className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent pl-14 pr-4 py-3 text-base placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                  disabled={isLoading}
+                  style={{
+                    lineHeight: "1.5",
+                    paddingRight: "60px", // Space for button (voice or send)
+                  }}
+                />
+              </div>
+              
+              {/* Action buttons integrated inside the input - vertically centered */}
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                {/* Voice message button - only show when input is empty AND agent supports audio */}
+                {!input.trim() && onVoiceMessage ? (
                   <Button
                     type="button"
                     size="icon"
                     variant="ghost"
-                    className="h-10 w-10 rounded-full hover:bg-primary/10"
-                    aria-label={t("input.more")}
-                    title={t("input.more")}
+                    onClick={handleStartRecording}
+                    disabled={isLoading}
+                    className="h-10 w-10 rounded-full hover:bg-primary/10 flex-shrink-0"
+                    title={t("input.sendVoiceMessage")}
                   >
-                    <Plus className="h-5 w-5 text-muted-foreground" />
+                    <Mic className="h-5 w-5 text-primary" />
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-56">
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      onAddWorkdeskFiles?.()
-                    }}
+                ) : (
+                  /* Send button - always show (disabled when empty and no voice support) */
+                  <Button
+                    type="submit"
+                    disabled={isLoading || !input.trim()}
+                    size="icon"
+                    className="h-10 w-10 rounded-full p-0 transition-all duration-200 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Upload className="h-4 w-4" />
-                    {t("workdesk.addDocuments")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      onOpenWorkdesk?.()
-                    }}
-                  >
-                    <LayoutDashboard className="h-4 w-4" />
-                    {t("workdesk.open")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    {isLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
-
-            {/* Main input area */}
-            <div className="flex-1 min-w-0">
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={t("input.messagePlaceholder").replace("{name}", placeholderName)}
-                className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent pl-14 pr-4 py-3 text-base placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                disabled={isLoading}
-                style={{ 
-                  lineHeight: '1.5',
-                  paddingRight: '60px' // Space for button (voice or send)
-                }}
-              />
-            </div>
-            
-            {/* Action buttons integrated inside the input - vertically centered */}
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              {/* Voice message button - only show when input is empty AND agent supports audio */}
-              {!input.trim() && onVoiceMessage ? (
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  onClick={handleStartRecording}
-                  disabled={isLoading}
-                  className="h-10 w-10 rounded-full hover:bg-primary/10 flex-shrink-0"
-                  title={t("input.sendVoiceMessage")}
-                >
-                  <Mic className="h-5 w-5 text-primary" />
-                </Button>
-              ) : (
-                /* Send button - always show (disabled when empty and no voice support) */
-                <Button
-                  type="submit"
-                  disabled={isLoading || !input.trim()}
-                  size="icon"
-                  className="h-10 w-10 rounded-full p-0 transition-all duration-200 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                </Button>
-              )}
-            </div>
-          </div>
+          </>
         )}
         
         {/* Loading indicator below input */}
