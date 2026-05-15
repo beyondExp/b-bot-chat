@@ -6,16 +6,25 @@ function _joinUrl(base: string, path: string) {
   return `${b}/${p}`
 }
 
-function _getDistConfig(item: any): { companyOnly: boolean; companyId: string } {
-  const metadata = item?.metadata || {}
-  const dist = metadata?.distributionChannel || metadata?.distribution_channel || {}
-  const cfg = dist?.config || {}
+type UnknownRecord = Record<string, unknown>
+
+function _asRecord(value: unknown): UnknownRecord {
+  return value && typeof value === "object" ? (value as UnknownRecord) : {}
+}
+
+function _getDistConfig(item: unknown): { companyOnly: boolean; companyId: string } {
+  const metadata = _asRecord(_asRecord(item).metadata)
+  const dist = _asRecord(metadata.distributionChannel || metadata.distribution_channel)
+  const cfg = _asRecord(dist.config)
   const companyOnly = !!cfg?.company_only
   const companyId = cfg?.company_id != null ? String(cfg.company_id).trim() : ""
   return { companyOnly, companyId }
 }
 
-async function _getMyCompanyIds(mainApiUrl: string, accessToken: string): Promise<Set<string>> {
+async function _getMyCompanyAccess(mainApiUrl: string, accessToken: string): Promise<{
+  companyIds: Set<string>
+  swissChatCompanyIds: Set<string>
+}> {
   try {
     const res = await fetch(_joinUrl(mainApiUrl, "/v0/users/me/companies"), {
       method: "GET",
@@ -24,12 +33,23 @@ async function _getMyCompanyIds(mainApiUrl: string, accessToken: string): Promis
         "Content-Type": "application/json",
       },
     })
-    if (!res.ok) return new Set()
+    if (!res.ok) return { companyIds: new Set(), swissChatCompanyIds: new Set() }
     const json = await res.json()
     const ids = Array.isArray(json?.company_ids) ? json.company_ids : []
-    return new Set(ids.map((x: any) => String(x).trim()).filter(Boolean))
+    const entitlements = Array.isArray(json?.entitlements?.companies) ? json.entitlements.companies : []
+    const swissChatIds = entitlements
+      .filter((item: unknown) => {
+        const record = _asRecord(item)
+        return Array.isArray(record.products) && record.products.includes("swiss_chat")
+      })
+      .map((item: unknown) => String(_asRecord(item).company_id).trim())
+      .filter(Boolean)
+    return {
+      companyIds: new Set(ids.map((x: unknown) => String(x).trim()).filter(Boolean)),
+      swissChatCompanyIds: new Set(swissChatIds),
+    }
   } catch {
-    return new Set()
+    return { companyIds: new Set(), swissChatCompanyIds: new Set() }
   }
 }
 
@@ -59,7 +79,9 @@ async function handleRequest(req: Request) {
 
     const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || ""
     const bearer = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : ""
-    const myCompanyIds = bearer ? await _getMyCompanyIds(mainApiUrl, bearer) : new Set<string>()
+    const myCompanyAccess = bearer
+      ? await _getMyCompanyAccess(mainApiUrl, bearer)
+      : { companyIds: new Set<string>(), swissChatCompanyIds: new Set<string>() }
 
     // Forward the request to the actual API with the admin key
     const response = await fetch(_joinUrl(mainApiUrl, "/v3/public/distribution-channels"), {
@@ -82,13 +104,13 @@ async function handleRequest(req: Request) {
 
     const data = await response.json()
 
-    // Filter out company-only agents unless the caller belongs to that company.
+    // Filter out company-only agents unless the caller has a Swiss-Chat seat for that company.
     const list = Array.isArray(data) ? data : []
-    const filtered = list.filter((item: any) => {
+    const filtered = list.filter((item: unknown) => {
       const { companyOnly, companyId } = _getDistConfig(item)
       if (!companyOnly) return true
       if (!companyId) return false
-      return myCompanyIds.has(companyId)
+      return myCompanyAccess.companyIds.has(companyId) && myCompanyAccess.swissChatCompanyIds.has(companyId)
     })
     return NextResponse.json(filtered)
   } catch (error) {
