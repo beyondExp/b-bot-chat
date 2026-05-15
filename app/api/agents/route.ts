@@ -24,6 +24,7 @@ function _getDistConfig(item: unknown): { companyOnly: boolean; companyId: strin
 async function _getMyCompanyAccess(mainApiUrl: string, accessToken: string): Promise<{
   companyIds: Set<string>
   swissChatCompanyIds: Set<string>
+  hasIndividualSwissChat: boolean
 }> {
   try {
     const res = await fetch(_joinUrl(mainApiUrl, "/v0/users/me/companies"), {
@@ -33,10 +34,13 @@ async function _getMyCompanyAccess(mainApiUrl: string, accessToken: string): Pro
         "Content-Type": "application/json",
       },
     })
-    if (!res.ok) return { companyIds: new Set(), swissChatCompanyIds: new Set() }
+    if (!res.ok) return { companyIds: new Set(), swissChatCompanyIds: new Set(), hasIndividualSwissChat: false }
     const json = await res.json()
     const ids = Array.isArray(json?.company_ids) ? json.company_ids : []
     const entitlements = Array.isArray(json?.entitlements?.companies) ? json.entitlements.companies : []
+    const individualProducts = Array.isArray(json?.entitlements?.individual_products)
+      ? json.entitlements.individual_products
+      : []
     const swissChatIds = entitlements
       .filter((item: unknown) => {
         const record = _asRecord(item)
@@ -47,9 +51,10 @@ async function _getMyCompanyAccess(mainApiUrl: string, accessToken: string): Pro
     return {
       companyIds: new Set(ids.map((x: unknown) => String(x).trim()).filter(Boolean)),
       swissChatCompanyIds: new Set(swissChatIds),
+      hasIndividualSwissChat: individualProducts.includes("swiss_chat"),
     }
   } catch {
-    return { companyIds: new Set(), swissChatCompanyIds: new Set() }
+    return { companyIds: new Set(), swissChatCompanyIds: new Set(), hasIndividualSwissChat: false }
   }
 }
 
@@ -81,7 +86,7 @@ async function handleRequest(req: Request) {
     const bearer = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : ""
     const myCompanyAccess = bearer
       ? await _getMyCompanyAccess(mainApiUrl, bearer)
-      : { companyIds: new Set<string>(), swissChatCompanyIds: new Set<string>() }
+      : { companyIds: new Set<string>(), swissChatCompanyIds: new Set<string>(), hasIndividualSwissChat: false }
 
     // Forward the request to the actual API with the admin key
     const response = await fetch(_joinUrl(mainApiUrl, "/v3/public/distribution-channels"), {
@@ -109,7 +114,7 @@ async function handleRequest(req: Request) {
     const filtered = list.filter((item: unknown) => {
       const { companyOnly, companyId } = _getDistConfig(item)
       if (!companyOnly) return true
-      if (!companyId) return false
+      if (!companyId) return myCompanyAccess.hasIndividualSwissChat
       return myCompanyAccess.companyIds.has(companyId) && myCompanyAccess.swissChatCompanyIds.has(companyId)
     })
     return NextResponse.json(filtered)
