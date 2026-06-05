@@ -249,6 +249,23 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
   }, [embedPassword])
 
+  const getEmbedDistributionChannel = useCallback(() => {
+    const raw = (agentObj && typeof agentObj === "object") ? (agentObj as any) : null
+    const meta = raw?.metadata || {}
+    const rawMeta = raw?.rawData?.metadata || {}
+    const dc =
+      meta?.distributionChannel ||
+      meta?.distribution_channel ||
+      rawMeta?.distributionChannel ||
+      rawMeta?.distribution_channel ||
+      null
+    const cfg = dc?.config || dc?.configuration || null
+    return {
+      type: "Embed",
+      ...(cfg && typeof cfg === "object" ? { config: cfg } : {}),
+    }
+  }, [agentObj])
+
   // Function to set thread metadata
   const setThreadMetadata = async (threadId: string) => {
     try {
@@ -270,9 +287,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         agent_id: agentId,
         entity_id: getEntityId(),
         knowledge_entity_id: getKnowledgeEntityId(),
-        distributionChannel: {
-          type: "Embed"
-        }
+        distributionChannel: getEmbedDistributionChannel()
       };
 
       const headers = await getHeaders();
@@ -924,7 +939,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           instructions: "Be helpful and concise.",
           system_message,
           ...(hasMergedApps ? { apps: mergedApps } : {}),
-              distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
+              distribution_channel: getEmbedDistributionChannel(), // Pass to backend for security filtering
             }
           },
           streamMode: ["messages", "updates"], // Use messages/updates for proper event streaming like B-Bot Hub
@@ -935,9 +950,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             assistant_id: agentId,
             entity_id: entityId,
             ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
-            distributionChannel: {
-              type: "Embed"
-            }
+            distributionChannel: getEmbedDistributionChannel()
           },
           optimisticValues: (prev) => ({
             ...prev,
@@ -1175,7 +1188,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               instructions: "Be helpful and concise.",
               system_message,
               ...(hasMergedApps ? { apps: mergedApps } : {}),
-              distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
+              distribution_channel: getEmbedDistributionChannel(), // Pass to backend for security filtering
             }
           },
           metadata: {
@@ -1185,9 +1198,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             assistant_id: agentId,
             entity_id: entityId,
             ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
-            distributionChannel: {
-              type: "Embed"
-            }
+            distributionChannel: getEmbedDistributionChannel()
           },
           optimisticValues: (prev) => ({
             ...prev,
@@ -1294,7 +1305,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               instructions: "Be helpful and concise.",
               system_message,
               ...(hasMergedApps ? { apps: mergedApps } : {}),
-              distribution_channel: { type: "Embed" }, // Pass to backend for security filtering
+              distribution_channel: getEmbedDistributionChannel(), // Pass to backend for security filtering
             }
           },
           metadata: {
@@ -1304,9 +1315,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             assistant_id: agentId,
             entity_id: entityId,
             ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
-            distributionChannel: {
-              type: "Embed"
-            }
+            distributionChannel: getEmbedDistributionChannel()
           },
           optimisticValues: (prev) => ({
             ...prev,
