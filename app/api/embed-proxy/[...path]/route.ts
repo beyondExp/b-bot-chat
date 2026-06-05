@@ -5,6 +5,14 @@ import { applyDefaultBbotModel, isBBotAssistantId } from "@/lib/bbot-default-mod
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
 
+function getRequiredAdminApiKey() {
+  const apiKey = (process.env.ADMIN_API_KEY || "").trim()
+  if (!apiKey || apiKey === "your-super-secret-admin-key" || apiKey.startsWith("your-")) {
+    return null
+  }
+  return apiKey
+}
+
 function createLangGraphJsonHeaders(apiKey: string, userId: string) {
   const headers = new Headers()
   headers.set("Content-Type", "application/json")
@@ -47,7 +55,10 @@ async function handleAnonymousThreadCreation(request: NextRequest) {
   try {
     // Create thread directly in LangGraph with admin authentication
     const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app"
-    const apiKey = process.env.ADMIN_API_KEY || "your-super-secret-admin-key"
+    const apiKey = getRequiredAdminApiKey()
+    if (!apiKey) {
+      return NextResponse.json({ error: "ADMIN_API_KEY not configured" }, { status: 500 })
+    }
     
     // Set up headers for LangGraph API
     const headers = new Headers();
@@ -194,7 +205,7 @@ export async function PATCH(request: NextRequest, context: EmbedProxyContext) {
 
 const LANGGRAPH_API_URL = process.env.LANGGRAPH_API_URL || ""
 const MAIN_API_URL = process.env.MAIN_API_URL || process.env.MAIN_API_PUBLIC_URL || ""
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || ""
+const ADMIN_API_KEY = getRequiredAdminApiKey() || ""
 
 async function _resolveSynapseAssistantIdFromDistributionChannel(publicChannelId: string): Promise<string | null> {
   const channelId = String(publicChannelId || "").trim()
@@ -343,6 +354,8 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     const isStreamRequest = targetPath.match(/^threads\/[^\/]+\/runs\/stream$/) && method === "POST"
     // Match history requests (embed mode should handle these anonymously too)
     const isHistoryRequest = targetPath.match(/^threads\/[^\/]+\/history$/) && method === "POST"
+    const isThreadReadRequest = method === "GET" && pathSegments.length === 2 && pathSegments[0] === "threads" && isValidUUID(pathSegments[1])
+    const isThreadStateRequest = method === "GET" && pathSegments.length === 3 && pathSegments[0] === "threads" && isValidUUID(pathSegments[1]) && pathSegments[2] === "state"
     const isThreadMetadataUpdateRequest = method === 'PATCH' && pathSegments.length === 2 && pathSegments[0] === 'threads' && isValidUUID(pathSegments[1]);
     
     // Handle thread creation early return
@@ -359,8 +372,10 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       const headers = new Headers(request.headers);
       // Synapse expects Admin-API-Key for admin auth
       headers.set('Admin-API-Key', apiKey);
+      headers.set('X-User-ID', 'anonymous-embed-user');
       headers.delete('host');
       headers.delete('authorization');
+      headers.delete('x-api-key');
 
       console.log('[EMBED-PROXY] Forwarding metadata update to LangGraph:', targetUrl);
 
@@ -377,6 +392,28 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         console.error('[EMBED-PROXY] Error forwarding metadata update request to LangGraph:', error);
         return new Response(JSON.stringify({ message: 'Error forwarding request' }), { status: 502 });
       }
+    }
+
+    if (isThreadReadRequest || isThreadStateRequest) {
+      console.log("[EmbedProxy] Handling thread read/state request directly for embed mode:", targetPath)
+      const url = new URL(`${LANGGRAPH_API_URL}/${targetPath}`)
+      const searchParams = new URLSearchParams(request.nextUrl.search)
+      for (const [key, value] of searchParams.entries()) {
+        url.searchParams.append(key, value)
+      }
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: createLangGraphJsonHeaders(apiKey, "anonymous-embed-user"),
+        redirect: "manual",
+      })
+
+      const contentType = response.headers.get("Content-Type") || ""
+      if (contentType.includes("application/json")) {
+        const data = await response.json().catch(() => null)
+        return NextResponse.json(data, { status: response.status })
+      }
+      return new Response(await response.text(), { status: response.status })
     }
     
     // Handle streaming requests in embed mode
@@ -630,11 +667,8 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       url.searchParams.append(key, value)
     }
 
-    // Prepare headers: copy all incoming headers
-    const headers = new Headers(request.headers);
-
-    // Always set Content-Type to application/json (or preserve original if needed)
-    headers.set("Content-Type", "application/json");
+    const headers = new Headers()
+    headers.set("Content-Type", "application/json")
 
     // Configure headers for all proxied requests
     console.log("[EmbedProxy] Using Admin API Key as X-API-Key header for embed request");
