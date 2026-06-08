@@ -266,6 +266,22 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     }
   }, [agentObj])
 
+  const embedChannelConfig = useMemo(() => {
+    const raw = (agentObj && typeof agentObj === "object") ? (agentObj as any) : null
+    const meta = raw?.metadata || {}
+    const rawMeta = raw?.rawData?.metadata || {}
+    const dc =
+      meta?.distributionChannel ||
+      meta?.distribution_channel ||
+      rawMeta?.distributionChannel ||
+      rawMeta?.distribution_channel ||
+      null
+    const cfg = dc?.config || dc?.configuration || null
+    return cfg && typeof cfg === "object" ? cfg : {}
+  }, [agentObj])
+
+  const showEmbedToolCalls = embedChannelConfig?.showToolCalls === true
+
   // Function to set thread metadata
   const setThreadMetadata = async (threadId: string) => {
     try {
@@ -995,11 +1011,21 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     
     return messages
       .filter(msg => {
+        if (!showEmbedToolCalls && msg.type === "tool") {
+          return false;
+        }
+
         // Filter out empty AI messages that only contain tool_calls (trigger messages)
         if (msg.type === "ai" && (!msg.content || (msg.content as string).trim() === "") && (msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
           console.log("🚫 [convertMessages] Filtering out empty AI message with tool_calls:", msg.id);
           return false;
         }
+
+        if (!showEmbedToolCalls && msg.type === "ai" && (msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
+          console.log("🚫 [convertMessages] Hiding AI message with tool_calls in embed:", msg.id);
+          return false;
+        }
+
         return true;
       })
       .map(msg => {
@@ -1358,6 +1384,19 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     return messageMetadataManager.getMessageMetadata(message);
   };
 
+  const filterVisibleEmbedMessages = useCallback((messages: ChatMessage[]): ChatMessage[] => {
+    if (showEmbedToolCalls) return messages;
+    return messages.filter((msg) => {
+      if (msg.role === "tool_response" || msg.role === "tool_call" || msg.type === "tool") {
+        return false;
+      }
+      if ((msg as any).tool_calls && Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
+        return false;
+      }
+      return true;
+    });
+  }, [showEmbedToolCalls]);
+
   return (
     <div className="fixed inset-0 flex flex-col bg-background embedded-chat overflow-hidden">
       <EmbedChatHeader
@@ -1378,7 +1417,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               // If branch manager has content, use it
               if (currentConversation.length > 0) {
                 console.log("📋 Using branch manager conversation:", currentConversation.length, "messages");
-                return currentConversation;
+                return filterVisibleEmbedMessages(currentConversation);
               }
               
               // Fallback to canonical/streaming/thread messages
@@ -1395,8 +1434,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
                 console.log(`  ${idx}: ${msg.type} - "${contentStr.substring(0, 50)}..." - tool_calls: ${toolCallsCount}`);
               });
               
-              return convertedMessages;
-            }, [canonicalThreadMessages, streamingMessages, thread.messages, branchRefreshKey])}
+              return filterVisibleEmbedMessages(convertedMessages);
+            }, [canonicalThreadMessages, streamingMessages, thread.messages, branchRefreshKey, filterVisibleEmbedMessages])}
               messagesEndRef={messagesEndRef}
               selectedAgent={selectedAgent}
               agents={agentObj ? [agentObj] : []}
@@ -1408,7 +1447,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             onMessageRegenerate={handleMessageRegenerate}
             onBranchSelect={handleBranchSelect}
             getMessageMetadata={getMessageMetadata}
-            toolEvents={toolEvents}
+            toolEvents={showEmbedToolCalls ? toolEvents : []}
               suggestions={
                 agentObj && agentObj.templates && agentObj.templates.length > 0
                   ? agentObj.templates.map((t: any) =>
