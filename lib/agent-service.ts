@@ -220,11 +220,14 @@ export function useAgents() {
         if (options?.allowAnonymous) {
           // Anonymous fetch using embed-proxy endpoint, no Authorization header
           // The embed-proxy will automatically add the Admin API Key for anonymous requests
-          const response = await fetch(`/api/embed-proxy/assistants/${normalizedAgentId}`, {
+          const response = await fetch(`/api/embed-proxy/assistants/${normalizedAgentId}?_t=${Date.now()}`, {
             method: "GET",
             headers: {
               "Content-Type": "application/json",
+              "Cache-Control": "no-cache",
+              Pragma: "no-cache",
             },
+            cache: "no-store",
           })
           if (!response.ok) throw new Error(`API error: ${response.status} ${response.statusText}`)
           responseData = await response.json()

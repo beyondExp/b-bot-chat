@@ -850,7 +850,36 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       try {
         setAgentError("");
         // Use allowAnonymous option for embed mode to avoid authentication requirements
-        const agentData = await getAgent(selectedAgent, { allowAnonymous: true });
+        let agentData: any = await getAgent(selectedAgent, { allowAnonymous: true });
+        if (!agentData) {
+          // Fallback: bypass cached/stale lookups and fetch embed assistant payload directly.
+          const fallbackResponse = await fetch(
+            `/api/embed-proxy/assistants/${encodeURIComponent(selectedAgent)}?_t=${Date.now()}`,
+            {
+              method: "GET",
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache",
+              },
+              cache: "no-store",
+            },
+          )
+          if (fallbackResponse.ok) {
+            const raw = await fallbackResponse.json()
+            const resolvedId = raw?.assistant_id || raw?.channel_id || raw?.id || selectedAgent
+            agentData = {
+              id: String(resolvedId),
+              name: raw?.name || "Assistant",
+              shortDescription: raw?.description || "No description available",
+              description: raw?.description || "No description available",
+              metadata: raw?.metadata || {},
+              templates: raw?.metadata?.templates || [],
+              rawData: raw,
+            }
+          }
+        }
+
         if (agentData) {
           setAgentObj(agentData);
           // Password-protected embeds: prompt once and store in sessionStorage
