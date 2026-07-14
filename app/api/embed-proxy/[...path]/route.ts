@@ -631,30 +631,54 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     // For other requests, set up the target URL
     let url: URL
     if (isAssistantByIdRequest) {
-      // For individual assistant requests, fetch directly from LangGraph to also reveal password protection
-      // (but never expose password hash/salt).
+      // In embed mode, treat assistant-id lookups as "public distribution channel id"
+      // first. This avoids false "agent not found" for public channel UUIDs.
+      const requestedId = String(pathSegments[1] || "").trim()
+      if (!requestedId) {
+        return NextResponse.json({ error: "assistant_id_required" }, { status: 400 })
+      }
+
       try {
-        const assistantId = String(pathSegments[1] || "").trim()
-        if (assistantId) {
-          const assistant = await _fetchAssistantForEmbedCheck(assistantId)
-          if (assistant) {
-            const cfg = _extractEmbedPasswordConfig(assistant)
-            if (cfg.protected) {
-              try {
-                assistant.metadata = assistant.metadata || {}
-                assistant.metadata.distributionChannel = assistant.metadata.distributionChannel || {}
-                assistant.metadata.distributionChannel.config = assistant.metadata.distributionChannel.config || {}
-                assistant.metadata.distributionChannel.config.password_protected = true
-              } catch {}
-            }
-            return NextResponse.json(_stripEmbedPasswordSecrets(assistant), { status: 200 })
+        const dcUrl = new URL(`${MAIN_API_URL}/v3/public/distribution-channels/${encodeURIComponent(requestedId)}`)
+        const dcResponse = await fetch(dcUrl.toString(), {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+          },
+          redirect: "manual",
+        })
+
+        if (dcResponse.ok) {
+          const distributionChannel = await dcResponse.json().catch(() => null)
+          if (distributionChannel) {
+            return NextResponse.json(distributionChannel, { status: 200 })
           }
         }
-      } catch {
-        // fall back below
+      } catch (error) {
+        console.log("[EmbedProxy] Distribution channel lookup failed, trying assistant fallback:", error)
       }
-      url = new URL(`${MAIN_API_URL}/v3/public/distribution-channels/${pathSegments[1]}`)
-      console.log("[EmbedProxy] Routing assistant by ID request to distribution channels endpoint:", url);
+
+      // Fallback for direct Synapse assistant UUIDs (non-public IDs).
+      try {
+        const assistant = await _fetchAssistantForEmbedCheck(requestedId)
+        if (assistant) {
+          const cfg = _extractEmbedPasswordConfig(assistant)
+          if (cfg.protected) {
+            try {
+              assistant.metadata = assistant.metadata || {}
+              assistant.metadata.distributionChannel = assistant.metadata.distributionChannel || {}
+              assistant.metadata.distributionChannel.config = assistant.metadata.distributionChannel.config || {}
+              assistant.metadata.distributionChannel.config.password_protected = true
+            } catch {}
+          }
+          return NextResponse.json(_stripEmbedPasswordSecrets(assistant), { status: 200 })
+        }
+      } catch (error) {
+        console.log("[EmbedProxy] Assistant fallback lookup failed:", error)
+      }
+
+      return NextResponse.json({ error: `Assistant '${requestedId}' not found` }, { status: 404 })
     } else {
       // Handle other requests through MainAPI proxy to LangGraph  
       url = new URL(`${MAIN_API_URL}/v2/${targetPath}`)
