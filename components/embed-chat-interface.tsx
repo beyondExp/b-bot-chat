@@ -850,34 +850,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       try {
         setAgentError("");
         // Use allowAnonymous option for embed mode to avoid authentication requirements
-        let agentData: any = await getAgent(selectedAgent, { allowAnonymous: true });
-        if (!agentData) {
-          // Fallback: bypass cached/stale lookups and fetch embed assistant payload directly.
-          const fallbackResponse = await fetch(
-            `/api/embed-proxy/assistants/${encodeURIComponent(selectedAgent)}?_t=${Date.now()}`,
-            {
-              method: "GET",
-              headers: {
-                "Content-Type": "application/json",
-                "Cache-Control": "no-cache",
-                Pragma: "no-cache",
-              },
-              cache: "no-store",
-            },
-          )
-          if (fallbackResponse.ok) {
-            const raw = await fallbackResponse.json()
-            const resolvedId = raw?.assistant_id || raw?.channel_id || raw?.id || selectedAgent
-            agentData = {
-              id: String(resolvedId),
-              name: raw?.name || "Assistant",
-              shortDescription: raw?.description || "No description available",
-              description: raw?.description || "No description available",
-              metadata: raw?.metadata || {},
-              templates: raw?.metadata?.templates || [],
-              rawData: raw,
-            }
-          }
+        let agentData: any = null
+        // Small retry window to survive transient deploy/cache races without
+        // falling back to insecure or fake assistant objects.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          agentData = await getAgent(selectedAgent, { allowAnonymous: true })
+          if (agentData) break
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
         }
 
         if (agentData) {
@@ -918,21 +897,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
 
           setAgentValid(true);
         } else {
-          // Keep embed usable even if assistant bootstrap temporarily fails.
-          setAgentObj({
-            id: selectedAgent,
-            name: "Assistant",
-            shortDescription: "Embed assistant",
-            description: "Embed assistant",
-            metadata: { distributionChannel: { type: "Embed" } },
-            templates: [],
-            rawData: {
-              assistant_id: selectedAgent,
-              metadata: { distributionChannel: { type: "Embed" } },
-            },
-          });
-          setAgentError("");
-          setAgentValid(true);
+          setAgentError(`Agent '${selectedAgent}' not found`);
+          setAgentValid(false);
         }
       } catch (error) {
         console.error("Error loading agent:", error);

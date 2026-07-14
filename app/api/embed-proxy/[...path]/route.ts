@@ -652,8 +652,24 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         if (dcResponse.ok) {
           const distributionChannel = await dcResponse.json().catch(() => null)
           if (distributionChannel) {
-            return NextResponse.json(distributionChannel, { status: 200 })
+            return NextResponse.json(distributionChannel, {
+              status: 200,
+              headers: {
+                "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+                Pragma: "no-cache",
+              },
+            })
           }
+        }
+
+        // If MainAPI answered with a non-404 error, don't silently mask it as "not found".
+        if (dcResponse.status !== 404) {
+          const details = await dcResponse.text().catch(() => "")
+          console.log("[EmbedProxy] Distribution channel lookup non-404 failure:", dcResponse.status, details)
+          return NextResponse.json(
+            { error: "distribution_channel_lookup_failed", status: dcResponse.status },
+            { status: 502 },
+          )
         }
       } catch (error) {
         console.log("[EmbedProxy] Distribution channel lookup failed, trying assistant fallback:", error)
@@ -677,22 +693,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       } catch (error) {
         console.log("[EmbedProxy] Assistant fallback lookup failed:", error)
       }
-
-      // Last-resort soft fallback: avoid hard-failing embed bootstrap for valid
-      // public channel IDs during transient lookup/auth races.
-      return NextResponse.json(
-        {
-          assistant_id: requestedId,
-          channel_id: requestedId,
-          id: requestedId,
-          name: "Assistant",
-          description: "Embed assistant",
-          metadata: {
-            distributionChannel: { type: "Embed" },
-          },
-        },
-        { status: 200 },
-      )
+      return NextResponse.json({ error: `Assistant '${requestedId}' not found` }, { status: 404 })
     } else {
       // Handle other requests through MainAPI proxy to LangGraph  
       url = new URL(`${MAIN_API_URL}/v2/${targetPath}`)
