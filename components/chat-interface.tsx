@@ -360,13 +360,26 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const threadService = new ThreadService(getAuthTokenForService)
 
   // Load agents
-  const { getAgents } = useAgents()
+  const { getAgents, getAgent } = useAgents()
   useEffect(() => {
     const loadAgents = async () => {
       try {
         setAgentsLoading(true)
         const agentsData = await getAgents()
-        setAgents(agentsData)
+        const explicitAgentId = normalizeAgentId(initialAgent)
+        let resolvedAgents = agentsData
+
+        // The public picker intentionally excludes Embed-only channels. When a
+        // channel is explicitly selected by URL, load that public channel so
+        // its name, branding, and runtime configuration are available.
+        if (explicitAgentId && !agentsData.some((agent: any) => agent.id === explicitAgentId)) {
+          const explicitAgent = await getAgent(explicitAgentId, { allowAnonymous: true })
+          if (explicitAgent) {
+            resolvedAgents = [...agentsData, explicitAgent]
+          }
+        }
+
+        setAgents(resolvedAgents)
         setAgentsError(null)
       } catch (error) {
         console.error("Error loading agents:", error);
@@ -375,7 +388,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       }
     };
     loadAgents();
-  }, [getAgents]);
+  }, [getAgent, getAgents, initialAgent]);
 
   useEffect(() => {
     let mounted = true
