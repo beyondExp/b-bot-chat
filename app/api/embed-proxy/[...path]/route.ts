@@ -503,9 +503,10 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         // best-effort; continue even if resolution fails
       }
 
-      // B-Bot has a dedicated stream proxy in Synapse that is more stable than
-      // the raw /threads/{id}/runs/stream path for browser streaming.
-      if (isBBotAssistantId(assistantPublicId) && pathSegments.length >= 4) {
+      // Synapse's dedicated B-Bot stream proxy is the stable browser-facing
+      // path for all public embeds. The raw LangGraph stream route returns
+      // 404 for public channel UUIDs such as Rocket.
+      if (pathSegments.length >= 4) {
         streamTargetPath = `bbot/threads/${pathSegments[1]}/runs/stream`
       }
 
