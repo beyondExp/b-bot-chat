@@ -227,17 +227,41 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     return '/api/embed-proxy';
   };
 
-  // Inject X-Embed-Password for embed-proxy calls (LangGraph SDK internal fetches)
+  // Force embed mode to stay on embed-proxy for thread endpoints and inject
+  // X-Embed-Password for protected embeds. This prevents accidental direct
+  // /api/v2/threads/* calls that fail for anonymous/public embeds.
   useEffect(() => {
     if (typeof window === "undefined") return
     const originalFetch = window.fetch
     window.fetch = async (url: string | URL | Request, options?: RequestInit) => {
       try {
-        const urlString = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url
-        if (urlString.includes("/api/embed-proxy/") && embedPassword) {
-          const existingHeaders = new Headers(options?.headers)
-          existingHeaders.set("X-Embed-Password", embedPassword)
-          return originalFetch(url, { ...(options || {}), headers: existingHeaders })
+        const urlString =
+          typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url
+
+        // Rewrite protected MainAPI thread routes to embed-proxy equivalents.
+        // Example: /api/v2/threads/{id}/state -> /api/embed-proxy/threads/{id}/state
+        let rewritten = urlString
+        rewritten = rewritten.replace(/\/api\/v2\/threads\//g, "/api/embed-proxy/threads/")
+
+        const shouldInjectEmbedPassword = rewritten.includes("/api/embed-proxy/") && Boolean(embedPassword)
+        if (rewritten !== urlString || shouldInjectEmbedPassword) {
+          // Preserve method/body when the SDK passes a Request object.
+          const requestBase =
+            url instanceof Request
+              ? new Request(rewritten, url)
+              : rewritten
+
+          const existingHeaders = new Headers(
+            options?.headers ?? (url instanceof Request ? url.headers : undefined),
+          )
+          if (shouldInjectEmbedPassword) {
+            existingHeaders.set("X-Embed-Password", embedPassword as string)
+          }
+
+          return originalFetch(requestBase, {
+            ...(options || {}),
+            headers: existingHeaders,
+          })
         }
       } catch {
         // ignore
