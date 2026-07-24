@@ -15,9 +15,16 @@ import { useRouter } from 'next/router'
 import { useStream } from "@langchain/langgraph-sdk/react"
 import type { Message } from "@langchain/langgraph-sdk"
 import { ChatHistoryManager, ChatSession } from "@/lib/chat-history"
+import { getOrCreateEmbedSessionToken } from "@/lib/embed-session"
+import {
+  extractMessagesFromHistory,
+  lastAssistantTextLength,
+  preferRicherMessages,
+} from "@/lib/message-reconcile"
 import { messageMetadataManager, type ChatMessage, type MessageMetadata } from "@/lib/message-metadata"
 import { useAppAuth } from "@/lib/app-auth"
 import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/chat-user-profile"
+import { extractChannelRunConfig } from "@/lib/channel-run-config"
 import { useI18n } from "@/lib/i18n"
 
 interface EmbedChatInterfaceProps {
@@ -65,6 +72,8 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   const [branchRefreshKey, setBranchRefreshKey] = useState(0);
   const lastStreamLoadingRef = useRef(false);
   const lastFallbackErrorKeyRef = useRef<string | null>(null);
+  const pendingFallbackErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const embedMessagesRef = useRef<any[]>([])
 
   const buildReplyPreview = useCallback((content: any): string => {
     try {
@@ -82,6 +91,26 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       return ""
     }
   }, [])
+
+  const hasAssistantReplyAfterLastHuman = useCallback((messages: any[]): boolean => {
+    if (!Array.isArray(messages) || messages.length === 0) return false
+
+    let lastHumanIndex = -1
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const type = String(messages[i]?.type || messages[i]?.role || "").toLowerCase()
+      if (type === "human" || type === "user") {
+        lastHumanIndex = i
+        break
+      }
+    }
+    if (lastHumanIndex === -1) return false
+
+    return messages.slice(lastHumanIndex + 1).some((msg) => {
+      const type = String(msg?.type || msg?.role || "").toLowerCase()
+      if (!(type === "ai" || type === "assistant")) return false
+      return buildReplyPreview(msg?.content).trim().length > 0
+    })
+  }, [buildReplyPreview])
 
   const normalizePreview = useCallback((text: string, maxLen = 160) => {
     const oneLine = String(text || "").replace(/\s+/g, " ").trim()
@@ -172,9 +201,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
 
   // Get the headers for embed requests - embed-proxy handles Admin API Key automatically
   const getHeaders = async () => {
+    const sessionToken = getOrCreateEmbedSessionToken(selectedAgent, embedId)
     const baseHeaders: Record<string, string> = {
       "Content-Type": "application/json",
+      "X-Embed-Session": sessionToken,
+      "X-Embed-Agent-Id": selectedAgent,
     };
+    if (embedPassword) {
+      baseHeaders["X-Embed-Password"] = embedPassword
+    }
 
     // For embed mode with specific user ID
     if (embedUserId) {
@@ -228,7 +263,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   };
 
   // Force embed mode to stay on embed-proxy for thread endpoints and inject
-  // X-Embed-Password for protected embeds. This prevents accidental direct
+  // session + password headers. This prevents accidental direct
   // /api/v2/threads/* calls that fail for anonymous/public embeds.
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -243,8 +278,12 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         let rewritten = urlString
         rewritten = rewritten.replace(/\/api\/v2\/threads\//g, "/api/embed-proxy/threads/")
 
-        const shouldInjectEmbedPassword = rewritten.includes("/api/embed-proxy/") && Boolean(embedPassword)
-        if (rewritten !== urlString || shouldInjectEmbedPassword) {
+        const hitsEmbedProxy = rewritten.includes("/api/embed-proxy/")
+        const sessionToken = hitsEmbedProxy
+          ? getOrCreateEmbedSessionToken(selectedAgent, embedId)
+          : ""
+        const shouldInjectEmbedPassword = hitsEmbedProxy && Boolean(embedPassword)
+        if (rewritten !== urlString || shouldInjectEmbedPassword || sessionToken) {
           // Preserve method/body when the SDK passes a Request object.
           const requestBase =
             url instanceof Request
@@ -254,24 +293,50 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           const existingHeaders = new Headers(
             options?.headers ?? (url instanceof Request ? url.headers : undefined),
           )
+          if (sessionToken) {
+            existingHeaders.set("X-Embed-Session", sessionToken)
+            existingHeaders.set("X-Embed-Agent-Id", selectedAgent)
+          }
           if (shouldInjectEmbedPassword) {
             existingHeaders.set("X-Embed-Password", embedPassword as string)
           }
 
-          return originalFetch(requestBase, {
+          const response = await originalFetch(requestBase, {
             ...(options || {}),
             headers: existingHeaders,
           })
+
+          // Stale thread + new tab session → 403. Drop the thread so the next
+          // send creates a fresh binding instead of looping apologies.
+          if (response.status === 403 && rewritten.includes("/threads/")) {
+            try {
+              const clone = response.clone()
+              const payload = await clone.json().catch(() => null)
+              const err = String(payload?.error || "").toLowerCase()
+              if (
+                err.includes("embed_session_mismatch") ||
+                err.includes("embed_session_required") ||
+                err.includes("embed_origin_mismatch")
+              ) {
+                console.warn("[Embed] Clearing stale thread after", err)
+                ChatHistoryManager.clearCurrentThreadId(embedId)
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          return response
         }
       } catch {
-        // ignore
+        // ignore and fall through
       }
       return originalFetch(url, options)
     }
     return () => {
       window.fetch = originalFetch
     }
-  }, [embedPassword])
+  }, [embedPassword, embedId, selectedAgent])
 
   const getEmbedDistributionChannel = useCallback(() => {
     const raw = (agentObj && typeof agentObj === "object") ? (agentObj as any) : null
@@ -373,7 +438,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   };
 
   // In embed mode, `selectedAgent` is typically a public distribution-channel id.
-  // When the channel payload includes a Synapse assistant UUID, prefer that for runs.
+  // Synapse runs need a real assistant/graph id — never the public channel UUID.
   const resolvedSynapseAssistantId = useMemo(() => {
     try {
       const raw = (agentObj && typeof agentObj === "object") ? agentObj : null
@@ -384,24 +449,36 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         raw?.synapse_assistant_id ||
         meta?.synapseAssistantId ||
         meta?.synapse_assistant_id ||
-        meta?.assistant_id ||
-        meta?.assistantId
+        // Only accept metadata assistant_id when it is NOT the public channel id.
+        (meta?.assistant_id && String(meta.assistant_id) !== String(selectedAgent)
+          ? meta.assistant_id
+          : null) ||
+        (meta?.assistantId && String(meta.assistantId) !== String(selectedAgent)
+          ? meta.assistantId
+          : null) ||
+        raw?.graph_id ||
+        meta?.graph_id
       const resolved = String(candidate || "").trim()
       return resolved ? resolved : null
     } catch {
       return null
     }
-  }, [agentObj])
+  }, [agentObj, selectedAgent])
 
-  // Get the assistant ID - only use it if it's a valid UUID, otherwise use a default
+  // Get the assistant ID for Synapse execution.
   const getAssistantId = () => {
-    const resolved = resolvedSynapseAssistantId || selectedAgent
-    if (resolved && isValidUUID(String(resolved))) {
-      return String(resolved)
+    const resolved = resolvedSynapseAssistantId
+    if (resolved) {
+      // graph_id like "bbot" or a real Synapse assistant UUID
+      if (!isValidUUID(String(resolved)) || String(resolved) !== String(selectedAgent)) {
+        return String(resolved)
+      }
     }
-    // For non-UUID agent IDs like "bbot", return the agent name directly
-    // The API accepts specific registered graphs: indexer, retrieval_graph, bbot, open_deep_research
-    return String(resolved || "bbot"); // Use the actual agent name or default to bbot
+    // selectedAgent is often a public channel UUID — Synapse does not know those.
+    if (selectedAgent && !isValidUUID(String(selectedAgent))) {
+      return String(selectedAgent)
+    }
+    return "bbot"
   };
 
   // State for API key (can be undefined since proxy handles auth)
@@ -492,36 +569,77 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     } as Message
   }, [])
 
-  const appendFriendlyStreamErrorMessage = useCallback((details?: string) => {
-    const key = `${ChatHistoryManager.getCurrentThreadId(embedId) || "no-thread"}:${String(details || "stream-error").slice(0, 120)}`
-    if (lastFallbackErrorKeyRef.current === key) return
-    lastFallbackErrorKeyRef.current = key
-
-    const fallbackMessage = buildFriendlyStreamErrorMessage(details)
-    setStreamingMessages(prev => {
-      const list = Array.isArray(prev) ? prev : []
-      return [...list, fallbackMessage]
-    })
-
-    try {
-      const currentConversation = messageMetadataManager.getCurrentConversation()
-      if (currentConversation.length > 0) {
-        messageMetadataManager.setBaseConversation([
-          ...currentConversation,
-          {
-            id: String(fallbackMessage.id),
-            role: "assistant",
-            type: "ai",
-            content: String(fallbackMessage.content || ""),
-          },
-        ])
-        setBranchRefreshKey(prev => prev + 1)
-      }
-    } catch {}
-  }, [buildFriendlyStreamErrorMessage, embedId])
-
   // State to track if we've set thread metadata
   const [threadMetadataSet, setThreadMetadataSet] = useState<string | null>(null);
+  // Workaround state for SDK bug - manually track streaming messages
+  // Declared before useStream so apology helpers can read them safely.
+  const [streamingMessages, setStreamingMessages] = useState<Message[]>([]);
+  const [canonicalThreadMessages, setCanonicalThreadMessages] = useState<Message[] | null>(null)
+  const pendingPostStreamReconcileRef = useRef(false)
+  const reconcileInFlightRef = useRef(false)
+
+  const appendFriendlyStreamErrorMessage = useCallback((details?: string) => {
+    // Prefer the ref (kept richest via sync effect); fall back to React state.
+    const getExisting = () =>
+      preferRicherMessages(
+        embedMessagesRef.current,
+        canonicalThreadMessages,
+        streamingMessages,
+      )
+
+    if (hasAssistantReplyAfterLastHuman(getExisting())) return
+
+    const lower = String(details || "").toLowerCase()
+    if (
+      lower.includes("embed_channel_mismatch") ||
+      lower.includes("embed_session_mismatch") ||
+      lower.includes("embed_origin_mismatch")
+    ) {
+      console.warn("[Embed] Ignoring embed auth noise for apology UI:", details)
+      return
+    }
+
+    const key = `${ChatHistoryManager.getCurrentThreadId(embedId) || "no-thread"}:${String(details || "stream-error").slice(0, 120)}`
+    if (lastFallbackErrorKeyRef.current === key) return
+
+    if (pendingFallbackErrorTimerRef.current) {
+      clearTimeout(pendingFallbackErrorTimerRef.current)
+    }
+    pendingFallbackErrorTimerRef.current = setTimeout(() => {
+      pendingFallbackErrorTimerRef.current = null
+      if (hasAssistantReplyAfterLastHuman(getExisting())) return
+      if (lastFallbackErrorKeyRef.current === key) return
+      lastFallbackErrorKeyRef.current = key
+
+      const fallbackMessage = buildFriendlyStreamErrorMessage(details)
+      setStreamingMessages((prev) => {
+        const list = Array.isArray(prev) ? prev : []
+        return [...list, fallbackMessage]
+      })
+
+      try {
+        const currentConversation = messageMetadataManager.getCurrentConversation()
+        if (currentConversation.length > 0) {
+          messageMetadataManager.setBaseConversation([
+            ...currentConversation,
+            {
+              id: String(fallbackMessage.id),
+              role: "assistant",
+              type: "ai",
+              content: String(fallbackMessage.content || ""),
+            },
+          ])
+          setBranchRefreshKey((prev) => prev + 1)
+        }
+      } catch {}
+    }, 750)
+  }, [
+    buildFriendlyStreamErrorMessage,
+    canonicalThreadMessages,
+    embedId,
+    hasAssistantReplyAfterLastHuman,
+    streamingMessages,
+  ])
 
   // Initialize the useStream hook - proxy handles authentication
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
@@ -537,15 +655,58 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // For anonymous users, don't show balance-related errors as they shouldn't be charged
       const userId = embedUserId || user?.sub || "anonymous-user";
       const isAnonymousUser = !embedUserId && !user?.sub;
+      const lower = errorMessage.toLowerCase()
       
-      if (isAnonymousUser && errorMessage.toLowerCase().includes('insufficient')) {
+      if (isAnonymousUser && lower.includes('insufficient')) {
         console.log("Ignoring balance error for anonymous user");
         return;
       }
 
+      // Assistant/channel UUID unknown to Synapse — drop the dead thread so the
+      // next send creates a fresh one (old clients used to ignore this as "not found").
+      if (
+        lower.includes("assistant") &&
+        (lower.includes("not found") || lower.includes("not_found"))
+      ) {
+        console.warn("Resetting embed thread after assistant not found:", errorMessage)
+        resetBrokenThread()
+        appendFriendlyStreamErrorMessage(errorMessage)
+        setAgentError("")
+        return
+      }
+
+      // New browser tab = new sessionStorage token, but localStorage may still
+      // hold the previous thread id → session mismatch. Clear and recover.
+      if (
+        lower.includes("embed_session_mismatch") ||
+        lower.includes("embed_session_required") ||
+        lower.includes("embed_origin_mismatch")
+      ) {
+        console.warn("Resetting embed thread after session binding failure:", errorMessage)
+        resetBrokenThread()
+        appendFriendlyStreamErrorMessage(errorMessage)
+        setAgentError("")
+        return
+      }
+
+      if (lower.includes("embed_channel_mismatch")) {
+        console.warn("Ignoring embed channel mismatch noise after stream:", errorMessage)
+        return
+      }
+
+      // After a successful anonymous run Synapse often 404s GET /threads/{id}
+      // even though /state and the streamed answer are fine. Do not overlay an apology.
+      // Keep this narrow — do NOT match "Assistant … not found".
+      if (
+        lower.includes("thread_not_found") ||
+        (lower.includes("thread") && (lower.includes("404") || lower.includes("not found")))
+      ) {
+        console.warn("Ignoring thread lookup 404 after stream:", errorMessage)
+        return
+      }
+
       // Dead/stale stream threads can get stuck in a retry loop in embed mode.
       // Drop the current thread so the next message starts a fresh run.
-      const lower = errorMessage.toLowerCase()
       if (
         lower.includes("fetch failed") ||
         lower.includes("socket") ||
@@ -562,6 +723,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     onFinish: (state: { values?: { messages?: ChatStreamMessage[] } }) => {
       console.log("Stream finished");
       const finalMessages = state.values?.messages
+      // Don't freeze a possibly truncated onFinish snapshot into the UI.
+      if (Array.isArray(finalMessages) && finalMessages.length > 0) {
+        embedMessagesRef.current = preferRicherMessages(embedMessagesRef.current, finalMessages)
+      }
       saveCurrentSession(Array.isArray(finalMessages) ? finalMessages : undefined);
     },
     onThreadId: async (threadId: string) => {
@@ -580,12 +745,6 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     // onToolEvent: handleToolEvent,
   });
 
-  // Workaround state for SDK bug - manually track streaming messages  
-  const [streamingMessages, setStreamingMessages] = useState<Message[]>([]);
-  const [canonicalThreadMessages, setCanonicalThreadMessages] = useState<Message[] | null>(null)
-  const pendingPostStreamReconcileRef = useRef(false)
-  const reconcileInFlightRef = useRef(false)
-
   const reconcileThreadState = useCallback(
     async (threadId: string | undefined | null): Promise<Message[] | null> => {
       const tid = String(threadId || "").trim()
@@ -595,17 +754,49 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       try {
         const headers = await getHeaders()
         const apiUrl = getApiUrl()
-        const response = await fetch(`${apiUrl}/threads/${tid}/state`, {
-          method: "GET",
-          headers,
-          credentials: "include",
-        })
-        if (!response.ok) return null
-        const state = await response.json()
-        const messages = state?.values?.messages
-        if (Array.isArray(messages)) {
-          setCanonicalThreadMessages(messages)
-          return messages as Message[]
+        let best = Array.isArray(embedMessagesRef.current) ? [...embedMessagesRef.current] : []
+
+        try {
+          const response = await fetch(`${apiUrl}/threads/${tid}/state`, {
+            method: "GET",
+            headers,
+            credentials: "include",
+          })
+          if (response.ok) {
+            const state = await response.json()
+            const messages = state?.values?.messages
+            if (Array.isArray(messages) && messages.length) {
+              best = preferRicherMessages(best, messages)
+            }
+          }
+        } catch (e) {
+          console.warn("[Embed] State reconcile failed:", e)
+        }
+
+        for (const delayMs of [0, 400, 1000]) {
+          if (delayMs) await new Promise((r) => setTimeout(r, delayMs))
+          try {
+            const histRes = await fetch(`${apiUrl}/threads/${tid}/history`, {
+              method: "POST",
+              headers,
+              credentials: "include",
+              body: JSON.stringify({ limit: 10 }),
+            })
+            if (!histRes.ok) continue
+            const histMessages = extractMessagesFromHistory(await histRes.json())
+            if (histMessages?.length) {
+              best = preferRicherMessages(best, histMessages)
+              if (lastAssistantTextLength(best) > 0) break
+            }
+          } catch (e) {
+            console.warn("[Embed] History reconcile failed:", e)
+          }
+        }
+
+        if (best.length) {
+          setCanonicalThreadMessages(best as Message[])
+          embedMessagesRef.current = best
+          return best as Message[]
         }
         return null
       } catch (e) {
@@ -617,6 +808,18 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     },
     [getApiUrl, getHeaders],
   )
+
+  // Keep a ref of the latest visible messages so onError can skip apologies
+  // when a real assistant reply already arrived. Never clobber a richer snapshot
+  // with an empty/partial SDK array during post-stream reconcile.
+  useEffect(() => {
+    embedMessagesRef.current = preferRicherMessages(
+      embedMessagesRef.current,
+      canonicalThreadMessages,
+      streamingMessages,
+      thread.messages,
+    )
+  }, [canonicalThreadMessages, streamingMessages, thread.messages])
 
   // Scroll to the latest message once after history loads (on first render with messages).
   useEffect(() => {
@@ -842,6 +1045,45 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     };
   }, []);
 
+  // New tabs get a fresh session token while localStorage may still point at an
+  // older thread. Probe once on mount and drop incompatible threads early.
+  useEffect(() => {
+    const tid = String(ChatHistoryManager.getCurrentThreadId(embedId) || "").trim()
+    if (!tid) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const sessionToken = getOrCreateEmbedSessionToken(selectedAgent, embedId)
+        const res = await fetch(`/api/embed-proxy/threads/${encodeURIComponent(tid)}/state`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Embed-Session": sessionToken,
+            "X-Embed-Agent-Id": selectedAgent,
+          },
+          credentials: "include",
+        })
+        if (cancelled) return
+        if (res.status !== 403) return
+        const payload = await res.json().catch(() => null)
+        const err = String(payload?.error || "").toLowerCase()
+        if (
+          err.includes("embed_session_mismatch") ||
+          err.includes("embed_session_required") ||
+          err.includes("embed_origin_mismatch")
+        ) {
+          console.warn("[Embed] Dropping incompatible stored thread on mount:", err)
+          resetBrokenThread()
+        }
+      } catch {
+        // ignore
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [embedId, selectedAgent, resetBrokenThread])
+
 
 
   // Load agent information
@@ -934,23 +1176,16 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       const entityId = getEntityId();
       const knowledgeEntityId = getKnowledgeEntityId()
 
-      // Merge assistant apps with user apps (user apps take precedence)
-      const userApps = {};
-      const assistantApps = agentObj?.rawData?.config?.apps || {};
-      const mergedApps = { ...assistantApps, ...userApps };
+      // Public channels store system_message/apps under config.configurable.*
+      const channelConfig = extractChannelRunConfig(agentObj)
+      const mergedApps = { ...channelConfig.apps }
       const hasMergedApps = Object.keys(mergedApps).length > 0
-      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
       const userProfile = loadChatUserProfile(user?.sub || "anonymous")
-      const baseSystemMessage =
-        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
-          ? (config as any).system_message.trim()
-          : "") || "Be helpful and concise."
-      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
-      
-      // Add manual blacklist to apps if in Embed mode (in addition to automatic blacklisting)
-      // This allows for custom blacklist overrides per app
-      // Example: mergedApps["knowledge_companyinfoludemedia"].blacklist = ["edit_line_knowledge_companyinfoludemedia"]
-      // Note: Automatic blacklisting for Embed mode is already handled by the backend
+      const system_message = buildSystemMessageWithUserProfile(
+        channelConfig.systemMessage,
+        userProfile,
+      )
+      const instructions = channelConfig.instructions || "Be helpful and concise."
 
       const replyQuote = replyContext?.preview ? `> ${replyContext.preview}\n\n` : ""
       const finalMessageContent = replyQuote ? `${replyQuote}${messageContent}` : messageContent
@@ -984,8 +1219,22 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           temperature: 0.7,
           max_tokens: 1024,
           top_p: 1.0,
-          instructions: "Be helpful and concise.",
+          instructions,
           system_message,
+          ...(channelConfig.responseModel ? { response_model: channelConfig.responseModel } : {}),
+          ...(channelConfig.queryModel ? { query_model: channelConfig.queryModel } : {}),
+          ...(channelConfig.responseModelBaseUrl
+            ? { response_model_base_url: channelConfig.responseModelBaseUrl }
+            : {}),
+          ...(channelConfig.queryModelBaseUrl
+            ? { query_model_base_url: channelConfig.queryModelBaseUrl }
+            : {}),
+          ...(channelConfig.userProviderKeyId
+            ? { user_provider_key_id: channelConfig.userProviderKeyId }
+            : {}),
+          ...(channelConfig.responseModelProviderKeyRef
+            ? { response_model_provider_key_ref: channelConfig.responseModelProviderKeyRef }
+            : {}),
           ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: getEmbedDistributionChannel(), // Pass to backend for security filtering
             }
@@ -1047,21 +1296,26 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
           return false;
         }
 
-        // Filter out empty AI messages that only contain tool_calls (trigger messages)
-        if (msg.type === "ai" && (!msg.content || (msg.content as string).trim() === "") && (msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
+        // Hide empty AI "trigger" messages that only contain tool_calls.
+        // Keep AI messages that already have visible text even if tool_calls are present
+        // (Rocket/WordPress often attach both — hiding those caused a false apology).
+        const textContent = buildReplyPreview(msg.content).trim()
+        if (msg.type === "ai" && !textContent && (msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
           console.log("🚫 [convertMessages] Filtering out empty AI message with tool_calls:", msg.id);
-          return false;
-        }
-
-        if (!showEmbedToolCalls && msg.type === "ai" && (msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
-          console.log("🚫 [convertMessages] Hiding AI message with tool_calls in embed:", msg.id);
           return false;
         }
 
         return true;
       })
       .map(msg => {
-        let content = msg.content as string;
+        let content: any = msg.content
+        if (Array.isArray(content)) {
+          content = buildReplyPreview(content)
+        } else if (content != null && typeof content !== "string") {
+          content = String(content)
+        } else {
+          content = String(content || "")
+        }
         
         // FIXME: Client-side workaround for server-side balance checking issue
         if (isAnonymousUser && 
@@ -1094,25 +1348,30 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     if (pendingPostStreamReconcileRef.current) {
       pendingPostStreamReconcileRef.current = false
       const tid = getThreadId()
+      const endSnapshot = preferRicherMessages(
+        embedMessagesRef.current,
+        streamingMessages,
+        thread.messages,
+        canonicalThreadMessages,
+      )
+      const hadAssistantAtEnd = hasAssistantReplyAfterLastHuman(endSnapshot)
+      if (endSnapshot.length) {
+        embedMessagesRef.current = endSnapshot
+      }
       void reconcileThreadState(tid).then((reconciled) => {
-        const rawMessages = (reconciled || (canonicalThreadMessages ?? (streamingMessages.length > 0 ? streamingMessages : thread.messages)) || []) as Message[]
+        const rawMessages = preferRicherMessages(
+          reconciled,
+          endSnapshot,
+          embedMessagesRef.current,
+          canonicalThreadMessages,
+          streamingMessages,
+          thread.messages,
+        ) as Message[]
+        if (hadAssistantAtEnd || hasAssistantReplyAfterLastHuman(rawMessages)) return
+
         const converted = convertMessages(rawMessages)
         if (!converted.length) return
-
-        let lastHumanIndex = -1
-        for (let i = converted.length - 1; i >= 0; i -= 1) {
-          if (converted[i]?.role === "user" || converted[i]?.type === "human") {
-            lastHumanIndex = i
-            break
-          }
-        }
-        if (lastHumanIndex === -1) return
-
-        const hasAssistantAfter = converted.slice(lastHumanIndex + 1).some((msg) => {
-          const content = String(msg?.content || "").trim()
-          return (msg?.role === "assistant" || msg?.type === "ai") && content.length > 0
-        })
-        if (hasAssistantAfter) return
+        if (hasAssistantReplyAfterLastHuman(converted)) return
 
         appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
       })
@@ -1122,24 +1381,19 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     const rawMessages = (canonicalThreadMessages ?? (streamingMessages.length > 0 ? streamingMessages : thread.messages) ?? []) as Message[]
     const converted = convertMessages(rawMessages)
     if (!converted.length) return
-
-    let lastHumanIndex = -1
-    for (let i = converted.length - 1; i >= 0; i -= 1) {
-      if (converted[i]?.role === "user" || converted[i]?.type === "human") {
-        lastHumanIndex = i
-        break
-      }
-    }
-    if (lastHumanIndex === -1) return
-
-    const hasAssistantAfter = converted.slice(lastHumanIndex + 1).some((msg) => {
-      const content = String(msg?.content || "").trim()
-      return (msg?.role === "assistant" || msg?.type === "ai") && content.length > 0
-    })
-    if (hasAssistantAfter) return
+    if (hasAssistantReplyAfterLastHuman(converted)) return
 
     appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
-  }, [thread.isLoading, thread.messages, streamingMessages, canonicalThreadMessages, appendFriendlyStreamErrorMessage, reconcileThreadState, getThreadId])
+  }, [
+    thread.isLoading,
+    thread.messages,
+    streamingMessages,
+    canonicalThreadMessages,
+    appendFriendlyStreamErrorMessage,
+    hasAssistantReplyAfterLastHuman,
+    reconcileThreadState,
+    getThreadId,
+  ])
 
   // Handle message editing
   const handleMessageEdit = async (messageId: string, newContent: string, parentCheckpoint?: string) => {
@@ -1208,18 +1462,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Get expert_id from assistant metadata if available
       const expertId = agentObj?.metadata?.expert_id;
 
-      // Merge assistant apps with user apps
-      const userApps = {};
-      const assistantApps = agentObj?.rawData?.config?.apps || {};
-      const mergedApps = { ...assistantApps, ...userApps };
+      const channelConfig = extractChannelRunConfig(agentObj)
+      const mergedApps = { ...channelConfig.apps }
       const hasMergedApps = Object.keys(mergedApps).length > 0
-      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
       const userProfile = loadChatUserProfile(user?.sub || "anonymous")
-      const baseSystemMessage =
-        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
-          ? (config as any).system_message.trim()
-          : "") || "Be helpful and concise."
-      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
+      const system_message = buildSystemMessageWithUserProfile(
+        channelConfig.systemMessage,
+        userProfile,
+      )
+      const instructions = channelConfig.instructions || "Be helpful and concise."
 
       // Submit the conversation from edit point to regenerate AI response
       setCanonicalThreadMessages(null)
@@ -1243,8 +1494,22 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               temperature: 0.7,
               max_tokens: 1024,
               top_p: 1.0,
-              instructions: "Be helpful and concise.",
+              instructions,
               system_message,
+              ...(channelConfig.responseModel ? { response_model: channelConfig.responseModel } : {}),
+              ...(channelConfig.queryModel ? { query_model: channelConfig.queryModel } : {}),
+              ...(channelConfig.responseModelBaseUrl
+                ? { response_model_base_url: channelConfig.responseModelBaseUrl }
+                : {}),
+              ...(channelConfig.queryModelBaseUrl
+                ? { query_model_base_url: channelConfig.queryModelBaseUrl }
+                : {}),
+              ...(channelConfig.userProviderKeyId
+                ? { user_provider_key_id: channelConfig.userProviderKeyId }
+                : {}),
+              ...(channelConfig.responseModelProviderKeyRef
+                ? { response_model_provider_key_ref: channelConfig.responseModelProviderKeyRef }
+                : {}),
               ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: getEmbedDistributionChannel(), // Pass to backend for security filtering
             }
@@ -1325,18 +1590,15 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       // Get expert_id from assistant metadata if available
       const expertId = agentObj?.metadata?.expert_id;
 
-      // Merge assistant apps with user apps
-      const userApps = {};
-      const assistantApps = agentObj?.rawData?.config?.apps || {};
-      const mergedApps = { ...assistantApps, ...userApps };
+      const channelConfig = extractChannelRunConfig(agentObj)
+      const mergedApps = { ...channelConfig.apps }
       const hasMergedApps = Object.keys(mergedApps).length > 0
-      const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {}
       const userProfile = loadChatUserProfile(user?.sub || "anonymous")
-      const baseSystemMessage =
-        (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
-          ? (config as any).system_message.trim()
-          : "") || "Be helpful and concise."
-      const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
+      const system_message = buildSystemMessageWithUserProfile(
+        channelConfig.systemMessage,
+        userProfile,
+      )
+      const instructions = channelConfig.instructions || "Be helpful and concise."
 
       // Submit the conversation up to the regeneration point
       setCanonicalThreadMessages(null)
@@ -1360,8 +1622,22 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
               temperature: 0.7,
               max_tokens: 1024,
               top_p: 1.0,
-              instructions: "Be helpful and concise.",
+              instructions,
               system_message,
+              ...(channelConfig.responseModel ? { response_model: channelConfig.responseModel } : {}),
+              ...(channelConfig.queryModel ? { query_model: channelConfig.queryModel } : {}),
+              ...(channelConfig.responseModelBaseUrl
+                ? { response_model_base_url: channelConfig.responseModelBaseUrl }
+                : {}),
+              ...(channelConfig.queryModelBaseUrl
+                ? { query_model_base_url: channelConfig.queryModelBaseUrl }
+                : {}),
+              ...(channelConfig.userProviderKeyId
+                ? { user_provider_key_id: channelConfig.userProviderKeyId }
+                : {}),
+              ...(channelConfig.responseModelProviderKeyRef
+                ? { response_model_provider_key_ref: channelConfig.responseModelProviderKeyRef }
+                : {}),
               ...(hasMergedApps ? { apps: mergedApps } : {}),
               distribution_channel: getEmbedDistributionChannel(), // Pass to backend for security filtering
             }
@@ -1422,12 +1698,14 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       if (msg.role === "tool_response" || msg.role === "tool_call" || msg.type === "tool") {
         return false;
       }
+      // Keep assistant text replies; only drop empty tool-call shells.
       if ((msg as any).tool_calls && Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
-        return false;
+        const text = buildReplyPreview((msg as any).content).trim()
+        if (!text) return false
       }
       return true;
     });
-  }, [showEmbedToolCalls]);
+  }, [buildReplyPreview, showEmbedToolCalls]);
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background embedded-chat overflow-hidden">
@@ -1437,6 +1715,11 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
         onShowHistory={() => setShowHistory(true)}
         userColor={userColor}
         headerIcon={agentObj?.metadata?.headerIcon || 'bot'}
+        profileImage={
+          (typeof agentObj?.metadata?.profileImage === "string" && agentObj.metadata.profileImage) ||
+          (typeof agentObj?.profileImage === "string" && agentObj.profileImage) ||
+          null
+        }
       />
       
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

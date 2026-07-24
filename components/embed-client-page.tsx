@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import { EmbedChatInterface } from "./embed-chat-interface"
 
@@ -9,9 +10,12 @@ export function EmbedClientPage() {
   const agentFromUrl = searchParams?.get("agent")
   const userIdFromUrl = searchParams?.get("user_id")
   const embedIdFromUrl = searchParams?.get("embedId")
-  
-  // Generate a unique embed ID if not provided
-  const embedId = embedIdFromUrl || `embed-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`
+
+  // Keep the namespace stable across re-renders when embedId is not in the URL.
+  const embedId = useMemo(
+    () => embedIdFromUrl || `embed-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
+    [embedIdFromUrl],
+  )
 
   return (
     <EmbedChatInterface 

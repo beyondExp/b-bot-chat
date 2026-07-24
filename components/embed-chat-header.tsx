@@ -11,6 +11,8 @@ interface EmbedChatHeaderProps {
   onShowHistory: () => void
   userColor?: string
   headerIcon?: string
+  /** Expert / channel profile image URL. Preferred over Lucide headerIcon when set. */
+  profileImage?: string | null
 }
 
 // Helper to determine readable text color
@@ -26,12 +28,23 @@ function getContrastYIQ(hexcolor: string) {
   return (yiq >= 128) ? '#000' : '#fff';
 }
 
+function isUsableProfileImage(url?: string | null): url is string {
+  if (!url || typeof url !== 'string') return false
+  const trimmed = url.trim()
+  if (!trimmed) return false
+  if (trimmed.includes('placeholder.svg')) return false
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return true
+  if (trimmed.startsWith('/')) return true
+  return false
+}
+
 export function EmbedChatHeader({
   agentName,
   onNewChat,
   onShowHistory,
   userColor = '#2563eb',
-  headerIcon = 'bot'
+  headerIcon = 'bot',
+  profileImage = null,
 }: EmbedChatHeaderProps) {
   // Get the icon component dynamically from Lucide
   const getIconComponent = (iconName: string) => {
@@ -49,20 +62,31 @@ export function EmbedChatHeader({
   };
   
   const IconComponent = getIconComponent(headerIcon);
+  const showAvatar = isUsableProfileImage(profileImage);
   
   return (
     <div className="embed-header flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex-shrink-0">
-      <div className="flex items-center gap-2">
-        <IconComponent 
-          className="h-5 w-5" 
-          style={{ color: userColor }}
-        />
-        <h1 className="font-semibold text-lg">
+      <div className="flex items-center gap-2 min-w-0">
+        {showAvatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={profileImage}
+            alt=""
+            className="h-7 w-7 rounded-full object-cover flex-shrink-0"
+            style={{ boxShadow: `0 0 0 1.5px ${userColor}33` }}
+          />
+        ) : (
+          <IconComponent 
+            className="h-5 w-5 flex-shrink-0" 
+            style={{ color: userColor }}
+          />
+        )}
+        <h1 className="font-semibold text-lg truncate">
           {agentName || 'Chat Assistant'}
         </h1>
       </div>
       
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-shrink-0">
         <Button
           variant="outlinePrimary"
           size="sm"
@@ -91,4 +115,4 @@ export function EmbedChatHeader({
       </div>
     </div>
   )
-} 
+}

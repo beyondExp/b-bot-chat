@@ -1,6 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 import { applyDefaultBbotModel, isBBotAssistantId } from "@/lib/bbot-default-model"
+import {
+  authorizeEmbedThreadAccess,
+  getEmbedAgentIdFromRequest,
+  getEmbedOriginFromRequest,
+  getEmbedSessionTokenFromRequest,
+  hashEmbedSessionToken,
+  metadataHasEmbedSessionBinding,
+} from "@/lib/embed-session-server"
 
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
@@ -48,6 +56,95 @@ function injectGeminiApiKey(body: any) {
   return body
 }
 
+async function _fetchThreadStateAsTrusted(
+  langGraphApiUrl: string,
+  apiKey: string,
+  threadId: string,
+  userId: string,
+): Promise<any | null> {
+  const response = await fetch(
+    `${langGraphApiUrl}/threads/${encodeURIComponent(threadId)}/state`,
+    {
+      method: "GET",
+      headers: createLangGraphJsonHeaders(apiKey, userId),
+    },
+  )
+  if (!response.ok) return null
+  return response.json().catch(() => null)
+}
+
+async function _fetchThreadAsTrusted(
+  langGraphApiUrl: string,
+  apiKey: string,
+  threadId: string,
+): Promise<{ thread: any | null; userId: string }> {
+  let response = await fetch(`${langGraphApiUrl}/threads/${encodeURIComponent(threadId)}`, {
+    method: "GET",
+    headers: createLangGraphJsonHeaders(apiKey, "admin"),
+  })
+  let userId = "admin"
+  if (response.status === 404) {
+    response = await fetch(`${langGraphApiUrl}/threads/${encodeURIComponent(threadId)}`, {
+      method: "GET",
+      headers: createLangGraphJsonHeaders(apiKey, "anonymous-embed-user"),
+    })
+    if (response.ok) userId = "anonymous-embed-user"
+  }
+  if (response.ok) {
+    const thread = await response.json().catch(() => null)
+    return { thread, userId }
+  }
+
+  // Aegra/Synapse often returns 404 for GET /threads/{id} right after a
+  // successful anonymous run, while GET /threads/{id}/state still works.
+  // Synthesize a thread payload so the SDK does not treat success as failure.
+  for (const candidateUserId of ["admin", "anonymous-embed-user"] as const) {
+    const state = await _fetchThreadStateAsTrusted(
+      langGraphApiUrl,
+      apiKey,
+      threadId,
+      candidateUserId,
+    )
+    if (!state) continue
+    const values = state.values && typeof state.values === "object" ? state.values : state
+    const metadata =
+      (state.metadata && typeof state.metadata === "object" && state.metadata) ||
+      (values?.metadata && typeof values.metadata === "object" && values.metadata) ||
+      {}
+    return {
+      thread: {
+        thread_id: threadId,
+        values,
+        metadata,
+        status: state.status || "idle",
+      },
+      userId: candidateUserId,
+    }
+  }
+
+  return { thread: null, userId }
+}
+
+async function _resolveChannelContext(agentId: string): Promise<{ expertId?: string | number; companyId?: number }> {
+  const out: { expertId?: string | number; companyId?: number } = {}
+  if (!agentId) return out
+  try {
+    const assistant = await _fetchAssistantForEmbedCheck(agentId)
+    const meta = assistant?.metadata || {}
+    const expertRaw = meta?.expert_id ?? meta?.expertId
+    if (expertRaw != null && String(expertRaw).trim() !== "") {
+      out.expertId = Number.isNaN(Number(expertRaw)) ? String(expertRaw) : Number(expertRaw)
+    }
+    const companyRaw = meta?.company_id ?? meta?.companyId
+    if (companyRaw != null && String(companyRaw).trim() !== "" && !Number.isNaN(Number(companyRaw))) {
+      out.companyId = Number(companyRaw)
+    }
+  } catch {
+    // best-effort
+  }
+  return out
+}
+
 // Helper function to create anonymous threads for embed mode
 async function handleAnonymousThreadCreation(request: NextRequest) {
   console.log("[EmbedProxy] Creating anonymous thread for embed mode");
@@ -59,11 +156,18 @@ async function handleAnonymousThreadCreation(request: NextRequest) {
     if (!apiKey) {
       return NextResponse.json({ error: "ADMIN_API_KEY not configured" }, { status: 500 })
     }
+
+    const sessionToken = getEmbedSessionTokenFromRequest(request)
+    if (!sessionToken || sessionToken.length < 32) {
+      return NextResponse.json({ error: "embed_session_required" }, { status: 403 })
+    }
     
     // Set up headers for LangGraph API
     const headers = new Headers();
     headers.set("Content-Type", "application/json");
-    headers.set("X-User-ID", "anonymous-embed-user");
+    // The thread's metadata identifies the end user as anonymous; its
+    // server-side owner is admin so the trusted embed proxy can read it.
+    headers.set("X-User-ID", "admin");
     headers.set("Admin-API-Key", apiKey);
     
     // Try to extract assistant/agent and expert from the embed context
@@ -90,14 +194,28 @@ async function handleAnonymousThreadCreation(request: NextRequest) {
       console.log('[EmbedProxy] Failed to parse embed context for agent/expert:', e);
     }
 
+    const sessionHash = hashEmbedSessionToken(sessionToken)
+    const embedOrigin = getEmbedOriginFromRequest(request)
+    const channelContext = agentId ? await _resolveChannelContext(agentId) : {}
+    if (!expertId && channelContext.expertId != null) {
+      expertId = String(channelContext.expertId)
+    }
+
     // Create thread payload
     const threadPayload: any = {
       metadata: {
         anonymous: true,
+        embed_thread: true,
+        channel_type: "Embed",
         distributionChannel: { type: "Embed" },
-        user_id: "anonymous-embed-user"
+        user_id: "anonymous-embed-user",
+        embed_session_hash: sessionHash,
+        owner: `embed-session:${sessionHash.slice(0, 24)}`,
       }
     };
+    if (embedOrigin) {
+      threadPayload.metadata.embed_origin = embedOrigin
+    }
 
     // Enrich metadata when available so Hub can later filter by expert_id
     if (agentId) {
@@ -111,8 +229,16 @@ async function handleAnonymousThreadCreation(request: NextRequest) {
     if (expertId) {
       threadPayload.metadata.expert_id = isNaN(Number(expertId)) ? expertId : Number(expertId);
     }
+    if (channelContext.companyId != null) {
+      threadPayload.metadata.company_id = channelContext.companyId
+      threadPayload.metadata.shared_chat = true
+      threadPayload.metadata.shared_acl = { mode: "company_members", owner: "embed" }
+    }
     
-    console.log("[EmbedProxy] Creating thread in LangGraph with payload:", threadPayload);
+    console.log("[EmbedProxy] Creating thread in LangGraph with payload:", {
+      ...threadPayload,
+      metadata: { ...threadPayload.metadata, embed_session_hash: "[redacted]" },
+    });
     
     // Make request to create thread in LangGraph
     const response = await fetch(`${langGraphApiUrl}/threads`, {
@@ -126,53 +252,24 @@ async function handleAnonymousThreadCreation(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("[EmbedProxy] Failed to create thread in LangGraph:", errorText);
-      
-      // Fallback to local anonymous thread if LangGraph creation fails
-      const fallbackThreadId = `embed-anonymous-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const fallbackThread = {
-        thread_id: fallbackThreadId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        user_id: "anonymous-embed-user",
-        metadata: { 
-          anonymous: true,
-          distributionChannel: { type: "Embed" }
-        },
-        status: "idle",
-        config: {},
-        values: {}
-      };
-      
-      console.log("[EmbedProxy] Using fallback anonymous thread:", fallbackThreadId);
-      return Response.json(fallbackThread, { status: 201 });
+      return NextResponse.json({ error: "thread_create_failed" }, { status: 502 });
     }
     
     const threadData = await response.json();
     console.log("[EmbedProxy] Successfully created thread in LangGraph:", threadData.thread_id);
+    try {
+      if (threadData?.metadata && typeof threadData.metadata === "object") {
+        delete threadData.metadata.embed_session_hash
+      }
+    } catch {
+      // ignore
+    }
     
     return Response.json(threadData, { status: 201 });
     
   } catch (error) {
     console.error("[EmbedProxy] Error creating anonymous thread:", error);
-    
-    // Fallback to local anonymous thread on any error
-    const fallbackThreadId = `embed-anonymous-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const fallbackThread = {
-      thread_id: fallbackThreadId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      user_id: "anonymous-embed-user",
-      metadata: { 
-        anonymous: true,
-        distributionChannel: { type: "Embed" }
-      },
-      status: "idle",
-      config: {},
-      values: {}
-    };
-    
-    console.log("[EmbedProxy] Using fallback anonymous thread after error:", fallbackThreadId);
-    return Response.json(fallbackThread, { status: 201 });
+    return NextResponse.json({ error: "thread_create_failed" }, { status: 500 });
   }
 }
 
@@ -223,12 +320,17 @@ async function _resolveSynapseAssistantIdFromDistributionChannel(publicChannelId
     })
     if (!r.ok) return null
     const dc: any = await r.json().catch(() => null)
+    // Prefer an explicit Synapse assistant UUID when MainAPI provides one.
+    // Public embed channels (e.g. Rocket) often only expose graph_id ("bbot") —
+    // Synapse rejects the distribution-channel UUID as assistant_id.
     const candidate =
       dc?.assistant_id ||
       dc?.assistantId ||
       dc?.assistant?.assistant_id ||
       dc?.assistant?.assistantId ||
-      dc?.assistant?.id
+      dc?.assistant?.id ||
+      dc?.graph_id ||
+      dc?.metadata?.graph_id
     const resolved = String(candidate || "").trim()
     return resolved ? resolved : null
   } catch {
@@ -368,11 +470,18 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
     if (isThreadMetadataUpdateRequest) {
       console.log('[EMBED-PROXY] Handling thread metadata update request:', pathSegments.join('/'));
       const targetUrl = `${LANGGRAPH_API_URL}/${pathSegments.join('/')}${request.nextUrl.search}`;
+      const threadId = String(pathSegments[1] || "").trim()
+      const loaded = await _fetchThreadAsTrusted(LANGGRAPH_API_URL, apiKey, threadId)
+      if (!loaded.thread) {
+        return NextResponse.json({ error: "thread_not_found" }, { status: 404 })
+      }
+      const authErr = authorizeEmbedThreadAccess(request, loaded.thread?.metadata)
+      if (authErr) return authErr
       
       const headers = new Headers(request.headers);
       // Synapse expects Admin-API-Key for admin auth
       headers.set('Admin-API-Key', apiKey);
-      headers.set('X-User-ID', 'anonymous-embed-user');
+      headers.set('X-User-ID', loaded.userId);
       headers.delete('host');
       headers.delete('authorization');
       headers.delete('x-api-key');
@@ -380,10 +489,11 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       console.log('[EMBED-PROXY] Forwarding metadata update to LangGraph:', targetUrl);
 
       try {
+        const body = await request.text()
         const response = await fetch(targetUrl, {
           method: method,
           headers: headers,
-          body: await request.text(),
+          body,
           redirect: 'manual',
         });
 
@@ -396,6 +506,27 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
 
     if (isThreadReadRequest || isThreadStateRequest) {
       console.log("[EmbedProxy] Handling thread read/state request directly for embed mode:", targetPath)
+      const threadId = String(pathSegments[1] || "").trim()
+      const loaded = await _fetchThreadAsTrusted(LANGGRAPH_API_URL, apiKey, threadId)
+      if (!loaded.thread) {
+        return NextResponse.json({ error: "thread_not_found" }, { status: 404 })
+      }
+      const authErr = authorizeEmbedThreadAccess(request, loaded.thread?.metadata)
+      if (authErr) return authErr
+
+      if (isThreadReadRequest) {
+        try {
+          if (loaded.thread?.metadata && typeof loaded.thread.metadata === "object") {
+            const clone = JSON.parse(JSON.stringify(loaded.thread))
+            delete clone.metadata.embed_session_hash
+            return NextResponse.json(clone, { status: 200 })
+          }
+        } catch {
+          // fall through
+        }
+        return NextResponse.json(loaded.thread, { status: 200 })
+      }
+
       const url = new URL(`${LANGGRAPH_API_URL}/${targetPath}`)
       const searchParams = new URLSearchParams(request.nextUrl.search)
       for (const [key, value] of searchParams.entries()) {
@@ -404,7 +535,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
 
       const response = await fetch(url.toString(), {
         method: "GET",
-        headers: createLangGraphJsonHeaders(apiKey, "anonymous-embed-user"),
+        headers: createLangGraphJsonHeaders(apiKey, loaded.userId),
         redirect: "manual",
       })
 
@@ -422,12 +553,24 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       // Route directly to LangGraph API, bypassing MainAPI user authentication
       const langGraphApiUrl = process.env.LANGGRAPH_API_URL || "https://b-bot-synapse-7da200fd4cf05d3d8cc7f6262aaa05ee.eu.langgraph.app"
       let streamTargetPath = targetPath
+
+      const streamThreadId = String(pathSegments?.[1] || "").trim()
+      if (streamThreadId && !isValidUUID(streamThreadId)) {
+        // Old local fallback IDs like `embed-anonymous-*` never exist in Synapse.
+        console.warn("[EmbedProxy] Rejecting non-UUID stream thread id:", streamThreadId)
+        return NextResponse.json(
+          { error: "invalid_thread_id", detail: "Stale local thread id; create a new thread" },
+          { status: 410 },
+        )
+      }
       
       // Use a minimal header set for upstream streaming.
       // Forwarding browser hop-by-hop headers can destabilize the SSE transport.
       const headers = new Headers();
       headers.set("Content-Type", "application/json");
-      headers.set("X-User-ID", "anonymous-embed-user");
+      // The public thread remains anonymous, but the trusted server-to-server
+      // stream request must read the channel assistant across owners.
+      headers.set("X-User-ID", "admin");
       headers.set("Admin-API-Key", apiKey);
       const requestId = request.headers.get("x-request-id") || request.headers.get("x-requestid")
       if (requestId) headers.set("X-Request-ID", requestId);
@@ -438,6 +581,18 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         body = await request.json()
         body = applyDefaultBbotModel(body)
         body = injectGeminiApiKey(body)
+        // Aegra validates run metadata as a flat primitive map. Preserve the
+        // public channel details without sending the nested object that causes
+        // a 422 validation error on public embed runs.
+        const runMetadata = (body as any)?.metadata
+        if (
+          runMetadata &&
+          typeof runMetadata === "object" &&
+          runMetadata.distributionChannel &&
+          typeof runMetadata.distributionChannel === "object"
+        ) {
+          runMetadata.distributionChannel = JSON.stringify(runMetadata.distributionChannel)
+        }
         if (STREAM_DEBUG) console.log("[EmbedProxy] Stream request body:", JSON.stringify(body, null, 2));
       } catch (error) {
         console.log("[EmbedProxy] Error parsing stream request body:", error);
@@ -458,25 +613,26 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
           : "")
 
       let assistantPublicId = assistantFromPayload
+      let streamUserId = "admin"
       try {
         if (threadId) {
-          const tRes = await fetch(`${langGraphApiUrl}/threads/${encodeURIComponent(threadId)}`, {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              "X-User-ID": "admin",
-              "Admin-API-Key": apiKey,
-            },
-          })
-          if (tRes.ok) {
-            const tData: any = await tRes.json().catch(() => null)
-            const fromMeta = String(tData?.metadata?.assistant_id || tData?.metadata?.agent_id || "").trim()
-            if (fromMeta) assistantPublicId = fromMeta
+          const loaded = await _fetchThreadAsTrusted(langGraphApiUrl, apiKey, threadId)
+          if (!loaded.thread) {
+            return NextResponse.json({ error: "thread_not_found" }, { status: 404 })
+          }
+          const authErr = authorizeEmbedThreadAccess(request, loaded.thread?.metadata)
+          if (authErr) return authErr
+          streamUserId = loaded.userId
+          const fromMeta = String(loaded.thread?.metadata?.assistant_id || loaded.thread?.metadata?.agent_id || "").trim()
+          if (fromMeta) assistantPublicId = fromMeta
+          if (!metadataHasEmbedSessionBinding(loaded.thread?.metadata) && !getEmbedAgentIdFromRequest(request)) {
+            console.log("[EmbedProxy] Legacy embed thread stream without session binding:", threadId)
           }
         }
       } catch {
         // best-effort; fall back to payload
       }
+      headers.set("X-User-ID", streamUserId)
 
       if (assistantPublicId) {
         const pwErr = await _requireEmbedPasswordIfConfigured(request, assistantPublicId)
@@ -563,25 +719,22 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       const url = new URL(`${langGraphApiUrl}/${targetPath}`)
       console.log("[EmbedProxy] Routing history directly to LangGraph:", url);
 
-      // Enforce password based on thread metadata assistant_id (best-effort).
+      // Enforce password + session binding based on thread metadata.
+      let historyUserId = "admin"
       try {
         const threadId = pathSegments[1]
         if (threadId) {
-          const tRes = await fetch(`${langGraphApiUrl}/threads/${encodeURIComponent(threadId)}`, {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              "X-User-ID": "admin",
-              "Admin-API-Key": apiKey,
-            },
-          })
-          if (tRes.ok) {
-            const tData: any = await tRes.json().catch(() => null)
-            const assistantId = String(tData?.metadata?.assistant_id || tData?.metadata?.agent_id || "").trim()
-            if (assistantId) {
-              const pwErr = await _requireEmbedPasswordIfConfigured(request, assistantId)
-              if (pwErr) return pwErr
-            }
+          const loaded = await _fetchThreadAsTrusted(langGraphApiUrl, apiKey, threadId)
+          if (!loaded.thread) {
+            return NextResponse.json({ error: "thread_not_found" }, { status: 404 })
+          }
+          const authErr = authorizeEmbedThreadAccess(request, loaded.thread?.metadata)
+          if (authErr) return authErr
+          historyUserId = loaded.userId
+          const assistantId = String(loaded.thread?.metadata?.assistant_id || loaded.thread?.metadata?.agent_id || "").trim()
+          if (assistantId) {
+            const pwErr = await _requireEmbedPasswordIfConfigured(request, assistantId)
+            if (pwErr) return pwErr
           }
         }
       } catch {
@@ -596,7 +749,7 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       
       // Only send headers LangGraph needs. Forwarded browser/proxy headers such as
       // Expect/Connection can make undici fail before the final history refresh.
-      const headers = createLangGraphJsonHeaders(apiKey, "anonymous-embed-user")
+      const headers = createLangGraphJsonHeaders(apiKey, historyUserId)
       
       // Get request body for history request
       let body = null

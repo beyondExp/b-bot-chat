@@ -1,4 +1,7 @@
-const DEFAULT_BBOT_INFOMANIAK_MODEL = "infomaniak/moonshotai/Kimi-K2.5"
+// Infomaniak pricing (CHF / 1M tokens): strong enough for tool-calling Main agent,
+// much cheaper than Kimi-K2.x (0.60/3.00). Kimi-K2.5 is gone (404); use Small-4.
+const DEFAULT_BBOT_INFOMANIAK_MODEL =
+  "infomaniak/mistralai/Mistral-Small-4-119B-2603"
 
 function readEnv(name: string): string {
   return String(process.env[name] || "").trim()
@@ -57,18 +60,35 @@ export function applyDefaultBbotModel(body: any) {
     typeof configurable.response_model_api_key === "string"
       ? configurable.response_model_api_key.trim()
       : ""
+  const hasProviderKeyRef =
+    Boolean(configurable.response_model_provider_key_ref) ||
+    Boolean(configurable.user_provider_key_id)
 
   const envModel = readEnv("BBOT_DEFAULT_RESPONSE_MODEL")
   const envBaseUrl = buildDefaultBaseUrl()
   const envApiKey = readDefaultApiKey()
 
-  // Safe fallback: only default to the Infomaniak Kimi model when we also have
+  // Safe fallback: only default to the Infomaniak model when we also have
   // a usable base URL (derived from product_id or set explicitly).
   const fallbackModel = envBaseUrl ? DEFAULT_BBOT_INFOMANIAK_MODEL : ""
   const nextModel = envModel || fallbackModel
 
   if (!configuredModel && nextModel) {
     configurable.response_model = nextModel
+  }
+
+  const effectiveModel =
+    typeof configurable.response_model === "string" ? configurable.response_model.trim() : ""
+  const modelLooksInfomaniak =
+    !effectiveModel ||
+    effectiveModel.startsWith("infomaniak/") ||
+    effectiveModel.includes("mistralai/") ||
+    effectiveModel.includes("moonshotai/")
+
+  // Never attach Infomaniak base_url/api_key onto an OpenAI (or other keyed)
+  // channel model such as openai/gpt-5-nano — that yields Infomaniak 400s.
+  if (!modelLooksInfomaniak || hasProviderKeyRef) {
+    return body
   }
 
   if (!configuredBaseUrl && envBaseUrl) {

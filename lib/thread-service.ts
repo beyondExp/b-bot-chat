@@ -23,12 +23,30 @@ export interface ThreadWithMessages extends Thread {
 }
 
 export class ThreadService {
-  private baseUrl: string
   private getAuthToken: (() => Promise<string | null>) | null
   
   constructor(getAuthToken?: () => Promise<string | null>) {
-    this.baseUrl = '/api/proxy'
     this.getAuthToken = getAuthToken || null
+  }
+
+  private async resolveAuthToken(): Promise<string | null> {
+    try {
+      if (this.getAuthToken) {
+        return await this.getAuthToken()
+      }
+      if (isLocallyAuthenticated()) {
+        return getAuthToken()
+      }
+    } catch (error) {
+      console.error('Failed to get auth token:', error)
+    }
+    return null
+  }
+
+  private async resolveBaseUrl(): Promise<string> {
+    // Anonymous main-chat must use embed-proxy (admin key server-side).
+    const token = await this.resolveAuthToken()
+    return token ? '/api/proxy' : '/api/embed-proxy'
   }
 
   private async getHeaders(): Promise<HeadersInit> {
@@ -36,21 +54,9 @@ export class ThreadService {
       'Content-Type': 'application/json',
     }
 
-    // Try to get auth token
-    try {
-      let token: string | null = null
-      
-      if (this.getAuthToken) {
-        token = await this.getAuthToken()
-      } else if (isLocallyAuthenticated()) {
-        token = getAuthToken()
-      }
-      
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-    } catch (error) {
-      console.error('Failed to get auth token:', error)
+    const token = await this.resolveAuthToken()
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
     }
 
     return headers
@@ -59,13 +65,14 @@ export class ThreadService {
   async getThreads(userId?: string, assistantId?: string): Promise<Thread[]> {
     try {
       const headers = await this.getHeaders()
+      const baseUrl = await this.resolveBaseUrl()
       
       // Try multiple endpoint approaches since search is not working
       const endpoints = [
         // Try the basic threads endpoint with query params
-        `${this.baseUrl}/threads`,
+        `${baseUrl}/threads`,
         // Try the search endpoint as a fallback
-        `${this.baseUrl}/threads/search`
+        `${baseUrl}/threads/search`
       ]
       
       for (const url of endpoints) {
@@ -173,7 +180,8 @@ export class ThreadService {
   async getThread(threadId: string): Promise<ThreadWithMessages | null> {
     try {
       const headers = await this.getHeaders()
-      const url = `${this.baseUrl}/threads/${threadId}/state`
+      const baseUrl = await this.resolveBaseUrl()
+      const url = `${baseUrl}/threads/${threadId}/state`
       
       console.log('[ThreadService] Fetching thread:', url)
       
@@ -200,7 +208,8 @@ export class ThreadService {
   async deleteThread(threadId: string): Promise<boolean> {
     try {
       const headers = await this.getHeaders()
-      const url = `${this.baseUrl}/threads/${threadId}`
+      const baseUrl = await this.resolveBaseUrl()
+      const url = `${baseUrl}/threads/${threadId}`
       
       console.log('[ThreadService] Deleting thread:', url)
       
@@ -220,7 +229,8 @@ export class ThreadService {
   async createThread(config?: any): Promise<Thread | null> {
     try {
       const headers = await this.getHeaders()
-      const url = `${this.baseUrl}/threads`
+      const baseUrl = await this.resolveBaseUrl()
+      const url = `${baseUrl}/threads`
       
       const body: any = {}
       if (config) {

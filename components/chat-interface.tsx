@@ -30,7 +30,14 @@ import { createContactsStore } from "@/lib/contacts-store"
 import { fetchBranding, type Branding } from "@/lib/branding"
 import { useI18n } from "@/lib/i18n"
 import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/chat-user-profile"
+import { extractChannelRunConfig } from "@/lib/channel-run-config"
 import { generateLocalKokoroTts, isLocalKokoroTtsModality } from "@/lib/local-tts-service"
+import { getOrCreateEmbedSessionToken } from "@/lib/embed-session"
+import {
+  extractMessagesFromHistory,
+  lastAssistantTextLength,
+  preferRicherMessages,
+} from "@/lib/message-reconcile"
 
 // Import the LANGGRAPH_AUDIENCE constant
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
@@ -44,6 +51,9 @@ type ChatStreamMessage = {
   type?: string
   content?: unknown
 }
+
+// Main chat identifier to separate from embed storage (module scope so init helpers can use it).
+const MAIN_CHAT_ID = "main-chat"
 
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const { user, isAuthenticated, getAccessTokenSilently, provider } = useAppAuth()
@@ -213,6 +223,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [fallbackStreamMessages, setFallbackStreamMessages] = useState<any[]>([])
   const lastStreamLoadingRef = useRef(false)
   const lastFallbackErrorKeyRef = useRef<string | null>(null)
+  const pendingFallbackErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [canonicalThreadMessages, setCanonicalThreadMessages] = useState<any[] | null>(null)
   const pendingPostStreamReconcileRef = useRef(false)
   const reconcileInFlightRef = useRef(false)
@@ -286,16 +297,69 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     }
   }, [])
 
+  const hasAssistantReplyAfterLastHuman = useCallback((messages: any[]): boolean => {
+    if (!Array.isArray(messages) || messages.length === 0) return false
+
+    let lastHumanIndex = -1
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const type = String(messages[i]?.type || messages[i]?.role || "").toLowerCase()
+      if (type === "human" || type === "user") {
+        lastHumanIndex = i
+        break
+      }
+    }
+    if (lastHumanIndex === -1) return false
+
+    return messages.slice(lastHumanIndex + 1).some((msg) => {
+      const type = String(msg?.type || msg?.role || "").toLowerCase()
+      if (!(type === "ai" || type === "assistant")) return false
+      // Content is often a LangChain block array; String(array) is useless ("[object Object]").
+      return buildReplyPreview(msg?.content).trim().length > 0
+    })
+  }, [buildReplyPreview])
+
   const appendFriendlyStreamErrorMessage = useCallback((details?: string) => {
+    // Synapse often finishes successfully while the SSE client still emits onError
+    // (or reconcile races before content blocks are visible). Never overlay an
+    // apology bubble when the user already got a real assistant reply.
+    // Note: do not read `thread` here — this callback is declared before useStream.
+    const getExisting = () =>
+      preferRicherMessages(messagesRef.current, canonicalThreadMessages)
+
+    if (hasAssistantReplyAfterLastHuman(getExisting())) return
+
+    const lower = String(details || "").toLowerCase()
+    // Transient auth/reconcile noise after a successful anonymous run — not a user-facing failure.
+    if (
+      lower.includes("embed_channel_mismatch") ||
+      lower.includes("embed_session_mismatch") ||
+      lower.includes("embed_origin_mismatch")
+    ) {
+      console.warn("[Chat] Ignoring embed auth noise for apology UI:", details)
+      return
+    }
+
     const key = `${ChatHistoryManager.getCurrentThreadId("main-chat") || "no-thread"}:${String(details || "stream-error").slice(0, 120)}`
     if (lastFallbackErrorKeyRef.current === key) return
-    lastFallbackErrorKeyRef.current = key
-    const fallbackMessage = buildFriendlyStreamErrorMessage(details)
-    setFallbackStreamMessages(prev => [...prev, fallbackMessage])
-  }, [buildFriendlyStreamErrorMessage])
-  
-  // Main chat identifier to separate from embed storage
-  const MAIN_CHAT_ID = "main-chat"
+
+    // onError frequently fires before React has flushed the assistant message.
+    // Defer and re-check so successful runs never show a false apology.
+    if (pendingFallbackErrorTimerRef.current) {
+      clearTimeout(pendingFallbackErrorTimerRef.current)
+    }
+    pendingFallbackErrorTimerRef.current = setTimeout(() => {
+      pendingFallbackErrorTimerRef.current = null
+      if (hasAssistantReplyAfterLastHuman(getExisting())) return
+      if (lastFallbackErrorKeyRef.current === key) return
+      lastFallbackErrorKeyRef.current = key
+      const fallbackMessage = buildFriendlyStreamErrorMessage(details)
+      setFallbackStreamMessages((prev) => [...prev, fallbackMessage])
+    }, 750)
+  }, [
+    buildFriendlyStreamErrorMessage,
+    canonicalThreadMessages,
+    hasAssistantReplyAfterLastHuman,
+  ])
   
   // Initialize currentSession from saved thread data
   const getInitialSession = (): ChatSession | null => {
@@ -785,6 +849,51 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     pendingPostStreamReconcileRef.current = false
   }, [activeThreadId])
 
+  // Anonymous Swiss Chat: a new browser tab gets a fresh sessionStorage token while
+  // localStorage may still point at the previous thread → embed_session_mismatch.
+  // Probe once on mount and drop incompatible threads before the user sends.
+  useEffect(() => {
+    if (isAuthenticated) return
+    const tid = String(ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID) || "").trim()
+    if (!tid) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const sessionToken = getOrCreateEmbedSessionToken(selectedAgent || "bbot", MAIN_CHAT_ID)
+        const res = await fetch(`/api/embed-proxy/threads/${encodeURIComponent(tid)}/state`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Embed-Session": sessionToken,
+            "X-Embed-Agent-Id": selectedAgent || "bbot",
+          },
+          credentials: "include",
+        })
+        if (cancelled) return
+        if (res.status !== 403) return
+        const payload = await res.json().catch(() => null)
+        const err = String(payload?.error || "").toLowerCase()
+        if (
+          err.includes("embed_session_mismatch") ||
+          err.includes("embed_session_required") ||
+          err.includes("embed_origin_mismatch")
+        ) {
+          console.warn("[Chat] Dropping incompatible anonymous thread on mount:", err)
+          ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+          setActiveThreadId(undefined)
+          setCurrentSession(null)
+          setCanonicalThreadMessages(null)
+          setFallbackStreamMessages([])
+        }
+      } catch {
+        // ignore
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated, selectedAgent])
+
   const reconcileThreadState = useCallback(
     async (threadId: string | undefined | null) => {
       const tid = String(threadId || "").trim()
@@ -792,11 +901,48 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       if (reconcileInFlightRef.current) return
       reconcileInFlightRef.current = true
       try {
-        const state = await threadService.getThread(tid)
-        const messages = state?.values?.messages
-        if (Array.isArray(messages)) {
-          setCanonicalThreadMessages(messages)
-          messagesRef.current = messages
+        // Baseline: whatever the live stream already showed (may be truncated).
+        let best = Array.isArray(messagesRef.current) ? [...messagesRef.current] : []
+
+        try {
+          const state = await threadService.getThread(tid)
+          const stateMessages = state?.values?.messages
+          if (Array.isArray(stateMessages) && stateMessages.length) {
+            best = preferRicherMessages(best, stateMessages)
+          }
+        } catch (e) {
+          console.warn("[Chat] State reconcile failed:", e)
+        }
+
+        // Reload uses history — that snapshot has the full assistant text.
+        // Retry briefly: Synapse sometimes persists the final checkpoint a moment later.
+        const historyUrl = `${getApiUrl()}/threads/${encodeURIComponent(tid)}/history`
+        for (const delayMs of [0, 400, 1000]) {
+          if (delayMs) {
+            await new Promise((r) => setTimeout(r, delayMs))
+          }
+          try {
+            const histRes = await fetch(historyUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ limit: 10 }),
+            })
+            if (!histRes.ok) continue
+            const histMessages = extractMessagesFromHistory(await histRes.json())
+            if (histMessages?.length) {
+              best = preferRicherMessages(best, histMessages)
+              // Stop early once history has a real assistant reply longer than the stream freeze.
+              if (lastAssistantTextLength(best) > 0) break
+            }
+          } catch (e) {
+            console.warn("[Chat] History reconcile failed:", e)
+          }
+        }
+
+        if (best.length) {
+          setCanonicalThreadMessages(best)
+          messagesRef.current = best
         }
       } catch (e) {
         console.warn("[Chat] Failed to reconcile thread state:", e)
@@ -824,17 +970,58 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   console.log('[Chat] Can initialize stream:', canInitializeStream);
   console.log('[Chat] Authentication state - isAuthenticated:', isAuthenticated, 'apiKey present:', !!apiKey, 'selectedAgent:', selectedAgent);
   
-  // Set up global fetch interceptor for LangGraph SDK internal requests
+  // Set up global fetch interceptor for LangGraph SDK / ThreadService requests
   useEffect(() => {
-    // Only set up interceptor if we have an API key (authenticated users)
-    if (!apiKey) return;
-    
     const originalFetch = window.fetch;
     window.fetch = async (url: string | URL | Request, options?: RequestInit) => {
-      // Check if this is a request to our proxy endpoints
-      const urlString = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-      
-      if (urlString.includes('/api/proxy/') || urlString.includes('/api/embed-proxy/')) {
+      let urlString = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+
+      // Anonymous main-chat must never hit /api/proxy (auth required). Rewrite
+      // accidental thread calls onto embed-proxy and attach a session token so
+      // thread create/stream/state work without login.
+      if (!isAuthenticated) {
+        if (urlString.includes('/api/proxy/threads')) {
+          urlString = urlString.replace('/api/proxy/threads', '/api/embed-proxy/threads')
+        }
+        if (urlString.includes('/api/embed-proxy/')) {
+          const sessionToken = getOrCreateEmbedSessionToken(selectedAgent || 'bbot', MAIN_CHAT_ID)
+          const requestBase =
+            url instanceof Request ? new Request(urlString, url) : urlString
+          const existingHeaders = new Headers(
+            options?.headers ?? (url instanceof Request ? url.headers : undefined),
+          )
+          existingHeaders.set('X-Embed-Session', sessionToken)
+          existingHeaders.set('X-Embed-Agent-Id', selectedAgent || 'bbot')
+          const response = await originalFetch(requestBase, { ...options, headers: existingHeaders })
+
+          // New tab = fresh sessionStorage token, but localStorage may still hold
+          // the previous anonymous thread → 403 session mismatch. Drop it so the
+          // next send creates a new thread instead of looping apologies.
+          if (response.status === 403 && urlString.includes('/threads/')) {
+            try {
+              const clone = response.clone()
+              const payload = await clone.json().catch(() => null)
+              const err = String(payload?.error || '').toLowerCase()
+              if (
+                err.includes('embed_session_mismatch') ||
+                err.includes('embed_session_required') ||
+                err.includes('embed_origin_mismatch')
+              ) {
+                console.warn('[Chat] Clearing stale anonymous thread after', err)
+                ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+                setActiveThreadId(undefined)
+                setCurrentSession(null)
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          return response
+        }
+      }
+
+      if (apiKey && (urlString.includes('/api/proxy/') || urlString.includes('/api/embed-proxy/'))) {
         console.log('[Chat] Intercepting fetch to proxy:', urlString);
         
         // Create headers object, being careful not to duplicate X-API-Key
@@ -850,7 +1037,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           ...options,
           headers: existingHeaders,
         };
-        return originalFetch(url, newOptions);
+        return originalFetch(urlString.includes('/api/') ? urlString : url, newOptions);
       }
       
       return originalFetch(url, options);
@@ -860,7 +1047,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     return () => {
       window.fetch = originalFetch;
     };
-  }, [apiKey]);
+  }, [apiKey, isAuthenticated, selectedAgent]);
   
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
     apiUrl: getApiUrl(),
@@ -872,6 +1059,57 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       console.error("Stream error:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Chat error:", errorMessage);
+      const lower = errorMessage.toLowerCase()
+      if (
+        lower.includes("assistant") &&
+        (lower.includes("not found") || lower.includes("not_found"))
+      ) {
+        console.warn("Clearing thread after assistant not found:", errorMessage)
+        ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+        setActiveThreadId(undefined)
+        setCurrentSession(null)
+        appendFriendlyStreamErrorMessage(errorMessage)
+        return
+      }
+
+      if (
+        lower.includes("embed_session_mismatch") ||
+        lower.includes("embed_session_required") ||
+        lower.includes("embed_origin_mismatch")
+      ) {
+        console.warn("Clearing thread after session binding failure:", errorMessage)
+        ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+        setActiveThreadId(undefined)
+        setCurrentSession(null)
+        appendFriendlyStreamErrorMessage(errorMessage)
+        return
+      }
+
+      // After a run Synapse may rewrite assistant_id to a UUID; history used to 403
+      // with embed_channel_mismatch even though the answer already streamed.
+      if (lower.includes("embed_channel_mismatch")) {
+        console.warn("Ignoring embed channel mismatch noise after stream:", errorMessage)
+        return
+      }
+
+      // Anonymous main-chat (embed-proxy) often gets GET /threads/{id} 404 after a
+      // successful run while /state still has the answer. Skip the false apology.
+      // Keep this narrow — do NOT match "Assistant … not found".
+      if (
+        lower.includes("thread_not_found") ||
+        (lower.includes("thread") && (lower.includes("404") || lower.includes("not found")))
+      ) {
+        console.warn("Ignoring thread lookup 404 after stream:", errorMessage)
+        return
+      }
+      // Stale local `embed-anonymous-*` ids must be dropped so the next send creates a real UUID.
+      if (lower.includes("invalid_thread_id") || lower.includes("410")) {
+        console.warn("Clearing stale anonymous thread id:", errorMessage)
+        ChatHistoryManager.clearCurrentThreadId(MAIN_CHAT_ID)
+        setActiveThreadId(undefined)
+        setCurrentSession(null)
+        return
+      }
       appendFriendlyStreamErrorMessage(errorMessage);
     },
     onFinish: (state: { values?: { messages?: ChatStreamMessage[] } }) => {
@@ -888,6 +1126,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         setFollowUpSuggestionsLoading(false)
       }
       const finalMessages = state.values?.messages
+      // Do NOT freeze onFinish values into canonical UI state — that snapshot is often
+      // truncated mid-stream while history (after reload) has the full answer.
+      if (Array.isArray(finalMessages) && finalMessages.length > 0) {
+        messagesRef.current = preferRicherMessages(messagesRef.current, finalMessages)
+      }
       saveCurrentSession(Array.isArray(finalMessages) ? finalMessages : undefined);
     },
     onThreadId: (threadId: string) => {
@@ -987,9 +1230,14 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   // Extract tool events from message stream (since LangGraph SDK doesn't support onToolEvent directly)
   useEffect(() => {
-    // Sync messages ref for event handlers
-    const sourceMessages = (canonicalThreadMessages ?? thread.messages) as any[] | undefined
-    if (sourceMessages) messagesRef.current = sourceMessages
+    // Keep the richest snapshot — never clobber a streamed assistant reply with an
+    // empty/partial SDK array while post-stream history reconcile is in flight.
+    messagesRef.current = preferRicherMessages(
+      messagesRef.current,
+      canonicalThreadMessages,
+      thread.messages,
+    )
+    const sourceMessages = messagesRef.current as any[] | undefined
 
     if (sourceMessages && sourceMessages.length > 0) {
       // Find tool messages and convert them to tool events
@@ -1272,26 +1520,26 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         String(activeThreadId || "").trim() ||
         String(ChatHistoryManager.getCurrentThreadId(MAIN_CHAT_ID) || "").trim()
 
+      // Snapshot before reconcile: SDK/history races can empty messagesRef briefly.
+      const endSnapshot = preferRicherMessages(
+        messagesRef.current,
+        thread.messages,
+        canonicalThreadMessages,
+      )
+      const hadAssistantAtEnd = hasAssistantReplyAfterLastHuman(endSnapshot)
+      if (endSnapshot.length) {
+        messagesRef.current = endSnapshot
+      }
+
       void reconcileThreadState(tid).finally(() => {
-        const messages = (Array.isArray(messagesRef.current) ? messagesRef.current : []) as any[]
+        const messages = preferRicherMessages(
+          messagesRef.current,
+          endSnapshot,
+          canonicalThreadMessages,
+          thread.messages,
+        ) as any[]
+        if (hadAssistantAtEnd || hasAssistantReplyAfterLastHuman(messages)) return
         if (!messages.length) return
-
-        let lastHumanIndex = -1
-        for (let i = messages.length - 1; i >= 0; i -= 1) {
-          const type = String(messages[i]?.type || messages[i]?.role || "").toLowerCase()
-          if (type === "human" || type === "user") {
-            lastHumanIndex = i
-            break
-          }
-        }
-        if (lastHumanIndex === -1) return
-
-        const hasAssistantAfter = messages.slice(lastHumanIndex + 1).some((msg) => {
-          const type = String(msg?.type || msg?.role || "").toLowerCase()
-          const content = String(msg?.content || "").trim()
-          return (type === "ai" || type === "assistant") && content.length > 0
-        })
-        if (hasAssistantAfter) return
 
         appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
       })
@@ -1302,26 +1550,18 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       ? (canonicalThreadMessages ?? thread.messages)
       : []) as any[]
     if (!messages.length) return
-
-    let lastHumanIndex = -1
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const type = String(messages[i]?.type || messages[i]?.role || "").toLowerCase()
-      if (type === "human" || type === "user") {
-        lastHumanIndex = i
-        break
-      }
-    }
-    if (lastHumanIndex === -1) return
-
-    const hasAssistantAfter = messages.slice(lastHumanIndex + 1).some((msg) => {
-      const type = String(msg?.type || msg?.role || "").toLowerCase()
-      const content = String(msg?.content || "").trim()
-      return (type === "ai" || type === "assistant") && content.length > 0
-    })
-    if (hasAssistantAfter) return
+    if (hasAssistantReplyAfterLastHuman(messages)) return
 
     appendFriendlyStreamErrorMessage("stream ended without an assistant answer")
-  }, [thread.isLoading, thread.messages, canonicalThreadMessages, activeThreadId, appendFriendlyStreamErrorMessage, reconcileThreadState])
+  }, [
+    thread.isLoading,
+    thread.messages,
+    canonicalThreadMessages,
+    activeThreadId,
+    appendFriendlyStreamErrorMessage,
+    hasAssistantReplyAfterLastHuman,
+    reconcileThreadState,
+  ])
 
   // Save current session to chat history (only once per thread)
   const saveCurrentSession = useCallback((messagesOverride?: ChatStreamMessage[]) => {
@@ -1399,7 +1639,10 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           // Merge assistant apps with user apps (user apps take precedence)
           const agentObj = agents.find((a: any) => a.id === selectedAgent);
           const config = agentObj?.rawData?.config || agentObj?.rawData?.metadata?.config || {};
+          const channelConfig = extractChannelRunConfig(agentObj)
           const assistantApps = pickAppsDict(
+            channelConfig.apps,
+            (config as any)?.configurable?.apps,
             (config as any)?.apps,
             agentObj?.rawData?.apps,
             agentObj?.rawData?.metadata?.apps,
@@ -1410,11 +1653,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           const mergedApps = { ...assistantApps, ...userApps };
           const hasMergedApps = Object.keys(mergedApps).length > 0
           const userProfile = loadChatUserProfile(user?.sub || "anonymous")
-          const baseSystemMessage =
-            (typeof (config as any)?.system_message === "string" && (config as any).system_message.trim()
-              ? (config as any).system_message.trim()
-              : "") || "Be helpful and concise."
-          const system_message = buildSystemMessageWithUserProfile(baseSystemMessage, userProfile)
+          const system_message = buildSystemMessageWithUserProfile(
+            channelConfig.systemMessage,
+            userProfile,
+          )
+          const instructions = channelConfig.instructions || "Be helpful and concise."
           
           // Get output modalities directly from agent config
           const outputModalities = config.output_modalities || [];
@@ -1470,8 +1713,16 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   ...(knowledgeEntityId ? { knowledge_entity_id: knowledgeEntityId } : {}),
                   temperature: 0.7,
                   top_p: 1.0,
-                  instructions: "Be helpful and concise.",
+                  instructions,
                   system_message,
+                  ...(channelConfig.responseModel ? { response_model: channelConfig.responseModel } : {}),
+                  ...(channelConfig.queryModel ? { query_model: channelConfig.queryModel } : {}),
+                  ...(channelConfig.userProviderKeyId
+                    ? { user_provider_key_id: channelConfig.userProviderKeyId }
+                    : {}),
+                  ...(channelConfig.responseModelProviderKeyRef
+                    ? { response_model_provider_key_ref: channelConfig.responseModelProviderKeyRef }
+                    : {}),
                   ...(hasMergedApps ? { apps: mergedApps } : {}),
                   distribution_channel: { type: "Chat" },
                   input_modalities: Array.isArray((config as any)?.input_modalities) ? (config as any).input_modalities : [],
@@ -2284,7 +2535,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         onAudioData={handleCallAudioData}
         onCallConnected={handleCallConnected}
         onAudioPlayed={handleAudioPlayedDuringCall}
-        messages={(canonicalThreadMessages ?? thread.messages ?? []) as any[]}
+        messages={preferRicherMessages(canonicalThreadMessages, thread.messages) as any[]}
         audioMap={audioMap}
         isLoading={thread.isLoading}
       />
@@ -2469,13 +2720,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           agentName={selectedAgentData?.name || "B-Bot"}
           agentAvatar={effectiveAgentAvatar}
           agentData={selectedAgentData}
-          hasMessages={(canonicalThreadMessages ?? thread.messages ?? []).length > 0}
+          hasMessages={preferRicherMessages(canonicalThreadMessages, thread.messages).length > 0}
         />
 
         {/* Message Search Bar */}
         {showMessageSearch && (
           <MessageSearch
-            messages={(canonicalThreadMessages ?? thread.messages ?? []) as any[]}
+            messages={preferRicherMessages(canonicalThreadMessages, thread.messages) as any[]}
             onClose={() => setShowMessageSearch(false)}
             onSelectMessage={handleSelectSearchResult}
           />
@@ -2497,9 +2748,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               shouldAutoPlayAudio={!isLoadingOldConversation}
               playedMessageIds={playedDuringCall}
               onSwipeReply={handleSwipeReply}
-              messages={[...((canonicalThreadMessages ?? thread.messages ?? []) as any[]), ...fallbackStreamMessages].filter((msg: any) => {
+              messages={[...(preferRicherMessages(canonicalThreadMessages, thread.messages) as any[]), ...fallbackStreamMessages].filter((msg: any) => {
                 // Filter out empty AI messages that only contain tool_calls (trigger messages)
-                if (msg.type === "ai" && (!msg.content || msg.content.trim() === "") && msg.tool_calls && msg.tool_calls.length > 0) {
+                // Content is often a LangChain block array — never call .trim() on it directly.
+                const textContent = buildReplyPreview(msg?.content).trim()
+                if (msg.type === "ai" && !textContent && msg.tool_calls && msg.tool_calls.length > 0) {
                   console.log("🚫 [ChatInterface] Filtering out empty AI message with tool_calls:", msg.id);
                   return false;
                 }

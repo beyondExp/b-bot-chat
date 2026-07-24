@@ -11,6 +11,14 @@ export interface ChatSession {
 export class ChatHistoryManager {
   private static STORAGE_KEY = 'embed-chat-history';
   private static CURRENT_THREAD_KEY = 'embed-current-thread';
+  private static UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  /** Synapse only accepts real UUIDs. Old `embed-anonymous-*` fallbacks are dead. */
+  static isValidSynapseThreadId(threadId: string | null | undefined): boolean {
+    const id = String(threadId || "").trim();
+    return !!id && this.UUID_RE.test(id);
+  }
 
   // Get instance-specific storage keys
   private static getStorageKey(embedId?: string): string {
@@ -111,7 +119,13 @@ export class ChatHistoryManager {
     if (typeof window === 'undefined') return null;
     
     try {
-      return localStorage.getItem(this.getCurrentThreadKey(embedId));
+      const threadId = localStorage.getItem(this.getCurrentThreadKey(embedId));
+      if (threadId && !this.isValidSynapseThreadId(threadId)) {
+        // Drop local-only fallback IDs that can never stream against Synapse.
+        localStorage.removeItem(this.getCurrentThreadKey(embedId));
+        return null;
+      }
+      return threadId;
     } catch (error) {
       console.error('Failed to get current thread ID:', error);
       return null;
@@ -122,6 +136,10 @@ export class ChatHistoryManager {
     if (typeof window === 'undefined') return;
     
     try {
+      if (!this.isValidSynapseThreadId(threadId)) {
+        console.warn('[ChatHistory] Refusing to persist invalid thread id:', threadId);
+        return;
+      }
       localStorage.setItem(this.getCurrentThreadKey(embedId), threadId);
     } catch (error) {
       console.error('Failed to set current thread ID:', error);

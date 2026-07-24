@@ -1,6 +1,6 @@
 // IMPORTANT: never cache Next.js HTML or build artifacts. Hashed chunks disappear
 // after deployments, so stale HTML can point browsers at files that no longer exist.
-const CACHE_NAME = "beyond-bot-cache-v4"
+const CACHE_NAME = "beyond-bot-cache-v5"
 const urlsToCache = [
   "/manifest.json",
   "/icons/icon-192x192.png",
