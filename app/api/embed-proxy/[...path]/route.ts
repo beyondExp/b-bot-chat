@@ -9,6 +9,8 @@ import {
   hashEmbedSessionToken,
   metadataHasEmbedSessionBinding,
 } from "@/lib/embed-session-server"
+import { consumeAnonymousMessage } from "@/lib/anonymous-rate-limit"
+import { mainApiBase } from "@/lib/main-api"
 
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
@@ -338,6 +340,42 @@ async function _resolveSynapseAssistantIdFromDistributionChannel(publicChannelId
   }
 }
 
+/**
+ * Meter an embed run against the agent owner's monthly plan quota in MainAPI.
+ * Returns a 402 response when the owner's plan is exhausted, null when the run
+ * may proceed. Fails open on transient errors so embeds stay usable.
+ */
+async function _consumeOwnerRunQuota(assistantPublicId: string): Promise<Response | null> {
+  const base = mainApiBase()
+  if (!base || !ADMIN_API_KEY || !assistantPublicId) return null
+  try {
+    const res = await fetch(`${base}/quota/consume-embed`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Admin-API-Key": ADMIN_API_KEY,
+      },
+      body: JSON.stringify({ assistant_id: assistantPublicId }),
+    })
+    if (res.status === 402) {
+      console.log("[EmbedProxy] Embed run rejected: agent owner's monthly run limit reached")
+      return NextResponse.json(
+        {
+          error: "owner_run_limit_reached",
+          message: "This assistant is temporarily unavailable (plan limit reached).",
+        },
+        { status: 402 },
+      )
+    }
+    if (!res.ok) {
+      console.log("[EmbedProxy] Owner quota check failed (non-402), continuing:", res.status)
+    }
+  } catch (error) {
+    console.log("[EmbedProxy] Owner quota check unreachable, continuing:", error)
+  }
+  return null
+}
+
 function _sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(String(s || ""), "utf8").digest("hex")
 }
@@ -639,6 +677,28 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
         if (pwErr) return pwErr
       }
 
+      // Anonymous usage cap: each embed session gets a bounded number of
+      // messages per day. Prevents unbounded free usage of the public embed
+      // path, which bypasses all subscription metering.
+      const anonSessionKey =
+        getEmbedSessionTokenFromRequest(request) || threadId || request.headers.get("x-forwarded-for") || "unknown"
+      const anonQuota = consumeAnonymousMessage(anonSessionKey)
+      if (!anonQuota.allowed) {
+        console.log("[EmbedProxy] Anonymous daily message limit reached for session")
+        return NextResponse.json(
+          {
+            error: "anonymous_message_limit",
+            message: "Daily free message limit reached. Sign in or come back tomorrow.",
+            limit: anonQuota.limit,
+          },
+          { status: 429 },
+        )
+      }
+
+      // Owner-side metering: embed runs consume the agent owner's monthly run
+      // quota in MainAPI. If the owner's plan is exhausted, the embed stops
+      // serving instead of running for free.
+
       // Resolve Synapse assistant UUID for execution if the public id refers to a distribution channel.
       // Keep the public id in thread metadata for ACL/password checks, but execute using the Synapse assistant UUID.
       try {
@@ -658,6 +718,15 @@ async function handleEmbedProxyRequest(request: NextRequest, pathSegments: strin
       } catch {
         // best-effort; continue even if resolution fails
       }
+
+      // Use the Synapse assistant UUID when resolution succeeded so MainAPI
+      // can look up metadata.owner; distribution-channel UUIDs are unknown to
+      // Synapse and would resolve to no owner (unmetered).
+      const ownerQuotaAssistantId =
+        (typeof (body as any)?.assistant_id === "string" && (body as any).assistant_id.trim()) ||
+        assistantPublicId
+      const ownerQuotaErr = await _consumeOwnerRunQuota(ownerQuotaAssistantId)
+      if (ownerQuotaErr) return ownerQuotaErr
 
       // Synapse's dedicated B-Bot stream proxy is the stable browser-facing
       // path for all public embeds. The raw LangGraph stream route returns

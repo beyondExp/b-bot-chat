@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { applyDefaultBbotModel } from "@/lib/bbot-default-model"
+import { mainApiBase } from "@/lib/main-api"
 
 export const maxDuration = 60 // Set max duration to 60 seconds for streaming
 const STREAM_DEBUG = process.env.STREAM_DEBUG === "1"
@@ -149,6 +150,43 @@ async function handleProxyRequest(request: NextRequest, pathSegments: string[], 
       "X-API-Key": headers.get("X-API-Key") ? "***PRESENT***" : "none",
       "X-User-ID": headers.get("X-User-ID"),
     });
+
+    // Subscription quota enforcement: run-creating requests bypass MainAPI here
+    // (direct to Synapse), so check + meter the caller's monthly run limit via
+    // MainAPI before forwarding. 402 is surfaced to the client for upgrade UX.
+    const isRunCreate =
+      method === "POST" && /^(?:bbot\/)?threads\/[^/]+\/runs(?:\/stream|\/wait)?$/.test(targetPath)
+    if (isRunCreate) {
+      const mainApiUrl = mainApiBase()
+      const quotaAuth = headers.get("Authorization")
+      if (mainApiUrl && quotaAuth) {
+        try {
+          const quotaRes = await fetch(`${mainApiUrl}/quota/consume`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: quotaAuth,
+            },
+          })
+          if (quotaRes.status === 402) {
+            const payload = await quotaRes.json().catch(() => ({}))
+            const detail = (payload && (payload.detail ?? payload)) || {}
+            console.log("[Proxy] Run rejected: monthly run limit reached", detail)
+            return NextResponse.json(
+              { error: "run_limit_reached", ...detail },
+              { status: 402 },
+            )
+          }
+          if (!quotaRes.ok) {
+            // Fail open on transient quota-service errors so chat stays usable;
+            // MainAPI remains the authoritative enforcement point for /v2 traffic.
+            console.log("[Proxy] Quota check failed (non-402), continuing:", quotaRes.status)
+          }
+        } catch (quotaError) {
+          console.log("[Proxy] Quota check unreachable, continuing:", quotaError)
+        }
+      }
+    }
 
     console.log("[Proxy] targetPath:", targetPath);
     console.log("[Proxy] headers:", Object.fromEntries(headers.entries()));

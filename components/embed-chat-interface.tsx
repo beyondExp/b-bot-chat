@@ -6,7 +6,7 @@ import { ChatInput } from "./chat-input"
 import { EnhancedChatMessages } from "./enhanced-chat-messages"
 // Temporarily remove tool response handling to avoid type conflicts  
 // import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
-import { EmbedChatHeader } from "./embed-chat-header"
+import { EmbedChatHeader, EmbedPoweredBy } from "./embed-chat-header"
 import { ChatHistorySidebar } from "./chat-history-sidebar"
 import { getAuthToken, isLocallyAuthenticated } from "@/lib/api"
 import { LANGGRAPH_AUDIENCE } from "@/lib/api"
@@ -44,7 +44,6 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
   // Normalize agent id: treat 'b-bot' and 'bbot' as the same
   const normalizedAgent = (!initialAgent || initialAgent === "b-bot" || initialAgent === "bbot") ? "bbot" : initialAgent;
   const [selectedAgent] = useState<string>(normalizedAgent);
-  const [tokensUsed, setTokensUsed] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const initialScrollDoneRef = useRef(false)
   const [input, setInput] = useState("")
@@ -162,16 +161,10 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
 
   const { isAuthenticated, getAccessTokenSilently, user } = useAppAuth()
 
-  const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
-
-  // Get auth token for API calls
+  // Get auth token for API calls. Embed traffic must go through embed-proxy
+  // (server-side Admin-API-Key) — never a public admin key in the browser.
   const getApiKey = async () => {
     try {
-      // For embed mode with admin API key
-    if (embedUserId && ADMIN_API_KEY) {
-        return ADMIN_API_KEY;
-      }
-
       // For authenticated users
       if (isAuthenticated) {
         const token = await getAccessTokenSilently({
@@ -560,12 +553,23 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
       text.includes("fetch failed") ||
       text.includes("socket")
 
+    let content =
+      "Entschuldigung, beim Erzeugen der Antwort ist etwas schiefgelaufen. Bitte versuche es gleich noch einmal."
+    if (text.includes("anonymous_message_limit")) {
+      content =
+        "Du hast das tägliche Limit an kostenlosen Nachrichten erreicht. Melde dich an oder versuche es morgen wieder."
+    } else if (text.includes("owner_run_limit_reached")) {
+      content =
+        "Dieser Assistent ist vorübergehend nicht verfügbar, weil das monatliche Kontingent seines Betreibers erreicht wurde."
+    } else if (providerUnavailable) {
+      content =
+        "Entschuldigung, ich konnte gerade keine Antwort erzeugen, weil der KI-Dienst kurzzeitig nicht erreichbar war. Bitte versuche es gleich noch einmal."
+    }
+
     return {
       id: `stream-error-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       type: "ai",
-      content: providerUnavailable
-        ? "Entschuldigung, ich konnte gerade keine Antwort erzeugen, weil der KI-Dienst kurzzeitig nicht erreichbar war. Bitte versuche es gleich noch einmal."
-        : "Entschuldigung, beim Erzeugen der Antwort ist etwas schiefgelaufen. Bitte versuche es gleich noch einmal.",
+      content,
     } as Message
   }, [])
 
@@ -1786,6 +1790,7 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
             onClearReplyContext={() => setReplyContext(null)}
           />
         </div>
+        <EmbedPoweredBy hidden={embedChannelConfig?.hidePoweredBy === true} />
       </div>
       
       {agentError && (

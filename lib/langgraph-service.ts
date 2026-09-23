@@ -44,7 +44,6 @@ export function useLangGraphService() {
         // Set up headers
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
-          "bbot-api-key": "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid",
         }
 
         // Add auth token if available
@@ -151,7 +150,6 @@ export function useLangGraphService() {
         // Set up headers
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
-          "bbot-api-key": "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid",
         }
 
         // Add auth token if available
@@ -260,7 +258,6 @@ export function useLangGraphService() {
         // Set up headers
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
-          "bbot-api-key": "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid",
         }
 
         // Add auth token if available

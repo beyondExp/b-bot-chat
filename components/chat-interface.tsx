@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import type { Message } from "@/types/chat"
 import { useStream } from "@langchain/langgraph-sdk/react"
 import { Client } from "@langchain/langgraph-sdk"
-import { calculateTokenCost } from "@/lib/stripe"
 import { ChatHistoryManager, type ChatSession } from "@/lib/chat-history"
 import { ChatInput } from "./chat-input"
 import { ChatHeader } from "./chat-header"
@@ -15,8 +14,7 @@ import { WorkdeskDrawer, type QueuedWorkdeskFile } from "./workdesk-drawer"
 // import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses"
 import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses"
 import { MainChatSidebar } from "./main-chat-sidebar"
-import { PaymentRequiredModal } from "./payment-required-modal"
-import { AutoRechargeNotification } from "./auto-recharge-notification"
+import { QuotaLimitModal, HUB_BILLING_URL, type QuotaInfo } from "./quota-limit-modal"
 import { DiscoverPage } from "./discover-page"
 import { ContactsPage } from "./contacts-page"
 import { VoiceCallView } from "./voice-call-view"
@@ -207,10 +205,17 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const shouldScrollToLatestRef = useRef(false)
   const initialHistoryScrollMarkedRef = useRef(false)
-  const [remainingCredits, setRemainingCredits] = useState(0)
-  const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [showAutoRechargeNotification, setShowAutoRechargeNotification] = useState(false)
-  const [autoRechargeAmount, setAutoRechargeAmount] = useState(0)
+  const [showQuotaModal, setShowQuotaModal] = useState(false)
+  const [quotaInfo, setQuotaInfo] = useState<QuotaInfo | null>(null)
+  // Soft usage warning: current plan quota, fetched after login and refreshed
+  // after runs (throttled) so users see they're near the limit before a 402.
+  const [quotaStatus, setQuotaStatus] = useState<{
+    plan?: string | null
+    monthly_runs_used?: number | null
+    monthly_runs_limit?: number | null
+  } | null>(null)
+  const [quotaWarningDismissed, setQuotaWarningDismissed] = useState(false)
+  const quotaFetchAtRef = useRef(0)
   const [toolEvents, setToolEvents] = useState<any[]>([])
   const [followUpSuggestions, setFollowUpSuggestions] = useState<any[]>([])
   const [followUpSuggestionsLoading, setFollowUpSuggestionsLoading] = useState(false)
@@ -287,15 +292,22 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       text.includes("fetch failed") ||
       text.includes("socket")
 
+    let content =
+      "Entschuldigung, beim Erzeugen der Antwort ist etwas schiefgelaufen. Bitte versuche es gleich noch einmal."
+    if (text.includes("anonymous_message_limit")) {
+      content = t("quotaLimit.anonymousDaily")
+    } else if (providerUnavailable) {
+      content =
+        "Entschuldigung, ich konnte gerade keine Antwort erzeugen, weil der KI-Dienst kurzzeitig nicht erreichbar war. Bitte versuche es gleich noch einmal."
+    }
+
     return {
       id: `stream-error-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       type: "ai",
       role: "assistant",
-      content: providerUnavailable
-        ? "Entschuldigung, ich konnte gerade keine Antwort erzeugen, weil der KI-Dienst kurzzeitig nicht erreichbar war. Bitte versuche es gleich noch einmal."
-        : "Entschuldigung, beim Erzeugen der Antwort ist etwas schiefgelaufen. Bitte versuche es gleich noch einmal.",
+      content,
     }
-  }, [])
+  }, [t])
 
   const hasAssistantReplyAfterLastHuman = useCallback((messages: any[]): boolean => {
     if (!Array.isArray(messages) || messages.length === 0) return false
@@ -1049,6 +1061,41 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     };
   }, [apiKey, isAuthenticated, selectedAgent]);
   
+  // Fetch the current plan quota (throttled) so the UI can warn before the
+  // monthly limit is hit instead of only failing with a 402.
+  const refreshQuotaStatus = useCallback(
+    async (force = false) => {
+      if (!isAuthenticated) return
+      const now = Date.now()
+      if (!force && now - quotaFetchAtRef.current < 60_000) return
+      quotaFetchAtRef.current = now
+      try {
+        const token = getAuthToken()
+        if (!token) return
+        const res = await fetch("/api/quota", { headers: { Authorization: `Bearer ${token}` } })
+        if (!res.ok) return
+        const data = await res.json().catch(() => null)
+        if (data && typeof data === "object") setQuotaStatus(data)
+      } catch {
+        // best-effort; the 402 modal remains the hard stop
+      }
+    },
+    [isAuthenticated],
+  )
+
+  useEffect(() => {
+    void refreshQuotaStatus(true)
+  }, [refreshQuotaStatus])
+
+  const quotaWarning = useMemo(() => {
+    if (!quotaStatus || quotaWarningDismissed) return null
+    const limit = Number(quotaStatus.monthly_runs_limit)
+    const used = Number(quotaStatus.monthly_runs_used ?? 0)
+    if (!Number.isFinite(limit) || limit <= 0) return null
+    if (used < limit * 0.8) return null
+    return { used: Math.min(used, limit), limit }
+  }, [quotaStatus, quotaWarningDismissed])
+
   const thread = useStream<{ messages: Message[]; entity_id?: string; user_id?: string; agent_id?: string }>({
     apiUrl: getApiUrl(),
     apiKey: canInitializeStream && isAuthenticated ? apiKey : undefined, // Only pass API key for authenticated users
@@ -1060,6 +1107,32 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Chat error:", errorMessage);
       const lower = errorMessage.toLowerCase()
+
+      // Subscription quota reached (402): show the upgrade modal instead of a
+      // generic error bubble. `keyless_daily_limit_reached` means the user is
+      // on the built-in platform key — point them to adding their own key
+      // instead of a plan upgrade.
+      if (
+        lower.includes("run_limit_reached") ||
+        lower.includes("keyless_daily_limit_reached") ||
+        lower.includes("402")
+      ) {
+        const isKeyless = lower.includes("keyless_daily_limit_reached")
+        try {
+          const detail = (error as any)?.detail ?? (error as any)?.data ?? {}
+          setQuotaInfo({
+            plan: detail?.plan ?? null,
+            limit: detail?.limit ?? null,
+            used: detail?.used ?? null,
+            reason: isKeyless ? "keyless_daily" : "monthly",
+          })
+        } catch {
+          setQuotaInfo(isKeyless ? { reason: "keyless_daily" } : null)
+        }
+        setShowQuotaModal(true)
+        return
+      }
+
       if (
         lower.includes("assistant") &&
         (lower.includes("not found") || lower.includes("not_found"))
@@ -1114,6 +1187,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     },
     onFinish: (state: { values?: { messages?: ChatStreamMessage[] } }) => {
       console.log("Stream finished");
+      void refreshQuotaStatus()
       try {
         const pending = pendingFollowUpsRef.current
         if (Array.isArray(pending) && pending.length > 0) {
@@ -2812,6 +2886,33 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           )}
         </div>
 
+        {quotaWarning && isAuthenticated && (
+          <div className="flex-none px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-sm flex items-center justify-between gap-3">
+            <span>
+              {t("quotaWarning.message")
+                .replace("{used}", String(quotaWarning.used))
+                .replace("{limit}", String(quotaWarning.limit))}
+            </span>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <a
+                href={HUB_BILLING_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium underline underline-offset-2"
+              >
+                {t("quotaWarning.upgrade")}
+              </a>
+              <button
+                onClick={() => setQuotaWarningDismissed(true)}
+                aria-label={t("common.close")}
+                className="text-lg leading-none hover:opacity-70"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex-none bg-background border-t border-gray-200 dark:border-gray-700">
           <ChatInput
             onSubmit={handleFormSubmit}
@@ -2866,23 +2967,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
         onAutoPickConsumed={() => setWorkdeskAutoPick(false)}
       />
 
-        <PaymentRequiredModal
-        isOpen={showPaymentModal && isAuthenticated}
-        onClose={() => setShowPaymentModal(false)}
-        currentBalance={remainingCredits}
-        onBalanceUpdated={(newBalance) => setRemainingCredits(newBalance)}
-          onAutoRechargeChange={(enabled) => {
-          // Handle auto recharge change if needed
-          console.log('Auto recharge enabled:', enabled)
-          }}
-        />
-
-      {showAutoRechargeNotification && (
-        <AutoRechargeNotification
-          onClose={() => setShowAutoRechargeNotification(false)}
-          amount={autoRechargeAmount}
-        />
-      )}
+      <QuotaLimitModal
+        isOpen={showQuotaModal && isAuthenticated}
+        onClose={() => setShowQuotaModal(false)}
+        quota={quotaInfo}
+      />
     </>
   )
 }

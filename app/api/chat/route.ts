@@ -48,7 +48,7 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
     const authHeader = req.headers.get("Authorization")
 
     // Use a valid API key for B-Bot
-    const bbotApiKey = "bbot_66e0fokzgaj8q2ze6u4uhov4wrg1td3iehpqxyec1j8ytsid"
+    const bbotApiKey = (process.env.BBOT_API_KEY || "").trim()
 
     // Log all incoming headers for debugging
     console.log("Incoming request headers:", Object.fromEntries([...req.headers.entries()]))
@@ -165,7 +165,9 @@ async function handleThreadBasedChat(req: NextRequest, parsedBody?: any) {
 
     // IMPORTANT: Set the bbot-api-key header for authentication
     // This is the key that the proxy endpoint will use to get a token
-    headers["bbot-api-key"] = bbotApiKey
+    if (bbotApiKey) {
+      headers["bbot-api-key"] = bbotApiKey
+    }
 
     // If we have an auth token, also set the Authorization header as a backup
     if (synapseToken) {

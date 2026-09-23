@@ -5,6 +5,7 @@ import Image from "next/image"
 import { useState } from "react"
 import { useAppAuth } from "@/lib/app-auth"
 import { BrandLogo } from "./brand-logo"
+import { LegalLinks } from "./legal-links"
 import { useI18n } from "@/lib/i18n"
 
 export function LoginPage() {
@@ -45,11 +46,11 @@ export function LoginPage() {
             <p className="text-sm">{t("login.featureLine")}</p>
           </div>
 
-          {error && (
+          {error ? (
             <div className="p-3 bg-red-100 text-red-800 rounded-lg text-sm">
               {t("login.authError")}
             </div>
-          )}
+          ) : null}
 
           {loginError && <div className="p-3 bg-red-100 text-red-800 rounded-lg text-sm">{loginError}</div>}
 
@@ -74,10 +75,11 @@ export function LoginPage() {
         </div>
       </div>
 
-      <div className="mt-8 text-center">
+      <div className="mt-8 space-y-2 text-center">
         <p className="text-sm text-muted-foreground">
           Beyond-Bot.ai © {new Date().getFullYear()} | All rights reserved
         </p>
+        <LegalLinks />
       </div>
     </div>
   )

@@ -20,10 +20,14 @@ import {
   ExternalLink,
   Download,
 } from "lucide-react"
+import Image from "next/image"
 import { useState } from "react"
 import { PWAInstallGuide } from "./pwa-install-guide"
 import { useAppAuth } from "@/lib/app-auth"
 import { BrandLogo } from "./brand-logo"
+import { LegalLinks } from "./legal-links"
+
+const HUB_URL = process.env.NEXT_PUBLIC_HUB_URL || "https://hub.beyond-bot.ch"
 
 export function LandingPage() {
   const { loginWithRedirect, isLoading, error } = useAppAuth()
@@ -139,11 +143,11 @@ export function LandingPage() {
               <PenTool size={16} />
             </a>
           </div>
-          {error && (
+          {error ? (
             <div className="p-3 bg-red-100 text-red-800 rounded-lg text-sm">
               Authentication error. Please try again or contact support.
             </div>
-          )}
+          ) : null}
           {loginError && <div className="p-3 bg-red-100 text-red-800 rounded-lg text-sm">{loginError}</div>}
         </div>
         <div className="lg:w-1/2 relative">
@@ -235,9 +239,9 @@ export function LandingPage() {
             <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
               <DollarSign size={24} className="text-primary" />
             </div>
-            <h3 className="font-semibold text-lg mb-2">Monetize Your Agents</h3>
+            <h3 className="font-semibold text-lg mb-2">Share Anywhere</h3>
             <p className="text-muted-foreground">
-              Publish your agents to the marketplace and earn money when others use them.
+              Publish your agents to the web, embed them on your site, or connect them to your channels.
             </p>
           </div>
         </div>
@@ -421,21 +425,21 @@ export function LandingPage() {
 
                   <div className="bg-muted p-4 rounded-lg">
                     <h4 className="font-medium mb-2 flex items-center gap-2">
-                      <DollarSign size={16} />
-                      Monetization
+                      <Share2 size={16} />
+                      Publishing
                     </h4>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm">Price per use:</span>
-                      <span className="font-medium">$0.05</span>
+                      <span className="text-sm">Visibility:</span>
+                      <span className="font-medium">Public</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm">Monthly subscription:</span>
-                      <span className="font-medium">$4.99</span>
+                      <span className="text-sm">Channels:</span>
+                      <span className="font-medium">Web, Embed, API</span>
                     </div>
                   </div>
 
                   <a
-                    href="https://hub.b-bot.space"
+                    href={HUB_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-full py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
@@ -450,11 +454,10 @@ export function LandingPage() {
           </div>
 
           <div className="lg:w-1/2 space-y-6">
-            <h2 className="text-3xl font-bold">Create, Publish & Monetize Your Own AI Agents</h2>
+            <h2 className="text-3xl font-bold">Create, Publish & Share Your Own AI Agents</h2>
             <p className="text-lg text-muted-foreground">
-              The Beyond-Bot.ai Creator Hub is a separate platform that gives you powerful tools to build, train, and
-              monetize your own AI agents. Share your expertise with the world and earn money when others use your
-              creations.
+              The Beyond-Bot.ai Creator Hub gives you powerful tools to build, train, and publish your own AI
+              agents. Share your expertise with the world — on the web, embedded on your site, or via API.
             </p>
 
             <div className="space-y-4">
@@ -508,19 +511,19 @@ export function LandingPage() {
 
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-1">
-                  <DollarSign size={18} className="text-primary" />
+                  <CheckCircle size={18} className="text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-medium">Earn Money</h3>
+                  <h3 className="font-medium">Swiss Hosting & Privacy</h3>
                   <p className="text-muted-foreground">
-                    Set your own pricing and earn revenue when users interact with your published agents.
+                    Your agents and data are hosted in Switzerland, with your own AI provider keys under your control.
                   </p>
                 </div>
               </div>
             </div>
 
             <a
-              href="https://hub.b-bot.space"
+              href={HUB_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 w-full sm:w-auto"
@@ -535,9 +538,9 @@ export function LandingPage() {
       {/* Monetization Section */}
       <section className="container mx-auto py-16 px-4">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold mb-4">Turn Your Expertise Into Income</h2>
+          <h2 className="text-3xl font-bold mb-4">Share Your Expertise With the World</h2>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Create valuable AI agents and earn money when users engage with them
+            Create valuable AI agents and make them available wherever your audience is
           </p>
         </div>
 
@@ -566,22 +569,23 @@ export function LandingPage() {
               expertise.
             </p>
             <div className="flex items-center justify-between text-sm border-t border-border pt-4">
-              <span>Average user growth:</span>
-              <span className="font-medium">30% monthly</span>
+              <span>Share via:</span>
+              <span className="font-medium">Link, embed & API</span>
             </div>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-6 hover:shadow-md transition-shadow">
             <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <DollarSign size={24} className="text-primary" />
+              <CheckCircle size={24} className="text-primary" />
             </div>
-            <h3 className="font-semibold text-lg mb-2">Earn</h3>
+            <h3 className="font-semibold text-lg mb-2">Stay in Control</h3>
             <p className="text-muted-foreground mb-4">
-              Set your own pricing model and earn money every time users interact with your agents.
+              Bring your own AI provider keys, keep your data in Switzerland, and decide exactly where your agents
+              are available.
             </p>
             <div className="flex items-center justify-between text-sm border-t border-border pt-4">
-              <span>Top creator earnings:</span>
-              <span className="font-medium">$5,000+ monthly</span>
+              <span>Your keys, your data:</span>
+              <span className="font-medium">Always yours</span>
             </div>
           </div>
         </div>
@@ -589,8 +593,8 @@ export function LandingPage() {
         <div className="mt-12 bg-muted p-8 rounded-xl border border-border">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div>
-              <h3 className="text-2xl font-bold mb-2">Ready to monetize your expertise?</h3>
-              <p className="text-muted-foreground">Join our creator program and start earning today.</p>
+              <h3 className="text-2xl font-bold mb-2">Ready to share your expertise?</h3>
+              <p className="text-muted-foreground">Build your first expert agent in the Creator Hub today.</p>
             </div>
             <button
               onClick={handleLogin}
@@ -631,11 +635,11 @@ export function LandingPage() {
                   <DollarSign size={18} className="text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-medium">Revenue Tracking</h3>
+                  <h3 className="font-medium">Usage Tracking</h3>
                 </div>
                 <div>
                   <p className="text-muted-foreground">
-                    Monitor your earnings, conversion rates, and subscription growth.
+                    Monitor runs, active users, and how your agents are used across channels.
                   </p>
                 </div>
               </div>
@@ -680,8 +684,8 @@ export function LandingPage() {
 
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium">Revenue Generated</span>
-                    <span className="text-primary font-bold">$1,245.80</span>
+                    <span className="font-medium">Messages Answered</span>
+                    <span className="text-primary font-bold">8,392</span>
                   </div>
                   <div className="h-2 bg-muted rounded-full overflow-hidden">
                     <div className="h-full bg-primary w-2/3"></div>
@@ -755,11 +759,12 @@ export function LandingPage() {
 
           <div className="flex flex-col items-center text-center p-6">
             <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <DollarSign size={32} className="text-primary" />
+              <CheckCircle size={32} className="text-primary" />
             </div>
-            <h3 className="text-xl font-semibold mb-2">Monetization</h3>
+            <h3 className="text-xl font-semibold mb-2">Swiss Made & Hosted</h3>
             <p className="text-muted-foreground">
-              Create and publish your own AI agents and earn money when others use them.
+              Built and hosted in Switzerland with strong privacy — bring your own AI provider keys and stay in
+              control of your data.
             </p>
           </div>
         </div>
@@ -797,7 +802,7 @@ export function LandingPage() {
             <Bot size={20} />
           </a>
           <a
-            href="https://hub.b-bot.space"
+            href={HUB_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="px-8 py-4 bg-muted text-foreground rounded-lg font-medium hover:bg-muted/70 transition-colors inline-flex items-center gap-2 text-lg"
@@ -837,14 +842,7 @@ export function LandingPage() {
             <p className="text-sm text-muted-foreground mb-4 md:mb-0">
               © {new Date().getFullYear()} Beyond-Bot.ai. All rights reserved.
             </p>
-            <div className="flex gap-4 text-sm text-muted-foreground">
-              <a href="#" className="hover:text-foreground transition-colors">
-                Privacy Policy
-              </a>
-              <a href="#" className="hover:text-foreground transition-colors">
-                Terms of Service
-              </a>
-            </div>
+            <LegalLinks className="flex gap-4 text-sm text-muted-foreground" />
           </div>
         </div>
       </footer>

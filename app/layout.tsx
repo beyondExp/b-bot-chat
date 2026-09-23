@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/components/auth-provider"
+import { AutoTrialBootstrap } from "@/components/auto-trial-bootstrap"
 import { PWAInstaller } from "@/components/pwa-installer"
 import { I18nProvider } from "@/lib/i18n"
 import { LanguagePrompt } from "@/components/language-prompt"
@@ -12,7 +13,8 @@ const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "Beyond-Bot.ai - Chat with AI Agents",
-  description: "Chat with personalized AI agents powered by LangGraph",
+  description:
+    "Chat with specialized AI expert agents for every topic — Swiss made and hosted. Discover experts, get answers, and create your own agents.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
@@ -38,7 +40,6 @@ export const metadata: Metadata = {
   other: {
     "mobile-web-app-capable": "yes",
   },
-  generator: 'v0.dev'
 }
 
 export const viewport: Viewport = {
@@ -58,7 +59,10 @@ export default function RootLayout({
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <I18nProvider>
-            <AuthProvider>{children}</AuthProvider>
+            <AuthProvider>
+              <AutoTrialBootstrap />
+              {children}
+            </AuthProvider>
             <LanguagePrompt />
             <PWAInstaller />
           </I18nProvider>
