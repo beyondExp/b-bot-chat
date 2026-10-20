@@ -239,6 +239,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const localTtsGeneratedMessageIdsRef = useRef<Set<string>>(new Set())
   const [localMessages, setLocalMessages] = useState<any[]>([])
   const [isLocalInferenceLoading, setIsLocalInferenceLoading] = useState(false)
+  const [isLocalModelReady, setIsLocalModelReady] = useState(false)
 
   const isBBotAgent = useMemo(() => {
     const selected = String(selectedAgent || "bbot").toLowerCase()
@@ -252,11 +253,17 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   // browser; a missing/unsupported WebGPU adapter transparently falls back to
   // the existing server agent during send.
   useEffect(() => {
+    setIsLocalModelReady(false)
     if (!isBBotAgent || typeof navigator === "undefined" || !("gpu" in navigator)) return
     let cancelled = false
     void preloadLocalWebGpuChat((progress) => {
       if (!cancelled) {
         console.debug("[Local WebGPU] model loading", progress)
+      }
+    }).then(() => {
+      if (!cancelled) {
+        setIsLocalModelReady(true)
+        console.info("[Local WebGPU] model ready")
       }
     }).catch((error) => {
       if (!cancelled) {
@@ -1802,7 +1809,9 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
           // On-device inference is deliberately limited to normal B-Bot text
           // chats. File/tool-capable requests still need the server agent.
-          if (isBBotAgent && !hasQueuedFiles) {
+          // Never hold the first response hostage while a multi-gigabyte local
+          // model is downloading. Until it is ready, use the server agent.
+          if (isBBotAgent && isLocalModelReady && !hasQueuedFiles) {
             const localUserMessage = {
               id: `local-user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
               type: "human" as const,
