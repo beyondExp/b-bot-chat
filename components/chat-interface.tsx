@@ -31,6 +31,7 @@ import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/ch
 import { extractChannelRunConfig } from "@/lib/channel-run-config"
 import { generateLocalKokoroTts, isLocalKokoroTtsModality } from "@/lib/local-tts-service"
 import {
+  DEFAULT_LOCAL_WEBGPU_MODEL,
   inferLocalWebGpuChat,
   preloadLocalWebGpuChat,
 } from "@/lib/local-webgpu-chat"
@@ -56,14 +57,6 @@ type ChatStreamMessage = {
 
 // Main chat identifier to separate from embed storage (module scope so init helpers can use it).
 const MAIN_CHAT_ID = "main-chat"
-
-function requiresServerTools(message: string): boolean {
-  // A browser-only model cannot access current information or invoke B-Bot
-  // integrations. Keep these requests on the existing server/tool path.
-  return /\b(web|internet|google|search|research|latest|current|news|weather|price|preise|wetter|news)\b|suche|recherch|aktuell|heute/i.test(
-    message,
-  )
-}
 
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const { user, isAuthenticated, getAccessTokenSilently, provider } = useAppAuth()
@@ -248,6 +241,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const [localMessages, setLocalMessages] = useState<any[]>([])
   const [isLocalInferenceLoading, setIsLocalInferenceLoading] = useState(false)
   const [isLocalModelReady, setIsLocalModelReady] = useState(false)
+  const handledClientInferRef = useRef(new Set<string>())
 
   const isBBotAgent = useMemo(() => {
     const selected = String(selectedAgent || "bbot").toLowerCase()
@@ -1351,6 +1345,114 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     // onToolEvent: handleToolEvent,
   });
 
+  useEffect(() => {
+    const rawInterrupt = thread.interrupt as { value?: unknown } | undefined
+    const rawRequests = rawInterrupt?.value ?? rawInterrupt
+    const requests = Array.isArray(rawRequests) ? rawRequests : [rawRequests]
+    const request = requests.find(
+      (entry: any) =>
+        String(entry?.action_request?.action || "").trim().toLowerCase() === "client_infer",
+    ) as { action_request?: { args?: Record<string, unknown>; tool_call_id?: string } } | undefined
+
+    if (!request) return
+
+    const args = request.action_request?.args ?? {}
+    const interruptKey = String(
+      args.checkpoint_id ??
+        args.checkpointId ??
+        request.action_request?.tool_call_id ??
+        JSON.stringify(args).slice(0, 240),
+    )
+    if (handledClientInferRef.current.has(interruptKey)) return
+    handledClientInferRef.current.add(interruptKey)
+
+    const assistantMessageId = `local-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    let cancelled = false
+
+    const runClientInference = async () => {
+      setIsLocalInferenceLoading(true)
+      setLocalMessages((previous) => [
+        ...previous,
+        {
+          id: assistantMessageId,
+          type: "ai",
+          role: "assistant",
+          content: "",
+          local: true,
+        },
+      ])
+
+      try {
+        const rawMessages = Array.isArray(args.messages) ? args.messages : []
+        const messages = rawMessages
+          .map((message: any) => {
+            const role = String(message?.role || "").toLowerCase()
+            if (!["system", "user", "assistant", "tool"].includes(role)) return null
+            return {
+              role,
+              content: buildReplyPreview(message?.content).trim(),
+              ...(message?.name ? { name: String(message.name) } : {}),
+              ...(message?.tool_call_id ? { tool_call_id: String(message.tool_call_id) } : {}),
+              ...(Array.isArray(message?.tool_calls) ? { tool_calls: message.tool_calls } : {}),
+            }
+          })
+          .filter((message): message is NonNullable<typeof message> => Boolean(message?.content))
+
+        const result = await inferLocalWebGpuChat({
+          messages: messages as any,
+          tools: Array.isArray(args.tools) ? args.tools as any[] : [],
+          toolChoice: args.tool_choice,
+          temperature: typeof args.temperature === "number" ? args.temperature : 0.2,
+          maxTokens: 512,
+          onToken: (_piece, text) => {
+            if (cancelled) return
+            setLocalMessages((previous) =>
+              previous.map((message) =>
+                message.id === assistantMessageId ? { ...message, content: text } : message,
+              ),
+            )
+          },
+        })
+
+        if (cancelled) return
+        thread.submit(null, {
+          command: {
+            resume: {
+              content: result.text,
+              text: result.text,
+              tool_calls: result.tool_calls,
+            },
+          },
+          streamMode: ["values", "messages", "updates", "custom"],
+        })
+      } catch (error) {
+        console.error("[Local WebGPU] client_infer failed", error)
+        if (!cancelled) {
+          thread.submit(null, {
+            command: {
+              resume: {
+                content: "Local WebGPU inference failed. Please try again with server inference.",
+                text: "Local WebGPU inference failed. Please try again with server inference.",
+                tool_calls: [],
+              },
+            },
+            streamMode: ["values", "messages", "updates", "custom"],
+          })
+        }
+      } finally {
+        setLocalMessages((previous) =>
+          previous.filter((message) => message.id !== assistantMessageId),
+        )
+        setIsLocalInferenceLoading(false)
+      }
+    }
+
+    void runClientInference()
+    return () => {
+      cancelled = true
+    }
+  }, [thread.interrupt, thread.submit])
+
   // Extract tool events from message stream (since LangGraph SDK doesn't support onToolEvent directly)
   useEffect(() => {
     // Keep the richest snapshot — never clobber a streamed assistant reply with an
@@ -1814,106 +1916,13 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
           const queuedFiles = queuedWorkdeskFilesRef.current || {}
           const hasQueuedFiles = Object.keys(queuedFiles).length > 0
-
-          // On-device inference is deliberately limited to normal B-Bot text
-          // chats. File/tool-capable requests still need the server agent.
-          // Never hold the first response hostage while a multi-gigabyte local
-          // model is downloading. Until it is ready, use the server agent.
-          if (
-            isBBotAgent &&
-            isLocalModelReady &&
-            !hasQueuedFiles &&
-            !requiresServerTools(finalMessageContent)
-          ) {
-            const localUserMessage = {
-              id: `local-user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-              type: "human" as const,
-              role: "user" as const,
-              content: finalMessageContent,
-              local: true,
-            }
-            const localAssistantMessageId =
-              `local-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`
-
-            setIsLocalInferenceLoading(true)
-            setLocalMessages((previous) => [
-              ...previous,
-              localUserMessage,
-              {
-                id: localAssistantMessageId,
-                type: "ai",
-                role: "assistant",
-                content: "",
-                local: true,
-              },
-            ])
-
-            try {
-              const serverHistory = preferRicherMessages(
-                canonicalThreadMessages,
-                thread.messages,
-              ) as any[]
-              const localHistory = [...serverHistory, ...localMessages, localUserMessage]
-                .map((message: any) => {
-                  const type = String(message?.type || message?.role || "").toLowerCase()
-                  const role = type === "human" || type === "user"
-                    ? "user"
-                    : type === "ai" || type === "assistant"
-                      ? "assistant"
-                      : null
-                  const content = buildReplyPreview(message?.content).trim()
-                  return role && content ? { role, content } : null
-                })
-                .filter(Boolean) as Array<{ role: "user" | "assistant"; content: string }>
-
-              const localResponse = await inferLocalWebGpuChat({
-                messages: [
-                  {
-                    role: "system",
-                    content:
-                      "You are B-Bot, a helpful Swiss AI assistant running locally in the user's browser. " +
-                      "Answer in the user's language. Do not claim to access files, the web, accounts, or external tools. " +
-                      "Give a concise, useful answer in plain text or Markdown.",
-                  },
-                  ...localHistory,
-                ],
-                maxTokens: 512,
-                temperature: 0.2,
-                onToken: (_piece, text) => {
-                  setLocalMessages((previous) =>
-                    previous.map((message) =>
-                      message.id === localAssistantMessageId
-                        ? { ...message, content: text }
-                        : message,
-                    ),
-                  )
-                },
-              })
-
-              setLocalMessages((previous) =>
-                previous.map((message) =>
-                  message.id === localAssistantMessageId
-                    ? { ...message, content: localResponse }
-                    : message,
-                ),
-              )
-              if (replyContext) setReplyContext(null)
-              return
-            } catch (error) {
-              // Local inference is opportunistic. Remove the optimistic local
-              // message before sending exactly the same prompt to the server.
-              setLocalMessages((previous) =>
-                previous.filter(
-                  (message) =>
-                    message.id !== localUserMessage.id &&
-                    message.id !== localAssistantMessageId,
-                ),
-              )
-              console.info("[Local WebGPU] falling back to server inference", error)
-            } finally {
-              setIsLocalInferenceLoading(false)
-            }
-          }
+          // Once the browser model is ready, Synapse pauses at `client_infer`
+          // and gives it the full prompt plus tool schemas. The browser resumes
+          // the graph with either text or tool calls; tools still run on Synapse.
+          const responseModel =
+            isBBotAgent && isLocalModelReady && !hasQueuedFiles
+              ? `client-webgpu/${DEFAULT_LOCAL_WEBGPU_MODEL}`
+              : channelConfig.responseModel
 
           // Submit using LangGraph's useStream (like agent-chat-ui)
           thread.submit(
@@ -1938,7 +1947,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                   top_p: 1.0,
                   instructions,
                   system_message,
-                  ...(channelConfig.responseModel ? { response_model: channelConfig.responseModel } : {}),
+                  ...(responseModel ? { response_model: responseModel } : {}),
                   ...(channelConfig.queryModel ? { query_model: channelConfig.queryModel } : {}),
                   ...(channelConfig.userProviderKeyId
                     ? { user_provider_key_id: channelConfig.userProviderKeyId }

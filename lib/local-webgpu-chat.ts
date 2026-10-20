@@ -5,8 +5,21 @@ const TRANSFORMERS_CDN_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transfor
 export const DEFAULT_LOCAL_WEBGPU_MODEL = "onnx-community/Qwen3-4B-Instruct-2507-ONNX"
 
 type LocalMessage = {
-  role: "system" | "user" | "assistant"
+  role: "system" | "user" | "assistant" | "tool"
   content: string
+  name?: string
+  tool_call_id?: string
+  tool_calls?: unknown[]
+}
+
+type ToolDefinition = {
+  type?: string
+  function?: {
+    name?: string
+    description?: string
+    parameters?: unknown
+  }
+  name?: string
 }
 
 type ProgressPayload = {
@@ -82,6 +95,11 @@ function normalizeMessages(messages: LocalMessage[]): LocalMessage[] {
     .map((message) => ({
       role: message.role,
       content: String(message.content || "").trim(),
+      ...(message.name ? { name: message.name } : {}),
+      ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+      ...(message.role === "assistant" && Array.isArray(message.tool_calls)
+        ? { tool_calls: message.tool_calls }
+        : {}),
     }))
     .filter((message) => message.content)
 
@@ -104,6 +122,57 @@ function extractText(output: any): string {
   return String(generated || "").trim()
 }
 
+function parseLooseArgs(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    const args: Record<string, unknown> = {}
+    const pairs = /([A-Za-z_][\w-]*)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,}]+))/g
+    let match: RegExpExecArray | null
+    while ((match = pairs.exec(raw))) {
+      const value = String(match[2] ?? match[3] ?? match[4] ?? "").trim()
+      args[match[1]] = value
+    }
+    return args
+  }
+}
+
+function extractToolCalls(text: string, tools: ToolDefinition[]) {
+  const allowedNames = new Set(
+    tools
+      .map((tool) => tool.function?.name || tool.name || "")
+      .filter(Boolean),
+  )
+  const calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> = []
+  const add = (name: string, args: unknown) => {
+    if (!name || (allowedNames.size > 0 && !allowedNames.has(name))) return
+    calls.push({
+      id: `call_local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      type: "function",
+      function: {
+        name,
+        arguments: JSON.stringify(args && typeof args === "object" ? args : {}),
+      },
+    })
+  }
+
+  const qwenToolPattern = /<\|tool_call>call:([A-Za-z_][\w-]*)\{([\s\S]*?)\}<tool_call\|>/g
+  let match: RegExpExecArray | null
+  while ((match = qwenToolPattern.exec(text))) {
+    add(match[1], parseLooseArgs(match[2]))
+  }
+
+  const jsonToolPattern = /\{[\s\S]*?"name"\s*:\s*"([^"]+)"[\s\S]*?"arguments"\s*:\s*(\{[\s\S]*?\})[\s\S]*?\}/g
+  while ((match = jsonToolPattern.exec(text))) {
+    try {
+      add(match[1], JSON.parse(match[2]))
+    } catch {
+      add(match[1], parseLooseArgs(match[2]))
+    }
+  }
+  return calls
+}
+
 export async function preloadLocalWebGpuChat(
   onProgress?: (payload: ProgressPayload) => void,
 ): Promise<void> {
@@ -116,13 +185,19 @@ export async function inferLocalWebGpuChat(options: {
   temperature?: number
   onProgress?: (payload: ProgressPayload) => void
   onToken?: (piece: string, text: string) => void
-}): Promise<string> {
+  tools?: ToolDefinition[]
+  toolChoice?: unknown
+}): Promise<{
+  text: string
+  tool_calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>
+}> {
   const pipeline = await getPipeline(options.onProgress)
   const runtime = await loadRuntime()
   let streamedText = ""
   const streamer = new runtime.TextStreamer(pipeline.tokenizer, {
     skip_prompt: true,
-    skip_special_tokens: true,
+    // Qwen's tool-call delimiters are special tokens and must survive parsing.
+    skip_special_tokens: false,
     callback_function: (piece: string) => {
       const next = String(piece || "")
       if (!next) return
@@ -131,12 +206,21 @@ export async function inferLocalWebGpuChat(options: {
     },
   })
   const output = await pipeline(normalizeMessages(options.messages), {
+    tools: options.tools?.length ? options.tools : undefined,
+    tool_choice: options.toolChoice ?? undefined,
     max_new_tokens: options.maxTokens ?? 512,
     do_sample: (options.temperature ?? 0.2) > 0,
     temperature: options.temperature ?? 0.2,
     streamer,
   })
-  const text = streamedText.trim() || extractText(output)
-  if (!text) throw new Error("Local model returned an empty response")
-  return text
+  const rawText = streamedText.trim() || extractText(output)
+  const tool_calls = extractToolCalls(rawText, options.tools || [])
+  const text = tool_calls.length
+    ? ""
+    : rawText
+        .replace(/<\|tool_call>call:[\s\S]*?<tool_call\|>/g, "")
+        .replace(/<\|tool_response>$/g, "")
+        .trim()
+  if (!text && !tool_calls.length) throw new Error("Local model returned an empty response")
+  return { text, tool_calls }
 }
