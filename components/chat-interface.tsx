@@ -30,6 +30,10 @@ import { useI18n } from "@/lib/i18n"
 import { buildSystemMessageWithUserProfile, loadChatUserProfile } from "@/lib/chat-user-profile"
 import { extractChannelRunConfig } from "@/lib/channel-run-config"
 import { generateLocalKokoroTts, isLocalKokoroTtsModality } from "@/lib/local-tts-service"
+import {
+  inferLocalWebGpuChat,
+  preloadLocalWebGpuChat,
+} from "@/lib/local-webgpu-chat"
 import { getOrCreateEmbedSessionToken } from "@/lib/embed-session"
 import {
   extractMessagesFromHistory,
@@ -233,6 +237,36 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const pendingPostStreamReconcileRef = useRef(false)
   const reconcileInFlightRef = useRef(false)
   const localTtsGeneratedMessageIdsRef = useRef<Set<string>>(new Set())
+  const [localMessages, setLocalMessages] = useState<any[]>([])
+  const [isLocalInferenceLoading, setIsLocalInferenceLoading] = useState(false)
+
+  const isBBotAgent = useMemo(() => {
+    const selected = String(selectedAgent || "bbot").toLowerCase()
+    if (selected === "bbot" || selected === "b-bot") return true
+    const agent = agents.find((item: any) => item.id === selectedAgent)
+    const name = String(agent?.name || "").toLowerCase()
+    return name === "bbot" || name === "b-bot"
+  }, [agents, selectedAgent])
+
+  // Public B-Bot chats prefer on-device inference. The model is cached by the
+  // browser; a missing/unsupported WebGPU adapter transparently falls back to
+  // the existing server agent during send.
+  useEffect(() => {
+    if (!isBBotAgent || typeof navigator === "undefined" || !("gpu" in navigator)) return
+    let cancelled = false
+    void preloadLocalWebGpuChat((progress) => {
+      if (!cancelled) {
+        console.debug("[Local WebGPU] model loading", progress)
+      }
+    }).catch((error) => {
+      if (!cancelled) {
+        console.info("[Local WebGPU] unavailable; server inference will be used", error)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isBBotAgent])
 
   // Add tool event handling like B-Bot Hub
   const handleToolEvent = (event: any) => {
@@ -1766,6 +1800,77 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           const queuedFiles = queuedWorkdeskFilesRef.current || {}
           const hasQueuedFiles = Object.keys(queuedFiles).length > 0
 
+          // On-device inference is deliberately limited to normal B-Bot text
+          // chats. File/tool-capable requests still need the server agent.
+          if (isBBotAgent && !hasQueuedFiles) {
+            const localUserMessage = {
+              id: `local-user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              type: "human" as const,
+              role: "user" as const,
+              content: finalMessageContent,
+              local: true,
+            }
+
+            setIsLocalInferenceLoading(true)
+            setLocalMessages((previous) => [...previous, localUserMessage])
+
+            try {
+              const serverHistory = preferRicherMessages(
+                canonicalThreadMessages,
+                thread.messages,
+              ) as any[]
+              const localHistory = [...serverHistory, ...localMessages, localUserMessage]
+                .map((message: any) => {
+                  const type = String(message?.type || message?.role || "").toLowerCase()
+                  const role = type === "human" || type === "user"
+                    ? "user"
+                    : type === "ai" || type === "assistant"
+                      ? "assistant"
+                      : null
+                  const content = buildReplyPreview(message?.content).trim()
+                  return role && content ? { role, content } : null
+                })
+                .filter(Boolean) as Array<{ role: "user" | "assistant"; content: string }>
+
+              const localResponse = await inferLocalWebGpuChat({
+                messages: [
+                  {
+                    role: "system",
+                    content:
+                      "You are B-Bot, a helpful Swiss AI assistant running locally in the user's browser. " +
+                      "Answer in the user's language. Do not claim to access files, the web, accounts, or external tools. " +
+                      "Give a concise, useful answer in plain text or Markdown.",
+                  },
+                  ...localHistory,
+                ],
+                maxTokens: 512,
+                temperature: 0.2,
+              })
+
+              setLocalMessages((previous) => [
+                ...previous,
+                {
+                  id: `local-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  type: "ai",
+                  role: "assistant",
+                  content: localResponse,
+                  local: true,
+                },
+              ])
+              if (replyContext) setReplyContext(null)
+              return
+            } catch (error) {
+              // Local inference is opportunistic. Remove the optimistic local
+              // message before sending exactly the same prompt to the server.
+              setLocalMessages((previous) =>
+                previous.filter((message) => message.id !== localUserMessage.id),
+              )
+              console.info("[Local WebGPU] falling back to server inference", error)
+            } finally {
+              setIsLocalInferenceLoading(false)
+            }
+          }
+
           // Submit using LangGraph's useStream (like agent-chat-ui)
           thread.submit(
             { 
@@ -2021,6 +2126,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
     // Mark that we're loading an old conversation (don't auto-play audio)
     setIsLoadingOldConversation(true)
     setPendingHistoryThreadId(session.threadId)
+    setLocalMessages([])
     shouldScrollToLatestRef.current = true
     
     // Set the current session and thread ID first
@@ -2088,6 +2194,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
 
   const handleSelectAgent = (agentId: string) => {
     console.log('[Chat] Selecting agent:', agentId)
+    setLocalMessages([])
     setSelectedAgent(normalizeAgentId(agentId))
     // The useEffect will handle clearing the current session
   }
@@ -2102,6 +2209,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
       setToolEvents([])
       setFollowUpSuggestions([])
       setFollowUpSuggestionsLoading(false)
+      setLocalMessages([])
       pendingFollowUpsRef.current = null
       setIsLoadingOldConversation(false) // New chat should auto-play audio
 
@@ -2142,6 +2250,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   }
 
   const handleToggleDiscover = () => {
+    setLocalMessages([])
     setSelectedAgent(null) // This will show the DiscoverPage
     setShowContactsPage(false)
   }
@@ -2165,6 +2274,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   }
 
   const handleSelectAgentFromContacts = (agentId: string) => {
+    setLocalMessages([])
     setSelectedAgent(normalizeAgentId(agentId))
     setShowContactsPage(false)
     // Start a new chat with this agent
@@ -2822,7 +2932,11 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               shouldAutoPlayAudio={!isLoadingOldConversation}
               playedMessageIds={playedDuringCall}
               onSwipeReply={handleSwipeReply}
-              messages={[...(preferRicherMessages(canonicalThreadMessages, thread.messages) as any[]), ...fallbackStreamMessages].filter((msg: any) => {
+              messages={[
+                ...(preferRicherMessages(canonicalThreadMessages, thread.messages) as any[]),
+                ...localMessages,
+                ...fallbackStreamMessages,
+              ].filter((msg: any) => {
                 // Filter out empty AI messages that only contain tool_calls (trigger messages)
                 // Content is often a LangChain block array — never call .trim() on it directly.
                 const textContent = buildReplyPreview(msg?.content).trim()
@@ -2876,7 +2990,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               userColor={branding?.accentColor || "#ff3131"}
               welcomeTitle={computedWelcomeTitle}
               welcomeSubtitle={computedWelcomeSubtitle}
-              isLoading={thread.isLoading}
+              isLoading={thread.isLoading || isLocalInferenceLoading}
               toolEvents={toolEvents}
               followUpSuggestions={followUpSuggestions}
               followUpSuggestionsLoading={followUpSuggestionsLoading}
@@ -2917,7 +3031,7 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           <ChatInput
             onSubmit={handleFormSubmit}
             onVoiceMessage={hasAudioInput() ? handleVoiceMessage : undefined}
-            isLoading={thread.isLoading}
+            isLoading={thread.isLoading || isLocalInferenceLoading}
             selectedAgent={selectedAgent}
             agentName={agents.find((a: any) => a.id === selectedAgent)?.name}
             draft={draftInput}
