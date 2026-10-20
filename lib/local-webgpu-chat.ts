@@ -115,14 +115,28 @@ export async function inferLocalWebGpuChat(options: {
   maxTokens?: number
   temperature?: number
   onProgress?: (payload: ProgressPayload) => void
+  onToken?: (piece: string, text: string) => void
 }): Promise<string> {
   const pipeline = await getPipeline(options.onProgress)
+  const runtime = await loadRuntime()
+  let streamedText = ""
+  const streamer = new runtime.TextStreamer(pipeline.tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: true,
+    callback_function: (piece: string) => {
+      const next = String(piece || "")
+      if (!next) return
+      streamedText += next
+      options.onToken?.(next, streamedText)
+    },
+  })
   const output = await pipeline(normalizeMessages(options.messages), {
     max_new_tokens: options.maxTokens ?? 512,
     do_sample: (options.temperature ?? 0.2) > 0,
     temperature: options.temperature ?? 0.2,
+    streamer,
   })
-  const text = extractText(output)
+  const text = streamedText.trim() || extractText(output)
   if (!text) throw new Error("Local model returned an empty response")
   return text
 }

@@ -57,6 +57,14 @@ type ChatStreamMessage = {
 // Main chat identifier to separate from embed storage (module scope so init helpers can use it).
 const MAIN_CHAT_ID = "main-chat"
 
+function requiresServerTools(message: string): boolean {
+  // A browser-only model cannot access current information or invoke B-Bot
+  // integrations. Keep these requests on the existing server/tool path.
+  return /\b(web|internet|google|search|research|latest|current|news|weather|price|preise|wetter|news)\b|suche|recherch|aktuell|heute/i.test(
+    message,
+  )
+}
+
 export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
   const { user, isAuthenticated, getAccessTokenSilently, provider } = useAppAuth()
   const { t, locale } = useI18n()
@@ -1811,7 +1819,12 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
           // chats. File/tool-capable requests still need the server agent.
           // Never hold the first response hostage while a multi-gigabyte local
           // model is downloading. Until it is ready, use the server agent.
-          if (isBBotAgent && isLocalModelReady && !hasQueuedFiles) {
+          if (
+            isBBotAgent &&
+            isLocalModelReady &&
+            !hasQueuedFiles &&
+            !requiresServerTools(finalMessageContent)
+          ) {
             const localUserMessage = {
               id: `local-user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
               type: "human" as const,
@@ -1819,9 +1832,21 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
               content: finalMessageContent,
               local: true,
             }
+            const localAssistantMessageId =
+              `local-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
             setIsLocalInferenceLoading(true)
-            setLocalMessages((previous) => [...previous, localUserMessage])
+            setLocalMessages((previous) => [
+              ...previous,
+              localUserMessage,
+              {
+                id: localAssistantMessageId,
+                type: "ai",
+                role: "assistant",
+                content: "",
+                local: true,
+              },
+            ])
 
             try {
               const serverHistory = preferRicherMessages(
@@ -1854,25 +1879,35 @@ export function ChatInterface({ initialAgent }: ChatInterfaceProps) {
                 ],
                 maxTokens: 512,
                 temperature: 0.2,
+                onToken: (_piece, text) => {
+                  setLocalMessages((previous) =>
+                    previous.map((message) =>
+                      message.id === localAssistantMessageId
+                        ? { ...message, content: text }
+                        : message,
+                    ),
+                  )
+                },
               })
 
-              setLocalMessages((previous) => [
-                ...previous,
-                {
-                  id: `local-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                  type: "ai",
-                  role: "assistant",
-                  content: localResponse,
-                  local: true,
-                },
-              ])
+              setLocalMessages((previous) =>
+                previous.map((message) =>
+                  message.id === localAssistantMessageId
+                    ? { ...message, content: localResponse }
+                    : message,
+                ),
+              )
               if (replyContext) setReplyContext(null)
               return
             } catch (error) {
               // Local inference is opportunistic. Remove the optimistic local
               // message before sending exactly the same prompt to the server.
               setLocalMessages((previous) =>
-                previous.filter((message) => message.id !== localUserMessage.id),
+                previous.filter(
+                  (message) =>
+                    message.id !== localUserMessage.id &&
+                    message.id !== localAssistantMessageId,
+                ),
               )
               console.info("[Local WebGPU] falling back to server inference", error)
             } finally {
