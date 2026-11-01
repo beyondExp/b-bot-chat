@@ -1,6 +1,7 @@
 import { Suspense } from "react"
 import type { Metadata } from "next"
 import { EmbedClientPage } from "@/components/embed-client-page"
+import { publicAppOrigin } from "@/lib/app-origin"
 import "./embed.css"
 
 type EmbedPageProps = {
@@ -11,12 +12,7 @@ export async function generateMetadata({ searchParams }: EmbedPageProps): Promis
   const params = (await searchParams) || {}
   const rawAgent = Array.isArray(params.agent) ? params.agent[0] : params.agent
   const agent = String(rawAgent || "bbot").trim() || "bbot"
-  const baseUrl = (
-    process.env.CHAT_PUBLIC_URL ||
-    process.env.AUTH0_BASE_URL ||
-    process.env.NEXT_PUBLIC_CHAT_URL ||
-    "https://swiss-chat.ch"
-  ).replace(/\/+$/, "")
+  const baseUrl = publicAppOrigin()
   const encodedAgent = encodeURIComponent(agent)
   const endpoint = `${baseUrl}/api/a2a/agents/${encodedAgent}`
   const card = `${endpoint}/agent-card.json`

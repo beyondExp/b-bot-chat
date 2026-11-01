@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { publicAppOrigin } from "@/lib/app-origin"
 
 type AgentCardContext = {
   params: Promise<{ agent: string }>
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest, context: AgentCardContext) {
     return NextResponse.json({ error: "invalid_agent" }, { status: 400 })
   }
 
-  const endpoint = `${request.nextUrl.origin}/api/a2a/agents/${encodeURIComponent(agent)}`
+  const endpoint = `${publicAppOrigin(request)}/api/a2a/agents/${encodeURIComponent(agent)}`
   return NextResponse.json(
     {
       name: "Beyond-Bot Website Expert",
