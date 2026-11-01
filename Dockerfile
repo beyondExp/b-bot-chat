@@ -1,4 +1,4 @@
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -6,7 +6,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN corepack enable \
   && pnpm install --frozen-lockfile
 
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -39,7 +39,7 @@ ENV NEXT_PUBLIC_SYNAPSE_URL=${NEXT_PUBLIC_SYNAPSE_URL}
 RUN corepack enable \
   && pnpm build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

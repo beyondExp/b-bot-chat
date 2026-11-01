@@ -138,8 +138,34 @@ jobs:
         env:
           CHAT_URL: ${{ secrets.CHAT_URL }}
         run: |
+          set -euo pipefail
           url="${CHAT_URL:-https://chat.beyond-bot.ch/}"
-          curl -fsS "$url" >/dev/null
+          # OpenShift may briefly return 503 while the router updates endpoints,
+          # even after the Deployment reports a successful rollout.
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 30 \
+            "$url" >/dev/null
+
+      - name: Collect deployment diagnostics
+        if: failure() && steps.oc_login.outcome == 'success'
+        shell: bash
+        env:
+          NS: ${{ secrets.OC_NAMESPACE }}
+        run: |
+          set +e
+          oc -n "$NS" get deployment/bbot-chat -o wide
+          oc -n "$NS" get pods -l app=bbot-chat -o wide
+          oc -n "$NS" get service,endpoints,route
+          oc -n "$NS" describe deployment/bbot-chat
+          oc -n "$NS" logs deployment/bbot-chat --all-containers=true --tail=200
 
       - name: Rollback on failure
         if: failure() && steps.oc_login.outcome == 'success'
@@ -150,4 +176,5 @@ jobs:
           set -euo pipefail
           : "${NS:?Missing OC_NAMESPACE secret (must be the OpenShift project name)}"
           oc -n "$NS" rollout undo deployment/bbot-chat
+          oc -n "$NS" rollout status deployment/bbot-chat --timeout=15m
 
