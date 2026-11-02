@@ -50,7 +50,9 @@ export async function GET(request: NextRequest, context: AgentCardContext) {
     {
       headers: {
         "Cache-Control": "public, max-age=300, stale-while-revalidate=3600",
-        "Content-Type": "application/a2a+json",
+        // Agent Cards are discovery documents. application/json keeps them
+        // readable by web-browsing clients that reject the A2A media type.
+        "Content-Type": "application/json",
         "X-Content-Type-Options": "nosniff",
       },
     },
