@@ -80,13 +80,33 @@
   position: static !important; /* Override sticky positioning in embed */
   bottom: auto !important;
   max-height: 280px; /* Prevent input container from growing */
-  overflow-y: auto; /* Allow scrolling if needed */
+  overflow: visible; /* Keep menus visible; only the textarea itself may scroll */
 }
 
 /* Constrain textarea in embed view */
 .embedded-chat .chat-input-container textarea {
   max-height: 150px !important; /* Limit textarea growth on mobile */
   overflow-y: auto !important; /* Enable scrolling in textarea */
+  scrollbar-width: thin;
+  scrollbar-color: hsl(0 0% 55%) transparent;
+}
+
+.embedded-chat .chat-input-container textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.embedded-chat .chat-input-container textarea::-webkit-scrollbar-thumb {
+  background: hsl(0 0% 55%);
+  border-radius: 999px;
+}
+
+.dark .embedded-chat .chat-input-container textarea {
+  color-scheme: dark;
+  scrollbar-color: hsl(0 0% 38%) transparent;
+}
+
+.dark .embedded-chat .chat-input-container textarea::-webkit-scrollbar-thumb {
+  background: hsl(0 0% 38%);
 }
 
 /* Ensure messages area is scrollable and fills space correctly */
