@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Plus, History, Bot } from 'lucide-react'
+import { Plus, History, Bot, X } from 'lucide-react'
 import * as LucideIcons from 'lucide-react'
 import { useI18n } from "@/lib/i18n"
 
@@ -10,6 +10,7 @@ interface EmbedChatHeaderProps {
   agentName?: string
   onNewChat: () => void
   onShowHistory: () => void
+  onClose?: () => void
   userColor?: string
   headerIcon?: string
   /** Expert / channel profile image URL. Preferred over Lucide headerIcon when set. */
@@ -43,6 +44,7 @@ export function EmbedChatHeader({
   agentName,
   onNewChat,
   onShowHistory,
+  onClose,
   userColor = '#2563eb',
   headerIcon = 'bot',
   profileImage = null,
@@ -120,6 +122,19 @@ export function EmbedChatHeader({
           <Plus className="h-4 w-4" />
           New Chat
         </Button>
+
+        {onClose && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="Close chat"
+            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   )

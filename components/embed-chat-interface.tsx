@@ -128,10 +128,13 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     [agentObj?.name, buildReplyPreview, normalizePreview, t],
   )
 
-  // Get streaming, color, and dark mode from query params
+  // Get streaming, color, bubble, and dark mode from query params
   let streaming = true;
   let userColor = '#2563eb'; // default blue
   let darkMode = false;
+  let isBubbleMode = false;
+  let headerIconParam = '';
+  let bubbleIconParam = '';
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
     if (params.has('streaming')) {
@@ -140,12 +143,49 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     if (params.has('color')) {
       userColor = params.get('color') || userColor;
     }
+    if (params.has('bubble')) {
+      const bubbleValue = params.get('bubble');
+      isBubbleMode = bubbleValue === 'true' || bubbleValue === '1';
+    }
+    if (params.has('headerIcon')) {
+      headerIconParam = params.get('headerIcon') || '';
+    }
+    if (params.has('bubbleIcon')) {
+      bubbleIconParam = params.get('bubbleIcon') || '';
+    }
     // Only enable dark mode if explicitly passed as 'true' or '1'
     if (params.has('dark')) {
       const darkValue = params.get('dark');
       darkMode = darkValue === 'true' || darkValue === '1';
     }
   }
+  const [isBubbleOpen, setIsBubbleOpen] = useState(true);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isBubbleMode) return;
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(
+          { type: 'bbot-embed-ready', hasHeaderClose: true, embedId },
+          '*',
+        );
+      }
+    } catch {
+      // ignore cross-origin postMessage errors
+    }
+  }, [isBubbleMode, embedId]);
+
+  const handleCloseBubble = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'bbot-embed-close', embedId }, '*');
+        return;
+      }
+    } catch {
+      // fallback to local state
+    }
+    setIsBubbleOpen(false);
+  }, [embedId]);
   
   // Apply dark mode class to root element
   useEffect(() => {
@@ -1711,14 +1751,42 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     });
   }, [buildReplyPreview, showEmbedToolCalls]);
 
+  if (isBubbleMode && !isBubbleOpen) {
+    return (
+      <div className="fixed inset-0 flex items-end justify-end p-6 bg-transparent pointer-events-none">
+        <button
+          type="button"
+          onClick={() => setIsBubbleOpen(true)}
+          aria-label="Open chat"
+          className="pointer-events-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-full text-white shadow-xl transition-transform hover:scale-105"
+          style={{ backgroundColor: userColor }}
+        >
+          {bubbleIconParam ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={bubbleIconParam}
+              alt=""
+              className="h-9 w-9 rounded-full object-cover"
+            />
+          ) : (
+            <svg width="32" height="32" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M2 21l1.65-4.77C2.6 14.54 2 13.32 2 12c0-4.42 4.48-8 10-8s10 3.58 10 8-4.48 8-10 8c-1.13 0-2.22-.13-3.24-.36L2 21z" />
+            </svg>
+          )}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 flex flex-col bg-background embedded-chat overflow-hidden">
       <EmbedChatHeader
         agentName={agentObj?.name}
         onNewChat={handleNewChat}
         onShowHistory={() => setShowHistory(true)}
+        onClose={isBubbleMode ? handleCloseBubble : undefined}
         userColor={userColor}
-        headerIcon={agentObj?.metadata?.headerIcon || 'bot'}
+        headerIcon={headerIconParam || agentObj?.metadata?.headerIcon || embedChannelConfig?.headerIcon || 'bot'}
         profileImage={
           (typeof agentObj?.metadata?.profileImage === "string" && agentObj.metadata.profileImage) ||
           (typeof agentObj?.profileImage === "string" && agentObj.profileImage) ||

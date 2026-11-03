@@ -27,6 +27,7 @@
   var height = String(script.dataset.height || "600").replace(/[^\d]/g, "") || "600";
   var headerIcon = String(script.dataset.headerIcon || "").trim();
   var bubbleIcon = String(script.dataset.bubbleIcon || "").trim();
+  var dark = script.dataset.dark === "true" || script.dataset.dark === "1";
   var discoveryEnabled = script.dataset.agentDiscovery !== "false";
 
   function embedUrl() {
@@ -34,6 +35,8 @@
     url.searchParams.set("agent", agentId);
     url.searchParams.set("embedId", instanceId);
     url.searchParams.set("color", color);
+    if (style === "bubble") url.searchParams.set("bubble", "true");
+    if (dark) url.searchParams.set("dark", "true");
     if (headerIcon) url.searchParams.set("headerIcon", headerIcon);
     if (bubbleIcon) url.searchParams.set("bubbleIcon", bubbleIcon);
     return url.toString();
@@ -63,13 +66,35 @@
     var panel = document.createElement("div");
     panel.id = instanceId;
     panel.style.cssText =
-      "position:fixed;right:24px;bottom:100px;width:min(420px,calc(100vw - 32px));" +
-      "height:min(640px,calc(100vh - 124px));z-index:2147483646;display:none;" +
-      "overflow:hidden;border-radius:16px;background:#fff;box-shadow:0 16px 48px rgba(0,0,0,.24)";
+      "position:fixed;right:24px;bottom:24px;width:min(420px,calc(100vw - 32px));" +
+      "height:min(720px,calc(100vh - 48px));z-index:2147483646;display:none;" +
+      "flex-direction:column;overflow:hidden;border-radius:16px;background:" +
+      (dark ? "#09090b" : "#fff") + ";box-shadow:0 16px 48px rgba(0,0,0,.24)";
+
+    var topBar = document.createElement("div");
+    topBar.style.cssText =
+      "display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;" +
+      "border-bottom:1px solid " + (dark ? "#27272a" : "#e5e7eb") + ";background:" +
+      (dark ? "#09090b" : "#fff") + ";flex-shrink:0";
+
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Close chat");
+    closeBtn.style.cssText =
+      "width:28px;height:28px;border:0;border-radius:9999px;display:flex;" +
+      "align-items:center;justify-content:center;cursor:pointer;background:transparent;" +
+      "color:" + (dark ? "#a1a1aa" : "#6b7280");
+    closeBtn.innerHTML =
+      '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">' +
+      '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+    topBar.appendChild(closeBtn);
+    panel.appendChild(topBar);
 
     var frame = createFrame();
     frame.style.width = "100%";
     frame.style.height = "100%";
+    frame.style.flex = "1";
+    frame.style.minHeight = "0";
     panel.appendChild(frame);
 
     var button = document.createElement("button");
@@ -94,10 +119,29 @@
         '<path d="M2 21l1.65-4.77C2.6 14.54 2 13.32 2 12c0-4.42 4.48-8 10-8s10 3.58 10 8-4.48 8-10 8c-1.13 0-2.22-.13-3.24-.36L2 21z"/></svg>';
     }
 
-    button.addEventListener("click", function () {
-      var open = panel.style.display !== "none";
-      panel.style.display = open ? "none" : "block";
-      button.setAttribute("aria-expanded", open ? "false" : "true");
+    function openBubble() {
+      panel.style.display = "flex";
+      button.style.display = "none";
+      button.setAttribute("aria-expanded", "true");
+    }
+
+    function closeBubble() {
+      panel.style.display = "none";
+      button.style.display = "flex";
+      button.setAttribute("aria-expanded", "false");
+    }
+
+    button.addEventListener("click", openBubble);
+    closeBtn.addEventListener("click", closeBubble);
+
+    window.addEventListener("message", function (event) {
+      if (!event || !event.data || typeof event.data !== "object") return;
+      if (event.data.embedId && event.data.embedId !== instanceId) return;
+      if (event.data.type === "bbot-embed-ready" && event.data.hasHeaderClose) {
+        topBar.style.display = "none";
+      } else if (event.data.type === "bbot-embed-close") {
+        closeBubble();
+      }
     });
 
     document.body.appendChild(panel);
