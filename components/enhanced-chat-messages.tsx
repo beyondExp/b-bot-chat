@@ -15,6 +15,32 @@ import { useI18n } from "@/lib/i18n"
 
 import { StreamingAudioPlayer } from "./streaming-audio-player"
 
+// Long tokens (URLs, place names) set a table's min-content width. The embed
+// clips horizontal overflow, so cells must be allowed to break and the table
+// must scroll inside the bubble instead of growing past it.
+const chatMarkdownComponents = {
+  table: ({ node, ...props }: any) => (
+    <div className="my-2 w-full min-w-0 max-w-full overflow-x-auto [-webkit-overflow-scrolling:touch]">
+      <table {...props} />
+    </div>
+  ),
+  th: ({ node, className, children, ...props }: any) => (
+    <th {...props} className={`${className ?? ""} [overflow-wrap:anywhere]`.trim()}>
+      {children}
+    </th>
+  ),
+  td: ({ node, className, children, ...props }: any) => (
+    <td {...props} className={`${className ?? ""} [overflow-wrap:anywhere]`.trim()}>
+      {children}
+    </td>
+  ),
+  a: ({ node, href, children, ...props }: any) => (
+    <a {...props} href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
+}
+
 function SwipeToReply({
   enabled,
   onReply,
@@ -622,8 +648,8 @@ export function EnhancedChatMessages({
                         <SwipeToReply enabled={typeof onSwipeReply === "function"} onReply={() => onSwipeReply?.(message)}>
                           <div className="py-1 w-full max-w-3xl">
                             <div className="p-3 bg-muted rounded-lg w-full">
-                              <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                              <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown>
                               </div>
                               
                               {/* 🔊 TTS Audio Player: Show if this message has audio chunks */}
@@ -685,14 +711,14 @@ export function EnhancedChatMessages({
           {/* Streaming message */}
           {incomingMessage && (
             <div className="flex justify-start">
-              <div className="flex gap-3 max-w-[80%]">
+              <div className="flex min-w-0 max-w-[80%] gap-3">
                 <Avatar className="h-8 w-8">
                   <AvatarImage src={getAgentAvatar() || "/placeholder.svg"} alt={getAgentName()} />
                   <AvatarFallback>{getAgentName().substring(0, 2)}</AvatarFallback>
                 </Avatar>
-                <div className="p-3 bg-muted rounded-lg">
-                  <div className="prose prose-sm dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{incomingMessage}</ReactMarkdown>
+                <div className="min-w-0 p-3 bg-muted rounded-lg">
+                  <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>{incomingMessage}</ReactMarkdown>
                   </div>
                 </div>
               </div>

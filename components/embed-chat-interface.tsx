@@ -1070,6 +1070,25 @@ export function EmbedChatInterface({ initialAgent, embedUserId, embedId }: Embed
     window.location.reload();
   };
 
+  // Agent links must leave the iframe. A normal navigation replaces the chat
+  // with the destination page inside the embed.
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0) return
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const anchor = target.closest("a")
+      if (!(anchor instanceof HTMLAnchorElement)) return
+      const href = anchor.getAttribute("href")
+      if (!href || href.startsWith("#") || href.toLowerCase().startsWith("javascript:")) return
+      event.preventDefault()
+      window.open(anchor.href, "_blank", "noopener,noreferrer")
+    }
+    document.addEventListener("click", onClick)
+    return () => document.removeEventListener("click", onClick)
+  }, [])
+
   // Prevent page-level scrolling by setting body/html overflow
   useEffect(() => {
     // Set body and html styles to prevent page scrolling

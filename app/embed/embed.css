@@ -118,6 +118,17 @@
   /* Remove conflicting flex properties */
 }
 
+/* Markdown tables size to their longest unbreakable token. That width is
+   clipped by overflow-x: hidden above, so cells must be able to break. */
+.embedded-chat .chat-messages .prose {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.embedded-chat .chat-messages .prose :where(td, th) {
+  overflow-wrap: anywhere;
+}
+
 /* Constrain header height - use class selector for reliability */
 .embedded-chat .embed-header {
   flex-shrink: 0; /* Header should not shrink */
